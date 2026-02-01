@@ -39,7 +39,7 @@ import {
   getBalanceStatus,
   parseBalanceData,
   convertToUSDT
-} from './settlementUtils';
+} from './Settlementutils';
 
 export default function MerchantSettlement() {
   const [merchantData, setMerchantData] = useState(null);
