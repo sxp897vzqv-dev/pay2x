@@ -17,31 +17,37 @@ import TraderPayin from './roles/trader/Payin/TraderPayin';
 import TraderPayout from './roles/trader/Payout/TraderPayout';
 import TraderDispute from './roles/trader/Disputes/TraderDispute';
 
-// Admin Components (if you have them)
-// Uncomment when you add admin panel
- import AdminLayout from './roles/admin/AdminLayout';
- import AdminDashboard from './roles/admin/pages/Dashboard/AdminDashboard';
- import AdminTraders from './roles/admin/pages/Traders/AdminTraders';
- import AdminMerchants from './roles/admin/pages/Merchants/AdminMerchants';
-import AdminTransactions from './roles/admin/pages/Transactions/AdminTransactions';
- import AdminPayoutRequests from './roles/admin/pages/Payouts/AdminPayoutRequests';
- import AdminDisputes from './roles/admin/pages/Disputes/AdminDisputes';
-import AdminSettings from './roles/admin/pages/Settings/AdminSettings';
- import { AdminAnalytics, AdminReports } from './roles/admin/pages/Analytics/AdminAnalyticsReports';
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN COMPONENTS
+// ═══════════════════════════════════════════════════════════════════
+import AdminLayout from './roles/admin/AdminLayout';
+import AdminDashboard from './roles/admin/OVERVIEW/AdminDashboard';
+import AdminTraderList from './roles/admin/ENTITIES/AdminTraderList';
+import AdminTraderDetail from './roles/admin/ENTITIES/AdminTraderDetail';
+import AdminMerchantList from './roles/admin/ENTITIES/AdminMerchantList';
+import AdminMerchantDetail from './roles/admin/ENTITIES/AdminMerchantDetail';
+import AdminUserList from './roles/admin/ENTITIES/AdminUserList';
+import AdminUserDetail from './roles/admin/ENTITIES/AdminUserDetail';
+import AdminPayins from './roles/admin/OPERATIONS/AdminPayins';
+import AdminPayouts from './roles/admin/OPERATIONS/AdminPayouts';
+import AdminDisputes from './roles/admin/OPERATIONS/AdminDisputes';
+import AdminUPIPool from './roles/admin/OPERATIONS/AdminUPIPool';
+import AdminLogs from './roles/admin/AUDIT/AdminLogs';
+import AdminCommission from './roles/admin/AUDIT/AdminCommission';
 
-// Merchant Components (if you have them)
-// Uncomment when you add merchant panel
- import MerchantLayout from './roles/merchant/MerchantLayout';
- import MerchantDashboard from './roles/merchant/pages/Dashboard/MerchantDashboard';
-import MerchantTransactions from './roles/merchant/pages/Transactions/MerchantTransactions';
-
-import MerchantDocumentation from './roles/merchant/pages/Api/Merchantdocumentation';
-import MerchantSettings from './roles/merchant/pages/Settings/Merchantsettings';
-import Merchantpayoutdashboard from './roles/merchant/pages/Payout/Merchantpayoutdashboard';
-import MerchantSettlement from './roles/merchant/pages/Settlement/Merchantsettlement';
-import MerchantDisputeCreate from './roles/merchant/pages/Dispute/Merchantdisputecreate';
-
-
+// ═══════════════════════════════════════════════════════════════════
+// NEW MERCHANT COMPONENTS - 8 Pages
+// Place these files in: src/roles/merchant/
+// ═══════════════════════════════════════════════════════════════════
+import MerchantLayout from './roles/merchant/MerchantLayout';
+import MerchantDashboard from './roles/merchant/MerchantDashboard';
+import MerchantPayin from './roles/merchant/MerchantPayin';
+import MerchantPayout from './roles/merchant/MerchantPayout';
+import MerchantBalance from './roles/merchant/MerchantBalance';
+import MerchantAPI from './roles/merchant/MerchantAPI';
+import MerchantAnalytics from './roles/merchant/MerchantAnalytics';
+import MerchantDispute from './roles/merchant/MerchantDispute';
+import MerchantSettings from './roles/merchant/MerchantSettings';
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRole, userRole }) {
@@ -97,7 +103,6 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // Check all role collections using query (more reliable)
           const roleCollections = ['admin', 'merchant', 'trader'];
           
           for (let role of roleCollections) {
@@ -116,7 +121,6 @@ function App() {
             }
           }
           
-          // No role found - sign out user
           console.warn('⚠️ No role found for user:', user.uid);
           await auth.signOut();
           setUserRole(null);
@@ -135,7 +139,6 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  // Show loading screen during initialization
   if (initializing || loading) {
     return <LoadingScreen />;
   }
@@ -155,8 +158,9 @@ function App() {
           } 
         />
 
-        {/* Admin Routes */}
-       
+        {/* ═══════════════════════════════════════════════════════════════
+            ADMIN ROUTES - 13 Pages
+            ═══════════════════════════════════════════════════════════════ */}
         <Route
           path="/admin/*"
           element={
@@ -165,22 +169,34 @@ function App() {
             </ProtectedRoute>
           }
         >
+          {/* Default redirect */}
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          
+          {/* Overview */}
           <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="traders" element={<AdminTraders />} />
-          <Route path="merchants" element={<AdminMerchants />} />
-          <Route path="transactions" element={<AdminTransactions />} />
-          <Route path="payouts" element={<AdminPayoutRequests />} />
+          
+          {/* Entity Management */}
+          <Route path="traders" element={<AdminTraderList />} />
+          <Route path="traders/:id" element={<AdminTraderDetail />} />
+          <Route path="merchants" element={<AdminMerchantList />} />
+          <Route path="merchants/:id" element={<AdminMerchantDetail />} />
+          <Route path="users" element={<AdminUserList />} />
+          <Route path="users/:id" element={<AdminUserDetail />} />
+          
+          {/* Operations */}
+          <Route path="payins" element={<AdminPayins />} />
+          <Route path="payouts" element={<AdminPayouts />} />
           <Route path="disputes" element={<AdminDisputes />} />
-          <Route path="analytics" element={<AdminAnalytics />} />
-          <Route path="reports" element={<AdminReports />} />
-          <Route path="settings" element={<AdminSettings />} />
+          <Route path="upi-pool" element={<AdminUPIPool />} />
+          
+          {/* Audit */}
+          <Route path="logs" element={<AdminLogs />} />
+          <Route path="commission" element={<AdminCommission />} />
         </Route>
-        
 
-        {/* Merchant Routes */}
-        {/* Uncomment when you add merchant panel */}
-       
+        {/* ═══════════════════════════════════════════════════════════════
+            NEW MERCHANT ROUTES - 8 Pages (UPDATED)
+            ═══════════════════════════════════════════════════════════════ */}
         <Route
           path="/merchant/*"
           element={
@@ -189,18 +205,23 @@ function App() {
             </ProtectedRoute>
           }
         >
+          {/* Default redirect */}
           <Route index element={<Navigate to="/merchant/dashboard" replace />} />
+          
+          {/* 8 Core Pages */}
           <Route path="dashboard" element={<MerchantDashboard />} />
-           <Route path="transactions" element={<MerchantTransactions />} />
-           <Route path="settings" element={<MerchantSettings/>} />
-            <Route path="api-docs" element={<MerchantDocumentation />} />
-            <Route path="payout" element={<Merchantpayoutdashboard/>} />
-            <Route path="settlement" element={<MerchantSettlement/>} />
-            <Route path="dispute" element={<MerchantDisputeCreate/>} />
+          <Route path="payins" element={<MerchantPayin />} />
+          <Route path="payouts" element={<MerchantPayout />} />
+          <Route path="balance" element={<MerchantBalance />} />
+          <Route path="api" element={<MerchantAPI />} />
+          <Route path="analytics" element={<MerchantAnalytics />} />
+          <Route path="disputes" element={<MerchantDispute />} />
+          <Route path="settings" element={<MerchantSettings />} />
         </Route>
-        
 
-        {/* Trader Routes */}
+        {/* ═══════════════════════════════════════════════════════════════
+            TRADER ROUTES - 6 Pages
+            ═══════════════════════════════════════════════════════════════ */}
         <Route
           path="/trader/*"
           element={
@@ -209,10 +230,7 @@ function App() {
             </ProtectedRoute>
           }
         >
-          {/* Index redirects to dashboard */}
           <Route index element={<Navigate to="/trader/dashboard" replace />} />
-          
-          {/* Trader Pages */}
           <Route path="dashboard" element={<TraderDashboard />} />
           <Route path="payin" element={<TraderPayin />} />
           <Route path="payout" element={<TraderPayout />} />

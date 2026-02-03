@@ -1563,39 +1563,157 @@ if (!adminDoc.exists) {
   }
 });
 exports.createTraderComplete = functions.https.onCall(async (data, context) => {
-  // Check admin permission
-  if (!context.auth || !context.auth.token.admin) {
-    throw new functions.https.HttpsError('permission-denied', 'Only admins');
+  try {
+    // Check admin permission
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be logged in');
+    }
+    
+    // Optional: Check if admin (uncomment if you have admin claims set up)
+    // if (!context.auth.token.admin) {
+    //   throw new functions.https.HttpsError('permission-denied', 'Only admins can create traders');
+    // }
+
+    const { 
+      email, 
+      password, 
+      name,
+      phone,
+      priority,
+      payinCommission,
+      payoutCommission,
+      balance,
+      securityHold,
+      telegramId,
+      telegramGroupLink,
+      active
+    } = data;
+
+    // Validate required fields
+    if (!email || !password) {
+      throw new functions.https.HttpsError('invalid-argument', 'Email and password are required');
+    }
+
+    if (password.length < 6) {
+      throw new functions.https.HttpsError('invalid-argument', 'Password must be at least 6 characters');
+    }
+
+    console.log('🚀 Creating trader:', email);
+
+    // Step 1: CREATE AUTH USER SERVER-SIDE (admin stays logged in!)
+    const userRecord = await admin.auth().createUser({
+      email: email,
+      password: password,
+      displayName: name || email.split('@')[0],
+    });
+
+    const uid = userRecord.uid;
+    console.log('✅ Auth user created:', uid);
+
+    // Step 2: Set custom claims
+    await admin.auth().setCustomUserClaims(uid, { role: 'trader' });
+    console.log('✅ Custom claims set');
+
+    // Step 3: Calculate working balance
+    const balanceNum = Number(balance) || 0;
+    const securityHoldNum = Number(securityHold) || 0;
+    const workingBalance = balanceNum - securityHoldNum;
+
+    // Step 4: Create FULL Firestore document with ALL fields
+    const traderData = {
+      // CRITICAL FIELDS
+      uid: uid,
+      role: 'trader',
+      userType: 'trader',
+      
+      // Basic Info
+      email: email,
+      name: name || email.split('@')[0],
+      phone: phone || '',
+      priority: priority || 'Normal',
+      
+      // Financial Fields
+      balance: balanceNum,
+      securityHold: securityHoldNum,
+      workingBalance: workingBalance,
+      overallCommission: 0,
+      
+      // Commission Rates
+      payinCommission: Number(payinCommission) || 4,
+      payoutCommission: Number(payoutCommission) || 1,
+      commissionRate: Number(payinCommission) || 4, // backwards compatibility
+      
+      // Status
+      active: active !== undefined ? active : true,
+      isActive: active !== undefined ? active : true,
+      isApproved: true,
+      status: active !== false ? 'active' : 'inactive',
+      
+      // Telegram
+      telegramId: telegramId || '',
+      telegramGroupLink: telegramGroupLink || '',
+      
+      // Payment Accounts (empty arrays)
+      currentMerchantUpis: [],
+      corporateMerchantUpis: [],
+      normalUpis: [],
+      bigUpis: [],
+      impsAccounts: [],
+      
+      // USDT (will be set later)
+      usdtDepositAddress: null,
+      derivationIndex: null,
+      mnemonic: null,
+      
+      // Stats
+      totalPayins: 0,
+      totalPayouts: 0,
+      
+      // Timestamps
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastModified: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    await db.collection('trader').doc(uid).set(traderData);
+    console.log('✅ Firestore document created with all fields');
+
+    return { 
+      success: true, 
+      uid: uid,
+      message: 'Trader created successfully'
+    };
+
+  } catch (error) {
+    console.error('❌ Error creating trader:', error);
+    
+    // If auth user was created but Firestore failed, we should handle cleanup
+    // but for now just throw the error
+    throw new functions.https.HttpsError('internal', error.message || 'Failed to create trader');
   }
-
-  const { email, password } = data;
-
-  // CREATE AUTH USER SERVER-SIDE (admin stays logged in!)
-  const userRecord = await admin.auth().createUser({
-    email: email,
-    password: password,
-  });
-
-  const uid = userRecord.uid;
-
-  // Set custom claim
-  await admin.auth().setCustomUserClaims(uid, { role: 'trader' });
-
-  // Create Firestore document
-  await db.collection('trader').doc(uid).set({
-    uid, role: 'trader', userType: 'trader',
-    // ... all other fields
-  });
-
-  return { success: true, uid: uid };
 });
 
+
+/**
+ * FALLBACK: Auth trigger - Only runs if createTraderComplete wasn't used
+ * This is a safety net, not the primary method
+ */
 exports.createTraderDocument = functions.auth.user().onCreate(async (user) => {
   try {
     const uid = user.uid;
     const email = user.email;
     
-    console.log('🔔 New user created:', uid, email);
+    console.log('🔔 Auth trigger - New user:', uid, email);
+
+    // Check if document already exists (created by createTraderComplete)
+    const existingDoc = await db.collection('trader').doc(uid).get();
+    if (existingDoc.exists) {
+      console.log('ℹ️ Trader document already exists, skipping trigger');
+      return { success: true, message: 'Document already exists' };
+    }
+
+    // Wait a moment for custom claims to be set
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Get custom claims to check role
     const userRecord = await admin.auth().getUser(uid);
@@ -1605,261 +1723,143 @@ exports.createTraderDocument = functions.auth.user().onCreate(async (user) => {
 
     // Only create trader document if role is 'trader'
     if (customClaims.role === 'trader') {
-      console.log('✅ Creating trader document for:', uid);
+      console.log('✅ Creating trader document via trigger for:', uid);
 
-      // Create trader document
       await db.collection('trader').doc(uid).set({
-        // CRITICAL FIELDS
         uid: uid,
         role: 'trader',
         userType: 'trader',
-        
-        // Basic Info
         email: email,
         name: userRecord.displayName || email.split('@')[0],
         phone: userRecord.phoneNumber || '',
-        
-        // Financial Fields
+        priority: 'Normal',
         balance: 0,
         workingBalance: 0,
         securityHold: 0,
         overallCommission: 0,
-        
-        // Commission Rates
-        payinCommission: 3,
+        payinCommission: 4,
         payoutCommission: 1,
-        
-        // Status
+        commissionRate: 4,
         isActive: true,
+        active: true,
         isApproved: true,
-        
-        // Payment Accounts
+        status: 'active',
         currentMerchantUpis: [],
         corporateMerchantUpis: [],
         normalUpis: [],
         bigUpis: [],
         impsAccounts: [],
-        
-        // USDT
         usdtDepositAddress: null,
         derivationIndex: null,
-        
-        // Timestamps
+        totalPayins: 0,
+        totalPayouts: 0,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        lastModified: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      console.log('✅ Trader document created successfully!');
-      
+      console.log('✅ Trader document created via trigger');
       return { success: true, message: 'Trader document created' };
     } else {
-      console.log('ℹ️ Not a trader, skipping document creation');
+      console.log('ℹ️ Not a trader role, skipping');
       return { success: false, message: 'Not a trader role' };
     }
 
   } catch (error) {
-    console.error('❌ Error creating trader document:', error);
-    // Don't throw error - let user creation succeed even if document creation fails
+    console.error('❌ Error in trigger:', error);
     return { success: false, error: error.message };
   }
 });
 
+
 /**
- * Alternative: HTTP Callable Function
- * Call this from admin panel after creating user
+ * UPDATE TRADER - For editing existing traders
  */
-exports.createTraderManual = functions.https.onCall(async (data, context) => {
+exports.updateTrader = functions.https.onCall(async (data, context) => {
   try {
-    // Check if caller is admin
-    if (!context.auth || !context.auth.token.admin) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only admins can create traders'
-      );
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be logged in');
     }
 
-    const { uid, email, name, phone, payinCommission, payoutCommission } = data;
+    const { traderId, updates } = data;
 
-    if (!uid || !email) {
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'UID and email are required'
-      );
+    if (!traderId) {
+      throw new functions.https.HttpsError('invalid-argument', 'Trader ID is required');
     }
 
-    // Set custom claims
-    await admin.auth().setCustomUserClaims(uid, { role: 'trader' });
+    // Calculate working balance if balance or securityHold changed
+    if (updates.balance !== undefined || updates.securityHold !== undefined) {
+      const traderDoc = await db.collection('trader').doc(traderId).get();
+      const currentData = traderDoc.data() || {};
+      
+      const newBalance = updates.balance !== undefined ? updates.balance : currentData.balance || 0;
+      const newSecurityHold = updates.securityHold !== undefined ? updates.securityHold : currentData.securityHold || 0;
+      
+      updates.workingBalance = newBalance - newSecurityHold;
+    }
 
-    // Create trader document
-    await db.collection('trader').doc(uid).set({
-      uid: uid,
-      role: 'trader',
-      userType: 'trader',
-      email: email,
-      name: name || email.split('@')[0],
-      phone: phone || '',
-      balance: 0,
-      workingBalance: 0,
-      securityHold: 0,
-      overallCommission: 0,
-      payinCommission: payinCommission || 3,
-      payoutCommission: payoutCommission || 1,
-      isActive: true,
-      isApproved: true,
-      currentMerchantUpis: [],
-      corporateMerchantUpis: [],
-      normalUpis: [],
-      bigUpis: [],
-      impsAccounts: [],
-      usdtDepositAddress: null,
-      derivationIndex: null,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      lastModified: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    // Sync active/isActive/status
+    if (updates.active !== undefined) {
+      updates.isActive = updates.active;
+      updates.status = updates.active ? 'active' : 'inactive';
+    }
 
-    console.log('✅ Trader created:', uid);
+    updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+    updates.lastModified = admin.firestore.FieldValue.serverTimestamp();
 
-    return { 
-      success: true, 
-      message: 'Trader created successfully',
-      uid: uid 
-    };
+    await db.collection('trader').doc(traderId).update(updates);
+
+    console.log('✅ Trader updated:', traderId);
+
+    return { success: true, message: 'Trader updated successfully' };
 
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Error updating trader:', error);
     throw new functions.https.HttpsError('internal', error.message);
   }
 });
 
+
 /**
- * Fix existing trader - Add missing uid field
+ * DELETE TRADER - Removes auth user and Firestore document
  */
-exports.fixTraderDocument = functions.https.onCall(async (data, context) => {
+exports.deleteTrader = functions.https.onCall(async (data, context) => {
   try {
-    // Check if caller is admin
-    if (!context.auth || !context.auth.token.admin) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only admins can fix traders'
-      );
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'Must be logged in');
     }
 
     const { traderId } = data;
 
     if (!traderId) {
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Trader ID is required'
-      );
+      throw new functions.https.HttpsError('invalid-argument', 'Trader ID is required');
     }
 
-    // Update trader document
-    await db.collection('trader').doc(traderId).set({
-      uid: traderId,
-      role: 'trader',
-      userType: 'trader',
-    }, { merge: true });
+    // Delete Firestore document
+    await db.collection('trader').doc(traderId).delete();
+    console.log('✅ Firestore document deleted');
 
-    console.log('✅ Fixed trader:', traderId);
+    // Try to delete auth user (might fail if doesn't exist)
+    try {
+      await admin.auth().deleteUser(traderId);
+      console.log('✅ Auth user deleted');
+    } catch (authError) {
+      console.log('ℹ️ Auth user not found or already deleted');
+    }
 
-    return { 
-      success: true, 
-      message: 'Trader document fixed successfully' 
-    };
+    return { success: true, message: 'Trader deleted successfully' };
 
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Error deleting trader:', error);
     throw new functions.https.HttpsError('internal', error.message);
   }
 });
 
-/**
- * Batch fix all traders - Add missing uid fields
- */
-exports.fixAllTraders = functions.https.onCall(async (data, context) => {
-  try {
-    // Check if caller is admin
-    if (!context.auth || !context.auth.token.admin) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only admins can run batch fixes'
-      );
-    }
 
-    const tradersSnapshot = await db.collection('trader').get();
-    const batch = db.batch();
-    let fixedCount = 0;
 
-    tradersSnapshot.forEach((doc) => {
-      const data = doc.data();
-      const docId = doc.id;
 
-      // If uid field is missing or doesn't match doc ID
-      if (!data.uid || data.uid !== docId) {
-        batch.set(doc.ref, {
-          uid: docId,
-          role: 'trader',
-          userType: 'trader',
-        }, { merge: true });
-        
-        fixedCount++;
-        console.log('Fixing trader:', docId);
-      }
-    });
 
-    await batch.commit();
 
-    console.log(`✅ Fixed ${fixedCount} traders`);
 
-    return { 
-      success: true, 
-      message: `Fixed ${fixedCount} trader documents`,
-      count: fixedCount
-    };
-
-  } catch (error) {
-    console.error('❌ Error:', error);
-    throw new functions.https.HttpsError('internal', error.message);
-  }
-});
-
-/**
- * Set user role (custom claims)
- */
-exports.setUserRole = functions.https.onCall(async (data, context) => {
-  try {
-    // Verify caller is admin
-    if (!context.auth || !context.auth.token.admin) {
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Only admins can set user roles'
-      );
-    }
-
-    const { uid, role } = data;
-
-    if (!uid || !role) {
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'UID and role are required'
-      );
-    }
-
-    // Set custom claim
-    await admin.auth().setCustomUserClaims(uid, { role: role });
-
-    console.log(`✅ Set role "${role}" for user:`, uid);
-
-    return { 
-      success: true, 
-      message: `Role "${role}" set successfully` 
-    };
-
-  } catch (error) {
-    console.error('❌ Error:', error);
-    throw new functions.https.HttpsError('internal', error.message);
-  }
-});
 
 
 

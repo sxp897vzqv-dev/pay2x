@@ -3,16 +3,16 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
 import {
   LayoutDashboard,
-  CreditCard,
+  TrendingUp,
+  TrendingDown,
   Wallet,
-  FileText,
+  Code,
+  BarChart3,
+  AlertCircle,
   Settings,
   LogOut,
   Menu,
   X,
-  Code,
-  Webhook,
-  TrendingUp,
 } from 'lucide-react';
 
 const MerchantLayout = () => {
@@ -21,13 +21,12 @@ const MerchantLayout = () => {
 
   const navigationLinks = [
     { to: '/merchant/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/merchant/transactions', icon: CreditCard, label: 'Transactions' },
-    { to: '/merchant/payout', icon: Settings, label: 'Payouts' },
-    { to: '/merchant/settlement', icon: Wallet, label: 'Settlements' },
-    { to: '/merchant/dispute', icon: FileText, label: 'Disputes' },
-    { to: '/merchant/api-docs', icon: Code, label: 'API Documentation' },
-    { to: '/merchant/webhooks', icon: Webhook, label: 'Webhooks' },
-    { to: '/merchant/reports', icon: FileText, label: 'Reports' },
+    { to: '/merchant/payins', icon: TrendingUp, label: 'Payins' },
+    { to: '/merchant/payouts', icon: TrendingDown, label: 'Payouts' },
+    { to: '/merchant/balance', icon: Wallet, label: 'Balance' },
+    { to: '/merchant/api', icon: Code, label: 'API & Webhooks' },
+    { to: '/merchant/analytics', icon: BarChart3, label: 'Analytics' },
+    { to: '/merchant/disputes', icon: AlertCircle, label: 'Disputes' },
     { to: '/merchant/settings', icon: Settings, label: 'Settings' },
   ];
 
@@ -43,14 +42,14 @@ const MerchantLayout = () => {
   const sidebarContent = (
     <div className="flex flex-col h-full">
       {/* Logo Section */}
-      <div className="px-6 py-5 border-b border-teal-400/20">
+      <div className="px-6 py-5 border-b border-purple-400/20">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-teal-500 rounded-xl flex items-center justify-center shadow-lg">
+          <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
             <TrendingUp className="w-6 h-6 text-white" />
           </div>
           <div>
             <h2 className="text-xl font-bold text-white">Merchant Portal</h2>
-            <p className="text-xs text-teal-200">Payment Gateway</p>
+            <p className="text-xs text-purple-200">Payment Gateway</p>
           </div>
         </div>
       </div>
@@ -67,7 +66,7 @@ const MerchantLayout = () => {
                 `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
                   isActive
                     ? 'bg-white/20 text-white shadow-lg backdrop-blur-sm'
-                    : 'text-teal-100 hover:bg-white/10 hover:text-white'
+                    : 'text-purple-100 hover:bg-white/10 hover:text-white'
                 }`
               }
               onClick={() => setSidebarOpen(false)}
@@ -88,7 +87,7 @@ const MerchantLayout = () => {
       </nav>
 
       {/* Logout Button */}
-      <div className="p-4 border-t border-teal-400/20">
+      <div className="p-4 border-t border-purple-400/20">
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/20 text-white hover:bg-red-500/30 transition-all duration-200 group"
@@ -109,7 +108,7 @@ const MerchantLayout = () => {
           className="fixed top-4 left-4 z-50 md:hidden p-3 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all"
           aria-label="Open menu"
         >
-          <Menu className="w-6 h-6 text-teal-600" />
+          <Menu className="w-6 h-6 text-purple-600" />
         </button>
       )}
 
@@ -117,7 +116,7 @@ const MerchantLayout = () => {
       <aside
         className={`
           fixed md:static inset-y-0 left-0 z-40
-          w-72 bg-gradient-to-br from-teal-600 via-teal-700 to-cyan-700
+          w-72 bg-gradient-to-br from-purple-600 via-purple-700 to-blue-700
           transform transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           shadow-2xl
