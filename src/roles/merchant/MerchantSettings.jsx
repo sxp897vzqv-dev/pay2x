@@ -121,6 +121,7 @@ export default function MerchantSettings() {
 
   // Security
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [password, setPassword] = useState({ current: '', new: '', confirm: '' });
 
   useEffect(() => {
     fetchData();
@@ -205,6 +206,54 @@ export default function MerchantSettings() {
     }
   };
 
+  const handleToggle2FA = async () => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+
+    try {
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
+      if (!merchantSnap.empty) {
+        const newValue = !twoFactorEnabled;
+        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
+          twoFactorEnabled: newValue,
+          updatedAt: serverTimestamp(),
+        });
+        setTwoFactorEnabled(newValue);
+        setToast({ msg: `✅ 2FA ${newValue ? 'enabled' : 'disabled'}!`, success: true });
+      }
+    } catch (e) {
+      setToast({ msg: 'Error: ' + e.message, success: false });
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!password.current || !password.new || !password.confirm) {
+      setToast({ msg: 'Fill all password fields', success: false });
+      return;
+    }
+    if (password.new.length < 6) {
+      setToast({ msg: 'New password must be at least 6 characters', success: false });
+      return;
+    }
+    if (password.new !== password.confirm) {
+      setToast({ msg: 'New passwords do not match', success: false });
+      return;
+    }
+
+    try {
+      const user = getAuth().currentUser;
+      await updatePassword(user, password.new);
+      setPassword({ current: '', new: '', confirm: '' });
+      setToast({ msg: '✅ Password updated successfully!', success: true });
+    } catch (e) {
+      if (e.code === 'auth/requires-recent-login') {
+        setToast({ msg: 'Please log out and log in again to change password', success: false });
+      } else {
+        setToast({ msg: 'Error: ' + e.message, success: false });
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
@@ -235,7 +284,6 @@ export default function MerchantSettings() {
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {[
           { key: 'profile', label: 'Profile', icon: User },
-          { key: 'banks', label: 'Banks', icon: CreditCard },
           { key: 'team', label: 'Team', icon: Users },
           { key: 'notifications', label: 'Alerts', icon: Bell },
           { key: 'security', label: 'Security', icon: Shield },
@@ -335,62 +383,14 @@ export default function MerchantSettings() {
         </div>
       )}
 
-      {/* Banks Tab */}
-      {activeTab === 'banks' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">Saved Bank Accounts</h3>
-            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold">
-              <Plus className="w-4 h-4" /> Add Account
-            </button>
-          </div>
-
-          {bankAccounts.length > 0 ? (
-            <div className="grid gap-3">
-              {bankAccounts.map(acc => (
-                <BankAccountCard
-                  key={acc.id}
-                  account={acc}
-                  isPrimary={acc.id === primaryAccountId}
-                  onEdit={() => alert('Edit ' + acc.id)}
-                  onDelete={() => alert('Delete ' + acc.id)}
-                  onSetPrimary={() => setPrimaryAccountId(acc.id)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-              <CreditCard className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-              <p className="text-slate-500 text-sm font-medium">No bank accounts added</p>
-              <p className="text-xs text-slate-400 mt-0.5">Add an account to receive settlements</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Team Tab */}
       {activeTab === 'team' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900">Team Members</h3>
-            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold">
-              <Plus className="w-4 h-4" /> Invite Member
-            </button>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
+            <Users className="w-10 h-10 text-yellow-400 mx-auto mb-2" />
+            <p className="text-sm font-bold text-yellow-900">Team Management</p>
+            <p className="text-xs text-yellow-700 mt-1">Coming Soon! Invite team members to manage your account.</p>
           </div>
-
-          {teamMembers.length > 0 ? (
-            <div className="space-y-2">
-              {teamMembers.map(member => (
-                <TeamMemberCard key={member.id} member={member} onRemove={(id) => alert('Remove ' + id)} />
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-              <Users className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-              <p className="text-slate-500 text-sm font-medium">No team members yet</p>
-              <p className="text-xs text-slate-400 mt-0.5">Invite team members to collaborate</p>
-            </div>
-          )}
         </div>
       )}
 
@@ -437,7 +437,7 @@ export default function MerchantSettings() {
                 <p className="text-xs text-slate-500 mt-0.5">Add extra layer of security</p>
               </div>
               <button
-                onClick={() => setTwoFactorEnabled(!twoFactorEnabled)}
+                onClick={handleToggle2FA}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold ${
                   twoFactorEnabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
                 }`}
@@ -450,10 +450,30 @@ export default function MerchantSettings() {
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
             <h3 className="text-sm font-bold text-slate-900 mb-4">Change Password</h3>
             <div className="space-y-3">
-              <input type="password" placeholder="Current Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              <input type="password" placeholder="New Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              <input type="password" placeholder="Confirm New Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
-              <button className="w-full py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm flex items-center justify-center gap-2">
+              <input 
+                type="password" 
+                placeholder="Current Password" 
+                value={password.current}
+                onChange={e => setPassword({ ...password, current: e.target.value })}
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" 
+              />
+              <input 
+                type="password" 
+                placeholder="New Password" 
+                value={password.new}
+                onChange={e => setPassword({ ...password, new: e.target.value })}
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" 
+              />
+              <input 
+                type="password" 
+                placeholder="Confirm New Password" 
+                value={password.confirm}
+                onChange={e => setPassword({ ...password, confirm: e.target.value })}
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" 
+              />
+              <button 
+                onClick={handleChangePassword}
+                className="w-full py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm flex items-center justify-center gap-2">
                 <Key className="w-4 h-4" /> Update Password
               </button>
             </div>

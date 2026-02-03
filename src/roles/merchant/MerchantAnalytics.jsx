@@ -103,6 +103,10 @@ export default function MerchantAnalytics() {
     transactionCount: 0,
     successRate: 0,
     avgTicketSize: 0,
+    previousVolume: 0,
+    previousTransactionCount: 0,
+    previousSuccessRate: 0,
+    previousAvgTicketSize: 0,
   });
   const [volumeData, setVolumeData] = useState([]);
   const [methodData, setMethodData] = useState([]);
@@ -118,18 +122,32 @@ export default function MerchantAnalytics() {
     if (!user) return;
 
     try {
-      // Calculate date range
+      // Calculate current period date range
       const now = new Date();
       const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 90;
       const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
       const startTimestamp = Timestamp.fromDate(startDate);
 
-      // Fetch payins
+      // Calculate previous period (same length)
+      const previousStartDate = new Date(startDate.getTime() - days * 24 * 60 * 60 * 1000);
+      const previousStartTimestamp = Timestamp.fromDate(previousStartDate);
+
+      // Fetch current period payins
       const payinsSnap = await getDocs(
         query(
           collection(db, 'merchantPayins'),
           where('merchantId', '==', user.uid),
           where('createdAt', '>=', startTimestamp)
+        )
+      );
+
+      // Fetch previous period payins
+      const previousPayinsSnap = await getDocs(
+        query(
+          collection(db, 'merchantPayins'),
+          where('merchantId', '==', user.uid),
+          where('createdAt', '>=', previousStartTimestamp),
+          where('createdAt', '<', startTimestamp)
         )
       );
 
@@ -159,15 +177,32 @@ export default function MerchantAnalytics() {
         hourCounts[date.getHours()]++;
       });
 
+      // Calculate previous period stats
+      let previousVolume = 0;
+      let previousSuccessCount = 0;
+      previousPayinsSnap.forEach(doc => {
+        const data = doc.data();
+        previousVolume += Number(data.amount || 0);
+        if (data.status === 'success') previousSuccessCount++;
+      });
+
       const totalCount = payinsSnap.size;
       const successRate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
       const avgTicketSize = totalCount > 0 ? Math.round(totalVolume / totalCount) : 0;
+
+      const previousCount = previousPayinsSnap.size;
+      const previousSuccessRate = previousCount > 0 ? Math.round((previousSuccessCount / previousCount) * 100) : 0;
+      const previousAvgTicketSize = previousCount > 0 ? Math.round(previousVolume / previousCount) : 0;
 
       setStats({
         totalVolume,
         transactionCount: totalCount,
         successRate,
         avgTicketSize,
+        previousVolume,
+        previousTransactionCount: previousCount,
+        previousSuccessRate,
+        previousAvgTicketSize,
       });
 
       // Volume chart data
@@ -194,6 +229,20 @@ export default function MerchantAnalytics() {
     }
     setLoading(false);
   };
+
+  // Calculate growth percentages
+  const volumeGrowth = stats.previousVolume > 0 
+    ? ((stats.totalVolume - stats.previousVolume) / stats.previousVolume * 100).toFixed(1)
+    : (stats.totalVolume > 0 ? '+100' : '0');
+  const txnGrowth = stats.previousTransactionCount > 0
+    ? ((stats.transactionCount - stats.previousTransactionCount) / stats.previousTransactionCount * 100).toFixed(1)
+    : (stats.transactionCount > 0 ? '+100' : '0');
+  const successRateGrowth = stats.previousSuccessRate > 0
+    ? (stats.successRate - stats.previousSuccessRate).toFixed(1)
+    : (stats.successRate > 0 ? `+${stats.successRate}` : '0');
+  const avgTicketGrowth = stats.previousAvgTicketSize > 0
+    ? ((stats.avgTicketSize - stats.previousAvgTicketSize) / stats.previousAvgTicketSize * 100).toFixed(1)
+    : (stats.avgTicketSize > 0 ? '+100' : '0');
 
   const handleExportReport = () => {
     const csv = [
@@ -269,29 +318,29 @@ export default function MerchantAnalytics() {
         <StatCard
           title="Total Volume"
           value={`₹${(stats.totalVolume / 1000).toFixed(1)}k`}
-          change="+12.5%"
-          isPositive={true}
+          change={`${Number(volumeGrowth) >= 0 ? '+' : ''}${volumeGrowth}%`}
+          isPositive={Number(volumeGrowth) >= 0}
           icon={TrendingUp}
         />
         <StatCard
           title="Transactions"
           value={stats.transactionCount}
-          change="+8.3%"
-          isPositive={true}
+          change={`${Number(txnGrowth) >= 0 ? '+' : ''}${txnGrowth}%`}
+          isPositive={Number(txnGrowth) >= 0}
           icon={Activity}
         />
         <StatCard
           title="Success Rate"
           value={`${stats.successRate}%`}
-          change="+2.1%"
-          isPositive={true}
+          change={`${Number(successRateGrowth) >= 0 ? '+' : ''}${successRateGrowth}%`}
+          isPositive={Number(successRateGrowth) >= 0}
           icon={PieChart}
         />
         <StatCard
           title="Avg Ticket"
           value={`₹${stats.avgTicketSize}`}
-          change="-1.2%"
-          isPositive={false}
+          change={`${Number(avgTicketGrowth) >= 0 ? '+' : ''}${avgTicketGrowth}%`}
+          isPositive={Number(avgTicketGrowth) >= 0}
           icon={FileText}
         />
       </div>
@@ -319,14 +368,15 @@ export default function MerchantAnalytics() {
             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
               <div>
                 <p className="text-xs text-slate-600 font-semibold">Previous Period</p>
-                <p className="text-lg font-bold text-slate-900">₹{Math.round(stats.totalVolume * 0.88).toLocaleString()}</p>
+                <p className="text-lg font-bold text-slate-900">₹{stats.previousVolume.toLocaleString()}</p>
               </div>
               <BarChart3 className="w-8 h-8 text-slate-400" />
             </div>
             <div className="flex items-center justify-between pt-2 border-t border-slate-200">
               <span className="text-xs text-slate-600 font-semibold">Growth</span>
-              <span className="text-sm font-bold text-green-600 flex items-center gap-1">
-                <ArrowUpRight className="w-4 h-4" /> +12.5%
+              <span className={`text-sm font-bold flex items-center gap-1 ${Number(volumeGrowth) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {Number(volumeGrowth) >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                {Number(volumeGrowth) >= 0 ? '+' : ''}{volumeGrowth}%
               </span>
             </div>
           </div>
@@ -340,21 +390,25 @@ export default function MerchantAnalytics() {
           Key Insights
         </h3>
         <ul className="space-y-2 text-sm text-purple-800">
+          {hourlyData.length > 0 && (
+            <li className="flex items-start gap-2">
+              <span className="text-purple-500 font-bold">•</span>
+              <span>Peak transaction hour: {hourlyData[0]?.label} ({hourlyData[0]?.value} transactions)</span>
+            </li>
+          )}
+          {methodData.length > 0 && (
+            <li className="flex items-start gap-2">
+              <span className="text-purple-500 font-bold">•</span>
+              <span>{methodData[0]?.label} is the most preferred payment method ({methodData[0]?.value} transactions)</span>
+            </li>
+          )}
           <li className="flex items-start gap-2">
             <span className="text-purple-500 font-bold">•</span>
-            <span>Peak transaction hours: 10:00 AM - 2:00 PM (lunch time)</span>
+            <span>Success rate {Number(successRateGrowth) >= 0 ? 'improved' : 'declined'} by {Math.abs(Number(successRateGrowth))}% compared to previous period</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-purple-500 font-bold">•</span>
-            <span>UPI is the most preferred payment method ({methodData[0]?.value || 0} transactions)</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-purple-500 font-bold">•</span>
-            <span>Success rate improved by 2.1% compared to previous period</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-purple-500 font-bold">•</span>
-            <span>Weekend volumes are 23% higher than weekdays</span>
+            <span>Total volume {Number(volumeGrowth) >= 0 ? 'increased' : 'decreased'} by {Math.abs(Number(volumeGrowth))}% vs previous {dateRange}</span>
           </li>
         </ul>
       </div>
