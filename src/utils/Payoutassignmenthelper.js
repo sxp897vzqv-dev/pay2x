@@ -415,8 +415,21 @@ export async function completePayoutWithProof(payoutId, traderId, utrId, proofUr
  */
 export async function cancelPayoutByTrader(payoutId, reason) {
   try {
-    const payoutRef = doc(db, 'payouts', payoutId);
+    // Get payout data first
+    const payoutSnap = await getDocs(
+      query(collection(db, 'payouts'), where('__name__', '==', payoutId))
+    );
     
+    if (payoutSnap.empty) {
+      throw new Error('Payout not found');
+    }
+
+    const payoutData = payoutSnap.docs[0].data();
+    const payoutAmount = Number(payoutData.amount || 0);
+    const requestId = payoutData.payoutRequestId;
+
+    // Update payout
+    const payoutRef = doc(db, 'payouts', payoutId);
     await updateDoc(payoutRef, {
       status: 'cancelled_by_trader',
       cancelledAt: serverTimestamp(),
@@ -429,6 +442,46 @@ export async function cancelPayoutByTrader(payoutId, reason) {
 
     console.log(`✅ Payout cancelled`);
 
+    // Update the payoutRequest if it exists
+    if (requestId) {
+      const requestSnap = await getDocs(
+        query(collection(db, 'payoutRequest'), where('__name__', '==', requestId))
+      );
+
+      if (!requestSnap.empty) {
+        const requestData = requestSnap.docs[0].data();
+        const assignedPayouts = (requestData.assignedPayouts || []).filter(id => id !== payoutId);
+        const newAssignedAmount = (requestData.assignedAmount || 0) - payoutAmount;
+        const newRemainingAmount = requestData.requestedAmount - newAssignedAmount;
+
+        const requestRef = doc(db, 'payoutRequest', requestId);
+        
+        // If no more assigned payouts, allow cancellation
+        if (assignedPayouts.length === 0) {
+          await updateDoc(requestRef, {
+            assignedPayouts: [],
+            assignedAmount: 0,
+            remainingAmount: requestData.requestedAmount,
+            fullyAssigned: false,
+            inWaitingList: true,
+            status: 'waiting'
+          });
+          console.log(`✅ Request ${requestId} status updated - now waiting (no assigned payouts)`);
+        } else {
+          // Update with remaining assignments
+          await updateDoc(requestRef, {
+            assignedPayouts,
+            assignedAmount: newAssignedAmount,
+            remainingAmount: newRemainingAmount > 0 ? newRemainingAmount : 0,
+            fullyAssigned: newRemainingAmount <= 0,
+            status: newRemainingAmount <= 0 ? 'fully_assigned' : 'partially_assigned'
+          });
+          console.log(`✅ Request ${requestId} updated - remaining ${assignedPayouts.length} payouts`);
+        }
+      }
+    }
+
+    // Process waiting list for the freed payout slot
     processWaitingList().catch(err => console.error('Error processing waiting list:', err));
 
     return { success: true };
@@ -583,8 +636,17 @@ export async function cancelPayoutRequestByTrader(requestId) {
 
     const requestData = requestSnap.docs[0].data();
 
-    if (requestData.assignedPayouts && requestData.assignedPayouts.length > 0) {
-      throw new Error('Cannot cancel: Payouts already assigned.');
+    // Check for ACTUAL assigned payouts in database (not just array)
+    const assignedPayoutsQuery = query(
+      collection(db, 'payouts'),
+      where('payoutRequestId', '==', requestId),
+      where('status', '==', 'assigned')
+    );
+
+    const assignedPayoutsSnap = await getDocs(assignedPayoutsQuery);
+
+    if (!assignedPayoutsSnap.empty) {
+      throw new Error(`Cannot cancel: ${assignedPayoutsSnap.size} payout(s) still assigned. Cancel them first.`);
     }
 
     await updateDoc(doc(db, 'payoutRequest', requestId), {
@@ -592,6 +654,8 @@ export async function cancelPayoutRequestByTrader(requestId) {
       cancelledAt: serverTimestamp(),
       cancelledBy: 'trader'
     });
+
+    console.log(`✅ Request ${requestId} cancelled successfully`);
 
     return { success: true };
 
