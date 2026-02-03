@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Merchants collection
+    match /merchants/{merchantId} {
+      allow read: if isOwner(resource.data.uid);
+      allow write: if isOwner(resource.data.uid);
+    }
+    
+    // Merchant API Keys - only merchant can read/write their own
+    match /merchantApiKeys/{merchantId} {
+      allow read, write: if isOwner(merchantId);
+    }
+    
+    // Webhook logs - only merchant can read their own
+    match /webhookLogs/{logId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if isAuthenticated(); // System creates these
+    }
+    
+    // Merchant ledger - read only for merchant
+    match /merchantLedger/{ledgerId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if false; // Only system creates these
+    }
+    
+    // Merchant settlements
+    match /merchantSettlements/{settlementId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if isAuthenticated() && 
+                       request.resource.data.merchantId == request.auth.uid &&
+                       request.resource.data.amount > 0;
+      allow update: if false; // Only admin/system updates
+    }
+    
+    // Merchant bank accounts
+    match /merchantBankAccounts/{accountId} {
+      allow read, write: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+    }
+    
+    // Merchant team members
+    match /merchantTeam/{memberId} {
+      allow read, write: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+    }
+    
+    // Payins - merchant can read their own
+    match /payin/{payinId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if isAuthenticated(); // API creates these
+      allow update: if false; // Only system/traders update
+    }
+    
+    // Merchant-specific payin collection (if used)
+    match /merchantPayins/{payinId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if isAuthenticated();
+    }
+    
+    // Payouts - merchant can read and create their own
+    match /payouts/{payoutId} {
+      allow read: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+      allow create: if isAuthenticated() && 
+                       request.resource.data.createdBy == request.auth.uid &&
+                       request.resource.data.amount > 0;
+      allow update: if false; // Only traders/system update
+    }
+    
+    // Merchant-specific payout collection (if used)
+    match /merchantPayouts/{payoutId} {
+      allow read: if isAuthenticated() && resource.data.merchantId == request.auth.uid;
+      allow create: if isAuthenticated() && 
+                       request.resource.data.merchantId == request.auth.uid &&
+                       request.resource.data.amount > 0;
+    }
+    
+    // Traders - read-only for merchants (to see who's handling their transactions)
+    match /traders/{traderId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(resource.data.uid);
+    }
+    
+    // Admin collections - no access for merchants
+    match /admin/{document=**} {
+      allow read, write: if false; // Admin-only, handle via admin panel
+    }
+    
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
