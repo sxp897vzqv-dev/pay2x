@@ -42,7 +42,14 @@ function SettlementModal({ onClose, onSubmit, availableBalance }) {
 
   const handleSubmit = async () => {
     if (!amount || Number(amount) <= 0) { alert('Enter valid amount'); return; }
-    if (Number(amount) > availableBalance) { alert('Insufficient balance'); return; }
+    if (Number(amount) > availableBalance) { 
+      alert(`Insufficient balance. Maximum you can withdraw: ₹${availableBalance.toLocaleString()}`); 
+      return; 
+    }
+    if (Number(amount) < 100) {
+      alert('Minimum settlement amount is ₹100');
+      return;
+    }
     if (!usdtAddress || usdtAddress.length !== 34 || !usdtAddress.startsWith('T')) {
       alert('Invalid USDT TRC20 address (must start with T and be 34 characters)');
       return;
@@ -132,7 +139,11 @@ export default function MerchantBalance() {
     available: 0,
     pending: 0,
     reserved: 0,
-    lifetime: 0,
+    totalPayinRevenue: 0,
+    totalPayinCommission: 0,
+    totalPayoutAmount: 0,
+    totalPayoutCommission: 0,
+    netBalance: 0,
   });
   const [ledger, setLedger] = useState([]);
   const [settlements, setSettlements] = useState([]);
@@ -146,15 +157,63 @@ export default function MerchantBalance() {
 
     const fetchData = async () => {
       try {
-        // Fetch merchant balance
+        // Fetch merchant data
         const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
         if (!merchantSnap.empty) {
           const data = merchantSnap.docs[0].data();
+          
+          // Calculate balance from transactions
+          const payinCommissionRate = data.payinCommissionRate || 0.06; // 6% default
+          const payoutCommissionRate = data.payoutCommissionRate || 0.02; // 2% default
+          
+          // Fetch all completed payins
+          const payinsSnap = await getDocs(
+            query(collection(db, 'payin'), 
+              where('merchantId', '==', user.uid),
+              where('status', '==', 'completed'))
+          );
+          
+          let totalPayinRevenue = 0;
+          let totalPayinCommission = 0;
+          
+          payinsSnap.forEach(doc => {
+            const amount = Number(doc.data().amount || 0);
+            const commission = amount * payinCommissionRate;
+            totalPayinRevenue += (amount - commission); // Merchant gets amount - commission
+            totalPayinCommission += commission;
+          });
+          
+          // Fetch all completed/processing payouts
+          const payoutsSnap = await getDocs(
+            query(collection(db, 'payouts'), 
+              where('createdBy', '==', user.uid),
+              where('status', 'in', ['completed', 'processing', 'queued']))
+          );
+          
+          let totalPayoutAmount = 0;
+          let totalPayoutCommission = 0;
+          
+          payoutsSnap.forEach(doc => {
+            const amount = Number(doc.data().amount || 0);
+            const commission = amount * payoutCommissionRate;
+            totalPayoutAmount += amount;
+            totalPayoutCommission += commission;
+          });
+          
+          // Calculate net balance
+          // Positive = We owe merchant (they can withdraw)
+          // Negative = Merchant owes us (they need to add funds)
+          const netBalance = totalPayinRevenue - (totalPayoutAmount + totalPayoutCommission);
+          
           setBalance({
-            available: data.availableBalance || 0,
+            available: Math.max(0, netBalance), // Only show positive as available
             pending: data.pendingSettlement || 0,
             reserved: data.reservedAmount || 0,
-            lifetime: data.lifetimeEarnings || 0,
+            totalPayinRevenue,
+            totalPayinCommission,
+            totalPayoutAmount,
+            totalPayoutCommission,
+            netBalance,
           });
         }
       } catch (e) {
@@ -228,28 +287,47 @@ export default function MerchantBalance() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Wallet & settlements</p>
         </div>
-        <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold">
+        <button 
+          onClick={() => setShowModal(true)}
+          disabled={balance.netBalance <= 0}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Request Settlement
         </button>
       </div>
 
       {/* Mobile request button */}
       <div className="flex sm:hidden justify-end">
-        <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold active:scale-[0.96]">
+        <button 
+          onClick={() => setShowModal(true)}
+          disabled={balance.netBalance <= 0}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Settlement
         </button>
       </div>
 
       {/* Hero Balance Card */}
-      <div className="bg-gradient-to-br from-green-600 to-emerald-600 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
+      <div className={`rounded-2xl p-4 sm:p-5 text-white shadow-lg ${
+        balance.netBalance >= 0 
+          ? 'bg-gradient-to-br from-green-600 to-emerald-600' 
+          : 'bg-gradient-to-br from-red-600 to-rose-600'
+      }`}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-green-200 text-xs font-semibold uppercase tracking-wide mb-0.5">Available Balance</p>
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">₹{balance.available.toLocaleString()}</h2>
+            <p className={`text-xs font-semibold uppercase tracking-wide mb-0.5 ${
+              balance.netBalance >= 0 ? 'text-green-200' : 'text-red-200'
+            }`}>
+              {balance.netBalance >= 0 ? 'Available to Withdraw' : 'Amount You Owe'}
+            </p>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
+              ₹{Math.abs(balance.netBalance).toLocaleString()}
+            </h2>
+            {balance.netBalance < 0 && (
+              <p className="text-xs text-red-100 mt-1">You need to add funds before processing payouts</p>
+            )}
           </div>
-          <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+            balance.netBalance >= 0 ? 'bg-white/20' : 'bg-white/15'
+          }`}>
             <Wallet className="w-6 h-6" />
           </div>
         </div>
@@ -257,28 +335,74 @@ export default function MerchantBalance() {
         <div className="flex gap-3">
           <div className="flex-1 bg-white/10 rounded-xl p-3">
             <div className="flex items-center gap-1.5 mb-1">
-              <Clock className="w-3.5 h-3.5 text-yellow-300" />
-              <span className="text-xs text-green-200 font-medium">Pending</span>
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-300" />
+              <span className={`text-xs font-medium ${
+                balance.netBalance >= 0 ? 'text-green-200' : 'text-red-200'
+              }`}>Payin Credit</span>
             </div>
-            <p className="text-lg font-bold text-white">₹{balance.pending.toLocaleString()}</p>
+            <p className="text-lg font-bold text-white">₹{balance.totalPayinRevenue.toLocaleString()}</p>
+            <p className="text-xs opacity-75">After {((balance.totalPayinCommission / (balance.totalPayinRevenue + balance.totalPayinCommission)) * 100 || 0).toFixed(1)}% commission</p>
           </div>
           <div className="flex-1 bg-white/10 rounded-xl p-3">
             <div className="flex items-center gap-1.5 mb-1">
-              <Lock className="w-3.5 h-3.5 text-orange-300" />
-              <span className="text-xs text-green-200 font-medium">Reserved</span>
+              <TrendingDown className="w-3.5 h-3.5 text-rose-300" />
+              <span className={`text-xs font-medium ${
+                balance.netBalance >= 0 ? 'text-green-200' : 'text-red-200'
+              }`}>Payout Debit</span>
             </div>
-            <p className="text-lg font-bold text-white">₹{balance.reserved.toLocaleString()}</p>
+            <p className="text-lg font-bold text-white">₹{(balance.totalPayoutAmount + balance.totalPayoutCommission).toLocaleString()}</p>
+            <p className="text-xs opacity-75">Inc. ₹{balance.totalPayoutCommission.toLocaleString()} commission</p>
           </div>
         </div>
       </div>
 
-      {/* Lifetime earnings */}
-      <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex items-center justify-between">
-        <div>
-          <p className="text-xs text-purple-600 font-semibold mb-0.5">Lifetime Earnings</p>
-          <p className="text-2xl font-bold text-purple-900">₹{balance.lifetime.toLocaleString()}</p>
+      {/* Balance Breakdown */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 mb-3">Balance Breakdown</h3>
+        
+        <div className="flex items-center justify-between py-2 border-b border-slate-100">
+          <span className="text-sm text-slate-600">Total Payin Revenue</span>
+          <span className="text-sm font-bold text-green-600">+₹{(balance.totalPayinRevenue + balance.totalPayinCommission).toLocaleString()}</span>
         </div>
-        <Shield className="w-10 h-10 text-purple-400" />
+        
+        <div className="flex items-center justify-between py-2 border-b border-slate-100 pl-4">
+          <span className="text-xs text-slate-500">Platform Commission (Payin)</span>
+          <span className="text-xs font-semibold text-slate-600">-₹{balance.totalPayinCommission.toLocaleString()}</span>
+        </div>
+        
+        <div className="flex items-center justify-between py-2 border-b border-slate-100 pl-4">
+          <span className="text-sm text-slate-700 font-medium">You Received (Payin)</span>
+          <span className="text-sm font-bold text-green-700">₹{balance.totalPayinRevenue.toLocaleString()}</span>
+        </div>
+        
+        <div className="flex items-center justify-between py-2 border-b border-slate-100">
+          <span className="text-sm text-slate-600">Total Payout Processed</span>
+          <span className="text-sm font-bold text-red-600">-₹{balance.totalPayoutAmount.toLocaleString()}</span>
+        </div>
+        
+        <div className="flex items-center justify-between py-2 border-b border-slate-100 pl-4">
+          <span className="text-xs text-slate-500">Platform Commission (Payout)</span>
+          <span className="text-xs font-semibold text-slate-600">-₹{balance.totalPayoutCommission.toLocaleString()}</span>
+        </div>
+        
+        <div className="flex items-center justify-between py-3 bg-slate-50 -mx-4 px-4 rounded-lg mt-3">
+          <span className="text-base font-bold text-slate-900">Net Balance</span>
+          <span className={`text-lg font-bold ${
+            balance.netBalance >= 0 ? 'text-green-600' : 'text-red-600'
+          }`}>
+            {balance.netBalance >= 0 ? '+' : ''}₹{balance.netBalance.toLocaleString()}
+          </span>
+        </div>
+        
+        {balance.netBalance < 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 mt-3">
+            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-red-800">
+              <p className="font-bold mb-1">Negative Balance</p>
+              <p>You need to add ₹{Math.abs(balance.netBalance).toLocaleString()} to cover payout costs and commissions.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -363,11 +487,11 @@ export default function MerchantBalance() {
         </div>
       )}
 
-      {showModal && (
+      {showModal && balance.netBalance > 0 && (
         <SettlementModal
           onClose={() => setShowModal(false)}
           onSubmit={handleSettlementRequest}
-          availableBalance={balance.available}
+          availableBalance={balance.netBalance}
         />
       )}
     </div>
