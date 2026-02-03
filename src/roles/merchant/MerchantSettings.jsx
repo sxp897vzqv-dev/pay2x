@@ -1,0 +1,465 @@
+import React, { useState, useEffect } from 'react';
+import { db } from '../../firebase';
+import { collection, query, where, getDocs, updateDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getAuth, updatePassword } from 'firebase/auth';
+import {
+  User, Building, Shield, Bell, Users, CreditCard, Key, Save,
+  CheckCircle, AlertCircle, Mail, Phone, Globe, FileText, Plus,
+  Trash2, Edit, RefreshCw, X,
+} from 'lucide-react';
+
+/* ─── Toast ─── */
+function Toast({ msg, success, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
+  return (
+    <div className={`fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 ${success ? 'bg-green-600' : 'bg-red-600'} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium`} style={{ top: 60 }}>
+      {success ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
+      <span>{msg}</span>
+    </div>
+  );
+}
+
+/* ─── Bank Account Card ─── */
+function BankAccountCard({ account, onEdit, onDelete, isPrimary, onSetPrimary }) {
+  return (
+    <div className={`rounded-xl border-2 p-4 ${isPrimary ? 'border-green-300 bg-green-50' : 'border-slate-200 bg-white'}`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <Building className="w-4 h-4 text-slate-600" />
+            <p className="font-bold text-slate-900">{account.bankName}</p>
+          </div>
+          <p className="text-sm text-slate-600 font-mono" style={{ fontFamily: 'var(--font-mono)' }}>
+            ***{account.accountNumber.slice(-4)}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">{account.holderName}</p>
+        </div>
+        {isPrimary && (
+          <span className="px-2 py-0.5 bg-green-600 text-white text-xs font-bold rounded-full">PRIMARY</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        {!isPrimary && (
+          <button onClick={onSetPrimary}
+            className="flex-1 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-100">
+            Set Primary
+          </button>
+        )}
+        <button onClick={onEdit}
+          className="flex-1 py-2 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-100 flex items-center justify-center gap-1">
+          <Edit className="w-3 h-3" /> Edit
+        </button>
+        <button onClick={onDelete}
+          className="flex-1 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-100 flex items-center justify-center gap-1">
+          <Trash2 className="w-3 h-3" /> Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Team Member Card ─── */
+function TeamMemberCard({ member, onRemove }) {
+  const roleColors = {
+    admin: 'bg-purple-100 text-purple-700',
+    finance: 'bg-blue-100 text-blue-700',
+    viewer: 'bg-slate-100 text-slate-700',
+  };
+
+  return (
+    <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-blue-400 rounded-full flex items-center justify-center text-white font-bold">
+          {member.name.charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <p className="font-semibold text-slate-900 text-sm">{member.name}</p>
+          <p className="text-xs text-slate-500">{member.email}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${roleColors[member.role] || roleColors.viewer}`}>
+          {member.role?.toUpperCase()}
+        </span>
+        <button onClick={() => onRemove(member.id)}
+          className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg">
+          <Trash2 className="w-4 h-4 text-red-500" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function MerchantSettings() {
+  const [activeTab, setActiveTab] = useState('profile');
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+  
+  // Profile
+  const [profile, setProfile] = useState({
+    businessName: '',
+    website: '',
+    supportEmail: '',
+    supportPhone: '',
+    gst: '',
+  });
+
+  // Bank accounts
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [primaryAccountId, setPrimaryAccountId] = useState('');
+
+  // Team
+  const [teamMembers, setTeamMembers] = useState([]);
+
+  // Notifications
+  const [notifications, setNotifications] = useState({
+    emailTransactions: true,
+    emailBalance: true,
+    smsAlerts: false,
+    webhookEvents: true,
+  });
+
+  // Security
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const user = getAuth().currentUser;
+    if (!user) return;
+
+    try {
+      // Fetch merchant profile
+      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      if (!merchantSnap.empty) {
+        const data = merchantSnap.docs[0].data();
+        setProfile({
+          businessName: data.businessName || '',
+          website: data.website || '',
+          supportEmail: data.supportEmail || '',
+          supportPhone: data.supportPhone || '',
+          gst: data.gst || '',
+        });
+        setNotifications(data.notifications || notifications);
+        setTwoFactorEnabled(data.twoFactorEnabled || false);
+      }
+
+      // Fetch bank accounts
+      const banksSnap = await getDocs(query(collection(db, 'merchantBankAccounts'), where('merchantId', '==', user.uid)));
+      const banks = [];
+      banksSnap.forEach(d => {
+        const acc = { id: d.id, ...d.data() };
+        banks.push(acc);
+        if (acc.isPrimary) setPrimaryAccountId(d.id);
+      });
+      setBankAccounts(banks);
+
+      // Fetch team members
+      const teamSnap = await getDocs(query(collection(db, 'merchantTeam'), where('merchantId', '==', user.uid)));
+      const team = [];
+      teamSnap.forEach(d => team.push({ id: d.id, ...d.data() }));
+      setTeamMembers(team);
+
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const handleSaveProfile = async () => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+
+    try {
+      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      if (!merchantSnap.empty) {
+        await updateDoc(doc(db, 'merchants', merchantSnap.docs[0].id), {
+          ...profile,
+          updatedAt: serverTimestamp(),
+        });
+        setToast({ msg: '✅ Profile updated!', success: true });
+      }
+    } catch (e) {
+      setToast({ msg: 'Error: ' + e.message, success: false });
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+
+    try {
+      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      if (!merchantSnap.empty) {
+        await updateDoc(doc(db, 'merchants', merchantSnap.docs[0].id), {
+          notifications,
+          updatedAt: serverTimestamp(),
+        });
+        setToast({ msg: '✅ Notifications updated!', success: true });
+      }
+    } catch (e) {
+      setToast({ msg: 'Error: ' + e.message, success: false });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-center">
+          <RefreshCw className="w-10 h-10 text-purple-500 animate-spin mx-auto mb-3" />
+          <p className="text-slate-500 text-sm font-medium">Loading settings…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 max-w-4xl mx-auto">
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+
+      {/* Desktop header */}
+      <div className="hidden sm:block">
+        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <div className="p-2 bg-gradient-to-br from-slate-500 to-slate-600 rounded-xl shadow-sm">
+            <User className="w-5 h-5 text-white" />
+          </div>
+          Settings
+        </h1>
+        <p className="text-slate-500 text-sm mt-0.5 ml-11">Manage your account</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        {[
+          { key: 'profile', label: 'Profile', icon: User },
+          { key: 'banks', label: 'Banks', icon: CreditCard },
+          { key: 'team', label: 'Team', icon: Users },
+          { key: 'notifications', label: 'Alerts', icon: Bell },
+          { key: 'security', label: 'Security', icon: Shield },
+        ].map(tab => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={`flex-shrink-0 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                activeTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              <Icon className="w-4 h-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Profile Tab */}
+      {activeTab === 'profile' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <Building className="w-4 h-4 text-purple-600" />
+            Business Information
+          </h3>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Business Name *</label>
+            <input
+              type="text"
+              value={profile.businessName}
+              onChange={e => setProfile({ ...profile, businessName: e.target.value })}
+              className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Website
+              </label>
+              <input
+                type="url"
+                value={profile.website}
+                onChange={e => setProfile({ ...profile, website: e.target.value })}
+                placeholder="https://yourbusiness.com"
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide flex items-center gap-1">
+                <FileText className="w-3 h-3" /> GST Number (Optional)
+              </label>
+              <input
+                type="text"
+                value={profile.gst}
+                onChange={e => setProfile({ ...profile, gst: e.target.value.toUpperCase() })}
+                placeholder="Enter GST number if applicable"
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 font-mono"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide flex items-center gap-1">
+                <Mail className="w-3 h-3" /> Support Email
+              </label>
+              <input
+                type="email"
+                value={profile.supportEmail}
+                onChange={e => setProfile({ ...profile, supportEmail: e.target.value })}
+                placeholder="support@yourbusiness.com"
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide flex items-center gap-1">
+                <Phone className="w-3 h-3" /> Support Phone
+              </label>
+              <input
+                type="tel"
+                value={profile.supportPhone}
+                onChange={e => setProfile({ ...profile, supportPhone: e.target.value })}
+                placeholder="+91 1234567890"
+                className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+              />
+            </div>
+          </div>
+
+          <button onClick={handleSaveProfile}
+            className="w-full py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm flex items-center justify-center gap-2">
+            <Save className="w-4 h-4" /> Save Changes
+          </button>
+        </div>
+      )}
+
+      {/* Banks Tab */}
+      {activeTab === 'banks' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900">Saved Bank Accounts</h3>
+            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold">
+              <Plus className="w-4 h-4" /> Add Account
+            </button>
+          </div>
+
+          {bankAccounts.length > 0 ? (
+            <div className="grid gap-3">
+              {bankAccounts.map(acc => (
+                <BankAccountCard
+                  key={acc.id}
+                  account={acc}
+                  isPrimary={acc.id === primaryAccountId}
+                  onEdit={() => alert('Edit ' + acc.id)}
+                  onDelete={() => alert('Delete ' + acc.id)}
+                  onSetPrimary={() => setPrimaryAccountId(acc.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
+              <CreditCard className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm font-medium">No bank accounts added</p>
+              <p className="text-xs text-slate-400 mt-0.5">Add an account to receive settlements</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Team Tab */}
+      {activeTab === 'team' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900">Team Members</h3>
+            <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold">
+              <Plus className="w-4 h-4" /> Invite Member
+            </button>
+          </div>
+
+          {teamMembers.length > 0 ? (
+            <div className="space-y-2">
+              {teamMembers.map(member => (
+                <TeamMemberCard key={member.id} member={member} onRemove={(id) => alert('Remove ' + id)} />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
+              <Users className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm font-medium">No team members yet</p>
+              <p className="text-xs text-slate-400 mt-0.5">Invite team members to collaborate</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Notifications Tab */}
+      {activeTab === 'notifications' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+          <h3 className="text-sm font-bold text-slate-900">Notification Preferences</h3>
+
+          {[
+            { key: 'emailTransactions', label: 'Email for Transactions', desc: 'Receive emails for every transaction' },
+            { key: 'emailBalance', label: 'Email for Balance Alerts', desc: 'Get notified when balance is low' },
+            { key: 'smsAlerts', label: 'SMS Alerts', desc: 'Critical alerts via SMS' },
+            { key: 'webhookEvents', label: 'Webhook Events', desc: 'Send webhook for all events' },
+          ].map(item => (
+            <label key={item.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer">
+              <div>
+                <p className="font-semibold text-slate-900 text-sm">{item.label}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{item.desc}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={notifications[item.key]}
+                onChange={e => setNotifications({ ...notifications, [item.key]: e.target.checked })}
+                className="w-5 h-5 text-purple-600 rounded"
+              />
+            </label>
+          ))}
+
+          <button onClick={handleSaveNotifications}
+            className="w-full py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm flex items-center justify-center gap-2">
+            <Save className="w-4 h-4" /> Save Preferences
+          </button>
+        </div>
+      )}
+
+      {/* Security Tab */}
+      {activeTab === 'security' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <h3 className="text-sm font-bold text-slate-900 mb-4">Two-Factor Authentication</h3>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-700 font-semibold">2FA Status</p>
+                <p className="text-xs text-slate-500 mt-0.5">Add extra layer of security</p>
+              </div>
+              <button
+                onClick={() => setTwoFactorEnabled(!twoFactorEnabled)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                  twoFactorEnabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {twoFactorEnabled ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <h3 className="text-sm font-bold text-slate-900 mb-4">Change Password</h3>
+            <div className="space-y-3">
+              <input type="password" placeholder="Current Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              <input type="password" placeholder="New Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              <input type="password" placeholder="Confirm New Password" className="w-full px-3 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              <button className="w-full py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm flex items-center justify-center gap-2">
+                <Key className="w-4 h-4" /> Update Password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
