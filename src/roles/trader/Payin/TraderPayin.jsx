@@ -222,6 +222,7 @@ export default function TraderPayin() {
   const [loading,      setLoading]      = useState(true);
   const [activeTab,    setActiveTab]    = useState("pending");
   const [search,       setSearch]       = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom,     setDateFrom]     = useState("");
   const [dateTo,       setDateTo]       = useState("");
   const [amountFilter, setAmountFilter] = useState("all");
@@ -231,6 +232,12 @@ export default function TraderPayin() {
   const [processing,   setProcessing]   = useState(false);
   const [showFilters,  setShowFilters]  = useState(false);
   const [userModal,    setUserModal]    = useState({ open: false, userId: null, data: null });
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     const user = getAuth().currentUser;
@@ -270,13 +277,13 @@ export default function TraderPayin() {
 
   const filtered = useMemo(() => {
     let r = payins.filter(p => p.status === activeTab);
-    if (search) { const s=search.toLowerCase(); r=r.filter(p => p.transactionId?.toLowerCase().includes(s)||p.userId?.toLowerCase().includes(s)||p.amount?.toString().includes(search)); }
+    if (debouncedSearch) { const s=debouncedSearch.toLowerCase(); r=r.filter(p => p.transactionId?.toLowerCase().includes(s)||p.userId?.toLowerCase().includes(s)||p.amount?.toString().includes(debouncedSearch)); }
     if (dateFrom) r=r.filter(p => (p.requestedAt?.seconds||0)*1000 >= new Date(dateFrom).getTime());
     if (dateTo)   r=r.filter(p => (p.requestedAt?.seconds||0)*1000 <= new Date(dateTo).getTime()+86399999);
     if (amountFilter==="high") r=r.filter(p => Number(p.amount)>10000);
     else if (amountFilter==="low") r=r.filter(p => Number(p.amount)<=10000);
     return r;
-  }, [payins, activeTab, search, dateFrom, dateTo, amountFilter]);
+  }, [payins, activeTab, debouncedSearch, dateFrom, dateTo, amountFilter]);
 
   const onAccept = useCallback(async (payin) => {
     setProcessing(true);
