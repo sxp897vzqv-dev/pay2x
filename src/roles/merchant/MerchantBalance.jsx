@@ -42,13 +42,13 @@ function SettlementModal({ onClose, onSubmit, availableBalance }) {
 
   const handleSubmit = async () => {
     if (!amount || Number(amount) <= 0) { alert('Enter valid amount'); return; }
+    if (Number(amount) < 50000) {
+      alert('Minimum settlement amount is ₹50,000');
+      return;
+    }
     if (Number(amount) > availableBalance) { 
       alert(`Insufficient balance. Maximum you can withdraw: ₹${availableBalance.toLocaleString()}`); 
       return; 
-    }
-    if (Number(amount) < 100) {
-      alert('Minimum settlement amount is ₹100');
-      return;
     }
     if (!usdtAddress || usdtAddress.length !== 34 || !usdtAddress.startsWith('T')) {
       alert('Invalid USDT TRC20 address (must start with T and be 34 characters)');
@@ -116,7 +116,16 @@ function SettlementModal({ onClose, onSubmit, availableBalance }) {
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2 text-xs">
             <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-            <p className="text-blue-800">Settlements are processed within 24 hours. USDT will be sent to your TRC20 wallet address. Network fees may apply.</p>
+            <div className="text-blue-800">
+              <p className="font-semibold mb-1">Settlement Policy:</p>
+              <ul className="space-y-0.5 text-xs list-disc list-inside">
+                <li>Minimum withdrawal: ₹50,000</li>
+                <li>Only positive balance can be withdrawn</li>
+                <li>Processed within 24 hours</li>
+                <li>USDT sent to TRC20 wallet</li>
+                <li>Network fees may apply</li>
+              </ul>
+            </div>
           </div>
         </div>
 
@@ -289,7 +298,7 @@ export default function MerchantBalance() {
         </div>
         <button 
           onClick={() => setShowModal(true)}
-          disabled={balance.netBalance <= 0}
+          disabled={balance.netBalance < 50000}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Request Settlement
         </button>
@@ -299,11 +308,22 @@ export default function MerchantBalance() {
       <div className="flex sm:hidden justify-end">
         <button 
           onClick={() => setShowModal(true)}
-          disabled={balance.netBalance <= 0}
+          disabled={balance.netBalance < 50000}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Settlement
         </button>
       </div>
+      
+      {/* Minimum balance warning */}
+      {balance.netBalance > 0 && balance.netBalance < 50000 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-yellow-800">
+            <p className="font-semibold">Below Minimum Withdrawal</p>
+            <p className="text-xs mt-0.5">You need ₹{(50000 - balance.netBalance).toLocaleString()} more to reach the minimum settlement amount of ₹50,000.</p>
+          </div>
+        </div>
+      )}
 
       {/* Hero Balance Card */}
       <div className={`rounded-2xl p-4 sm:p-5 text-white shadow-lg ${
@@ -487,7 +507,7 @@ export default function MerchantBalance() {
         </div>
       )}
 
-      {showModal && balance.netBalance > 0 && (
+      {showModal && balance.netBalance >= 50000 && (
         <SettlementModal
           onClose={() => setShowModal(false)}
           onSubmit={handleSettlementRequest}
