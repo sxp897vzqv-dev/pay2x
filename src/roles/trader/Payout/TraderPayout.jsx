@@ -87,7 +87,10 @@ export default function TraderPayout() {
         let active = null;
         snap.forEach(d => {
           const data = { id: d.id, ...d.data() };
-          if (data.status !== 'completed' && data.status !== 'cancelled') active = data;
+          // Only show active requests (not completed/cancelled)
+          if (data.status !== 'completed' && data.status !== 'cancelled') {
+            active = data;
+          }
         });
         setActiveRequest(active);
         setLoading(false);
@@ -198,6 +201,31 @@ export default function TraderPayout() {
           overallCommission: (Number(td.overallCommission) || 0) + commission,
         });
       });
+
+      // ✅ Check if all payouts for this request are completed
+      if (selectedPayout.payoutRequestId) {
+        const requestId = selectedPayout.payoutRequestId;
+        
+        // Check remaining assigned payouts
+        const remainingPayoutsSnap = await getDocs(
+          query(
+            collection(db, 'payouts'),
+            where('payoutRequestId', '==', requestId),
+            where('status', '==', 'assigned')
+          )
+        );
+
+        // If no more assigned payouts, mark request as completed
+        if (remainingPayoutsSnap.empty) {
+          await updateDoc(doc(db, 'payoutRequest', requestId), {
+            status: 'completed',
+            completedAt: serverTimestamp(),
+            fullyCompleted: true,
+          });
+          console.log(`✅ Request ${requestId} auto-completed - all payouts done`);
+          setToast({ msg: '✅ All payouts completed! Request closed automatically', success: true });
+        }
+      }
 
       const comm = Math.round((selectedPayout.amount * payoutCommission) / 100);
       setToast({ msg: `✅ Completed! ₹${(selectedPayout.amount + comm).toLocaleString()} credited`, success: true });

@@ -397,6 +397,29 @@ export async function completePayoutWithProof(payoutId, traderId, utrId, proofUr
 
     console.log(`✅ Payout completed: ₹${payoutAmount} added`);
 
+    // ✅ Auto-complete request if all payouts done
+    const requestId = payoutData.payoutRequestId;
+    if (requestId) {
+      // Check remaining assigned payouts for this request
+      const remainingPayoutsSnap = await getDocs(
+        query(
+          collection(db, 'payouts'),
+          where('payoutRequestId', '==', requestId),
+          where('status', '==', 'assigned')
+        )
+      );
+
+      // If no more assigned payouts, mark request as completed
+      if (remainingPayoutsSnap.empty) {
+        await updateDoc(doc(db, 'payoutRequest', requestId), {
+          status: 'completed',
+          completedAt: serverTimestamp(),
+          fullyCompleted: true,
+        });
+        console.log(`✅ Request ${requestId} auto-completed - all payouts done`);
+      }
+    }
+
     processWaitingList().catch(err => console.error('Error processing waiting list:', err));
 
     return {
