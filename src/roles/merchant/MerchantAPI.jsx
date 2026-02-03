@@ -160,14 +160,21 @@ export default function MerchantAPI() {
         if (!merchantSnap.empty) {
           const data = merchantSnap.docs[0].data();
           console.log('📄 MerchantAPI: Merchant document ID:', merchantSnap.docs[0].id);
+          console.log('📄 MerchantAPI: Full merchant data:', data);
+          
+          // Support both old structure (apiKey) and new structure (liveApiKey/testApiKey)
+          const liveKey = data.liveApiKey || data.apiKey || '';
+          const testKey = data.testApiKey || '';
+          
           console.log('🔑 MerchantAPI: Current API keys:', {
-            live: data.liveApiKey ? `${data.liveApiKey.substring(0, 15)}...` : 'EMPTY',
-            test: data.testApiKey ? `${data.testApiKey.substring(0, 15)}...` : 'EMPTY'
+            live: liveKey ? `${liveKey.substring(0, 15)}...` : 'EMPTY',
+            test: testKey ? `${testKey.substring(0, 15)}...` : 'EMPTY',
+            usingLegacyApiKey: !!data.apiKey && !data.liveApiKey
           });
           
           setApiKeys({
-            live: data.liveApiKey || '',
-            test: data.testApiKey || '',
+            live: liveKey,
+            test: testKey,
           });
           setWebhookUrl(data.webhookUrl || '');
           setWebhookSecret(data.webhookSecret || '');
@@ -176,6 +183,7 @@ export default function MerchantAPI() {
           console.log('✅ MerchantAPI: State updated successfully');
         } else {
           console.error('❌ MerchantAPI: No merchant document found for uid:', user.uid);
+          console.error('❌ MerchantAPI: Make sure your Firebase Auth UID matches the merchant document uid field');
         }
       } catch (e) {
         console.error('❌ MerchantAPI: Error fetching data:', e);
@@ -235,15 +243,28 @@ export default function MerchantAPI() {
       
       if (!merchantSnap.empty) {
         const docId = merchantSnap.docs[0].id;
+        const merchantData = merchantSnap.docs[0].data();
+        
+        // Use liveApiKey/testApiKey structure (ignore legacy apiKey field)
         const fieldName = mode === 'live' ? 'liveApiKey' : 'testApiKey';
         
         console.log('💾 handleRegenerateKey: Updating document:', docId);
         console.log('💾 handleRegenerateKey: Field:', fieldName);
         console.log('💾 handleRegenerateKey: New value:', newKey);
         
-        await updateDoc(doc(db, 'merchants', docId), {
+        // Update both the specific field and set apiKeyUpdatedAt
+        const updateData = {
           [fieldName]: newKey,
-        });
+          apiKeyUpdatedAt: serverTimestamp()
+        };
+        
+        // If this is the first time setting liveApiKey and there's a legacy apiKey, clear it
+        if (mode === 'live' && merchantData.apiKey && !merchantData.liveApiKey) {
+          console.log('🔄 handleRegenerateKey: Migrating from legacy apiKey to liveApiKey');
+          updateData.apiKey = null; // Clear legacy field
+        }
+        
+        await updateDoc(doc(db, 'merchants', docId), updateData);
         
         console.log('✅ handleRegenerateKey: Firestore update successful');
         

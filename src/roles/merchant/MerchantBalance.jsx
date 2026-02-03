@@ -172,8 +172,19 @@ export default function MerchantBalance() {
           const data = merchantSnap.docs[0].data();
           
           // Calculate balance from transactions
-          const payinCommissionRate = data.payinCommissionRate || 0.06; // 6% default
-          const payoutCommissionRate = data.payoutCommissionRate || 0.02; // 2% default
+          // Commission rates in DB can be stored as 5 (meaning 5%) or 0.05
+          // Normalize to decimal format
+          let payinCommissionRate = data.payinCommissionRate || 6;
+          let payoutCommissionRate = data.payoutCommissionRate || 2;
+          
+          // Convert to decimal if stored as whole number (5 → 0.05)
+          if (payinCommissionRate > 1) payinCommissionRate = payinCommissionRate / 100;
+          if (payoutCommissionRate > 1) payoutCommissionRate = payoutCommissionRate / 100;
+          
+          console.log('💰 MerchantBalance: Commission rates:', {
+            payin: `${(payinCommissionRate * 100).toFixed(1)}%`,
+            payout: `${(payoutCommissionRate * 100).toFixed(1)}%`
+          });
           
           // Fetch all completed payins
           const payinsSnap = await getDocs(
