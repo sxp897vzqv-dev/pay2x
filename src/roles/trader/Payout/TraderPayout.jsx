@@ -168,17 +168,31 @@ export default function TraderPayout() {
       const proofUrl = await getDownloadURL(storageRef);
       setUploadProgress(100);
 
+      // ✅ FIX: Get trader doc ID BEFORE transaction
+      const tSnap = await getDocs(query(collection(db, 'trader'), where('uid', '==', traderId)));
+      if (tSnap.empty) throw new Error('Trader not found');
+      const traderDocId = tSnap.docs[0].id;
+
       await runTransaction(db, async (tx) => {
         const payoutRef = doc(db, 'payouts', selectedPayout.id);
-        const tSnap     = await getDocs(query(collection(db, 'trader'), where('uid', '==', traderId)));
-        if (tSnap.empty) throw new Error('Trader not found');
-        const tRef = doc(db, 'trader', tSnap.docs[0].id);
-        const td   = tSnap.docs[0].data();
+        const tRef = doc(db, 'trader', traderDocId);
+        
+        // ✅ FIX: Use tx.get() inside transaction (participates in lock)
+        const tDoc = await tx.get(tRef);
+        if (!tDoc.exists()) throw new Error('Trader not found');
+        const td = tDoc.data();
 
         const amount     = Number(selectedPayout.amount);
         const commission = Math.round((amount * payoutCommission) / 100);
-        /* ✅ BUG FIX: credit trader.balance (the real field), not workingBalance */
-        tx.update(payoutRef, { status: 'completed', completedAt: serverTimestamp(), traderId, utrId, proofUrl, commission });
+        
+        tx.update(payoutRef, { 
+          status: 'completed', 
+          completedAt: serverTimestamp(), 
+          traderId, 
+          utrId, 
+          proofUrl, 
+          commission 
+        });
         tx.update(tRef, {
           balance: (Number(td.balance) || 0) + amount + commission,
           overallCommission: (Number(td.overallCommission) || 0) + commission,
