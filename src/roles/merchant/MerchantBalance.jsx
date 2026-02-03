@@ -167,7 +167,7 @@ export default function MerchantBalance() {
     const fetchData = async () => {
       try {
         // Fetch merchant data
-        const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+        const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
         if (!merchantSnap.empty) {
           const data = merchantSnap.docs[0].data();
           

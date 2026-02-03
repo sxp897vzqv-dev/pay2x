@@ -153,7 +153,7 @@ export default function MerchantAPI() {
     const fetchData = async () => {
       try {
         console.log('🔍 MerchantAPI: Fetching merchant data for uid:', user.uid);
-        const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+        const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
         
         console.log('📦 MerchantAPI: Query result - found docs:', merchantSnap.size);
         
@@ -238,7 +238,7 @@ export default function MerchantAPI() {
     
     try {
       console.log('📡 handleRegenerateKey: Querying merchant document...');
-      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
       console.log('📦 handleRegenerateKey: Found merchants:', merchantSnap.size);
       
       if (!merchantSnap.empty) {
@@ -264,7 +264,7 @@ export default function MerchantAPI() {
           updateData.apiKey = null; // Clear legacy field
         }
         
-        await updateDoc(doc(db, 'merchants', docId), updateData);
+        await updateDoc(doc(db, 'merchant', docId), updateData);
         
         console.log('✅ handleRegenerateKey: Firestore update successful');
         
@@ -304,9 +304,9 @@ export default function MerchantAPI() {
     }
 
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
       if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchants', merchantSnap.docs[0].id), {
+        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
           webhookUrl,
           webhookEvents,
           updatedAt: serverTimestamp(),

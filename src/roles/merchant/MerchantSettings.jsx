@@ -133,7 +133,7 @@ export default function MerchantSettings() {
 
     try {
       // Fetch merchant profile
-      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
       if (!merchantSnap.empty) {
         const data = merchantSnap.docs[0].data();
         setProfile({
@@ -174,9 +174,9 @@ export default function MerchantSettings() {
     if (!user) return;
 
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
       if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchants', merchantSnap.docs[0].id), {
+        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
           ...profile,
           updatedAt: serverTimestamp(),
         });
@@ -192,9 +192,9 @@ export default function MerchantSettings() {
     if (!user) return;
 
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchants'), where('uid', '==', user.uid)));
+      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
       if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchants', merchantSnap.docs[0].id), {
+        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
           notifications,
           updatedAt: serverTimestamp(),
         });

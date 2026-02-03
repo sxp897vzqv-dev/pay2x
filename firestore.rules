@@ -11,8 +11,8 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Merchants collection
-    match /merchants/{merchantId} {
+    // Merchant collection (singular)
+    match /merchant/{merchantId} {
       allow read: if isOwner(resource.data.uid);
       allow write: if isOwner(resource.data.uid);
     }
