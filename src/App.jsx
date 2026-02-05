@@ -146,11 +146,13 @@ function App() {
     initAuth();
 
     // Listen for auth state changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // NOTE: Don't await Supabase calls inside this callback — causes deadlock.
+    // Use setTimeout to break out of the auth state change handler.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('🔐 Auth event:', event);
 
       if (event === 'SIGNED_IN' && session?.user) {
-        await resolveRole(session.user.id);
+        setTimeout(() => resolveRole(session.user.id), 0);
       } else if (event === 'SIGNED_OUT') {
         setUserRole(null);
         localStorage.removeItem('pay2x_user_role');
