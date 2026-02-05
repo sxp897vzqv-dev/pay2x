@@ -1,0 +1,235 @@
+-- ============================================
+-- 002 v3: Clean fix — drops broken tables, recreates with correct UUID types
+-- ============================================
+
+-- 1. Storage Policies (buckets already created)
+DO $$ BEGIN
+  CREATE POLICY "Authenticated users can upload payout proofs" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'payout-proofs');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Public can read payout proofs" ON storage.objects FOR SELECT USING (bucket_id = 'payout-proofs');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Authenticated users can upload dispute proofs" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'dispute-proofs');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Public can read dispute proofs" ON storage.objects FOR SELECT USING (bucket_id = 'dispute-proofs');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 2. Missing columns on admin_logs
+ALTER TABLE admin_logs ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE admin_logs ADD COLUMN IF NOT EXISTS review_status TEXT;
+ALTER TABLE admin_logs ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE admin_logs ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+
+-- 3. Missing columns on traders
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS current_merchant_upis JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS corporate_merchant_upis JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS normal_upis JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS big_upis JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS imps_accounts JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS security_hold NUMERIC DEFAULT 0;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS payout_commission NUMERIC DEFAULT 1;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 4;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS overall_commission NUMERIC DEFAULT 0;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'Normal';
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS telegram_group_link TEXT;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS usdt_deposit_address TEXT;
+ALTER TABLE traders ADD COLUMN IF NOT EXISTS derivation_index INTEGER;
+
+-- 4. Missing columns on merchants
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS business_name TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS live_api_key TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS test_api_key TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS api_key TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS secret_key TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS webhook_url TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS webhook_events JSONB DEFAULT '["payin.success","payin.failed","payout.completed"]'::jsonb;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS api_key_updated_at TIMESTAMPTZ;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS available_balance NUMERIC DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS pending_settlement NUMERIC DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS reserved_amount NUMERIC DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payin_commission_rate NUMERIC DEFAULT 6;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payout_commission_rate NUMERIC DEFAULT 2;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS support_email TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS support_phone TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS gst TEXT;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS notifications JSONB;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT false;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS total_orders INTEGER DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS total_volume NUMERIC DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS success_rate NUMERIC DEFAULT 0;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS dispute_count INTEGER DEFAULT 0;
+
+-- 5. Missing columns on payins
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS transaction_id TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS upi_id TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS utr TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS screenshot_url TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS auto_rejected BOOLEAN DEFAULT false;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS commission NUMERIC;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE payins ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'UPI';
+
+-- 6. Missing columns on payouts
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS payout_request_id TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS payout_id TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS utr TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS proof_url TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS commission NUMERIC;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS beneficiary_name TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS payment_mode TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS upi_id TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS account_number TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS ifsc_code TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS purpose TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+
+-- 7. Missing columns on disputes
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS trader_note TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS trader_action TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS proof_url TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS evidence_url TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS dispute_id TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS transaction_id TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS upi_id TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS message_count INTEGER DEFAULT 0;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS last_message_from TEXT;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS deadline TIMESTAMPTZ;
+
+-- 8. DROP broken tables from previous failed run (they may have wrong column types)
+DROP TABLE IF EXISTS merchant_ledger CASCADE;
+DROP TABLE IF EXISTS merchant_settlements CASCADE;
+DROP TABLE IF EXISTS merchant_bank_accounts CASCADE;
+DROP TABLE IF EXISTS merchant_team CASCADE;
+DROP TABLE IF EXISTS webhook_logs CASCADE;
+
+-- 9. Recreate with correct UUID foreign keys
+CREATE TABLE merchant_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID REFERENCES merchants(id),
+  type TEXT,
+  amount NUMERIC,
+  balance_after NUMERIC,
+  description TEXT,
+  reference_id TEXT,
+  timestamp TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE merchant_settlements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID REFERENCES merchants(id),
+  amount NUMERIC,
+  usdt_address TEXT,
+  network TEXT DEFAULT 'TRC20',
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE merchant_bank_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID REFERENCES merchants(id),
+  account_number TEXT,
+  ifsc_code TEXT,
+  holder_name TEXT,
+  bank_name TEXT,
+  is_primary BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE merchant_team (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID REFERENCES merchants(id),
+  name TEXT,
+  email TEXT,
+  role TEXT,
+  permissions JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE webhook_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  merchant_id UUID REFERENCES merchants(id),
+  event TEXT,
+  url TEXT,
+  status TEXT,
+  response_code INTEGER,
+  payload JSONB,
+  timestamp TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 10. Fix saved_banks if it has wrong column types (from 001_schema)
+-- Check: if trader_id is TEXT, recreate. If UUID, skip.
+DO $$ 
+BEGIN
+  -- Try adding a UUID FK. If saved_banks.trader_id is already UUID, this works.
+  -- If it's TEXT, it'll fail and we handle it.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'saved_banks_trader_id_fkey'
+  ) THEN
+    BEGIN
+      ALTER TABLE saved_banks 
+        ADD CONSTRAINT saved_banks_trader_id_fkey 
+        FOREIGN KEY (trader_id) REFERENCES traders(id);
+    EXCEPTION WHEN OTHERS THEN
+      -- Type mismatch, need to fix the column
+      ALTER TABLE saved_banks ALTER COLUMN trader_id TYPE UUID USING trader_id::uuid;
+      ALTER TABLE saved_banks 
+        ADD CONSTRAINT saved_banks_trader_id_fkey 
+        FOREIGN KEY (trader_id) REFERENCES traders(id);
+    END;
+  END IF;
+END $$;
+
+-- 11. RLS on new tables
+ALTER TABLE merchant_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE merchant_settlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE merchant_bank_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE merchant_team ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
+
+-- RLS on existing tables (safe to re-run)
+ALTER TABLE saved_banks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispute_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payout_requests ENABLE ROW LEVEL SECURITY;
+
+-- Policies (use DO blocks to handle duplicates)
+DO $$ BEGIN CREATE POLICY "Auth full access" ON merchant_ledger FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON merchant_settlements FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON merchant_bank_accounts FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON merchant_team FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON webhook_logs FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON saved_banks FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON dispute_messages FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Auth full access" ON payout_requests FOR ALL TO authenticated USING (true) WITH CHECK (true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 12. Indexes
+CREATE INDEX IF NOT EXISTS idx_saved_banks_trader ON saved_banks(trader_id);
+CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute ON dispute_messages(dispute_id);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_trader ON payout_requests(trader_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_ledger_merchant ON merchant_ledger(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_merchant_settlements_merchant ON merchant_settlements(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_logs_merchant ON webhook_logs(merchant_id);

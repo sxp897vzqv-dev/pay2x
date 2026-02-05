@@ -26,6 +26,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
         .order('timestamp', { ascending: true });
       const list = (data || []).map(m => ({
         ...m,
+        text: m.message, // DB column is 'message', app uses 'text'
         disputeId: m.dispute_id,
         readByTrader: m.read_by_trader,
         readByMerchant: m.read_by_merchant,
@@ -52,7 +53,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
       await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
         from: 'trader',
-        text: messageText,
+        message: messageText,
         timestamp: ts,
         read_by_merchant: false,
         read_by_trader: true,
@@ -62,7 +63,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
         last_message_at: ts,
         last_message_from: 'trader',
       }).eq('id', dispute.id);
-      setMessages(prev => [...prev, { from: 'trader', text: messageText, timestamp: { seconds: new Date(ts).getTime() / 1000 } }]);
+      setMessages(prev => [...prev, { from: 'trader', message: messageText, timestamp: { seconds: new Date(ts).getTime() / 1000 } }]);
       setMessageText('');
     } catch (e) {
       alert('Error: ' + e.message);
@@ -89,7 +90,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
       await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
         from: 'trader',
-        text: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
+        message: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
         is_decision: true,
         action,
         proof_url: proofUrl,
@@ -165,7 +166,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
                     {new Date((msg.timestamp?.seconds || 0) * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <p className="text-sm text-slate-800 whitespace-pre-wrap">{msg.text}</p>
+                <p className="text-sm text-slate-800 whitespace-pre-wrap">{msg.message || msg.text}</p>
                 {msg.proofUrl && (
                   <a href={msg.proofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:underline">
                     <Paperclip size={12} /> View Proof
