@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import { useSearchParams } from 'react-router-dom';
 import {
   TrendingUp, Filter, Download, RefreshCw, Calendar, X, AlertTriangle,
@@ -68,6 +69,9 @@ export default function AdminPayins() {
   useEffect(() => {
     fetchPayins();
   }, [fetchPayins]);
+
+  // Realtime: auto-refresh on any payins change
+  useRealtimeSubscription('payins', () => fetchPayins());
 
   // Load more (offset-based pagination)
   const loadMorePayins = async () => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import { useSearchParams } from 'react-router-dom';
 import { AlertCircle, Search, RefreshCw } from 'lucide-react';
 
@@ -43,6 +44,8 @@ export default function AdminDisputes() {
   useEffect(() => {
     fetchDisputes();
   }, [fetchDisputes]);
+
+  useRealtimeSubscription('disputes', () => fetchDisputes());
 
   const filtered = useMemo(() => {
     let result = disputes;

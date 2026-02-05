@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
   AlertCircle, RefreshCw, Search, Filter, Bell, BellOff,
 } from "lucide-react";
@@ -56,6 +57,21 @@ export default function TraderDispute() {
     };
     fetchDisputes();
   }, [notificationsEnabled]);
+
+  // Realtime: refresh on dispute changes
+  useRealtimeSubscription('disputes', async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('disputes').select('*').eq('trader_id', user.id).order('created_at', { ascending: false }).limit(200);
+    setDisputes((data || []).map(d => ({
+      ...d, traderId: d.trader_id, merchantId: d.merchant_id,
+      orderId: d.order_id || d.payin_id || d.payout_id,
+      upiId: d.upi_id, traderNote: d.trader_note,
+      traderAction: d.trader_action, proofUrl: d.proof_url,
+      createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
+      respondedAt: d.responded_at ? { seconds: new Date(d.responded_at).getTime() / 1000 } : null,
+    })));
+  });
 
   // Load unread message counts
   useEffect(() => {

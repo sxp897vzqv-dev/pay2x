@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import { useSearchParams } from 'react-router-dom';
 import {
   TrendingDown, Filter, Download, RefreshCw, User, Calendar, Clock,
@@ -71,6 +72,9 @@ export default function AdminPayouts() {
   useEffect(() => {
     fetchPayouts();
   }, [fetchPayouts]);
+
+  // Realtime: auto-refresh on any payouts change
+  useRealtimeSubscription('payouts', () => fetchPayouts());
 
   // Fetch waiting requests
   const fetchWaitingRequests = useCallback(async () => {

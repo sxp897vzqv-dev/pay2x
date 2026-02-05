@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
   DollarSign, CreditCard, TrendingDown, FileText,
 } from 'lucide-react';
@@ -95,6 +96,15 @@ export default function TraderPayout() {
     };
     fetchAll();
   }, [traderId]);
+
+  // Realtime: refresh when payouts change
+  useRealtimeSubscription('payouts', async () => {
+    if (!traderId) return;
+    const { data: assigned } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'assigned').limit(100);
+    setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
+    const { data: completed } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(200);
+    setCompletedPayouts((completed || []).map(mapPayout));
+  });
 
   /* ── handlers ── */
   const handleSubmitRequest = async () => {

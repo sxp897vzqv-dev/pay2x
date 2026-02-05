@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeMulti } from '../../../hooks/useRealtimeSubscription';
 import { Link } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, DollarSign, Users, Store, Activity, RefreshCw,
@@ -57,6 +58,9 @@ export default function AdminDashboard() {
     fetchStats();
     fetchAlerts();
   }, []);
+
+  // Realtime: refresh dashboard on any transaction changes
+  useRealtimeMulti(['payins', 'payouts', 'disputes'], () => fetchStats());
 
   const fetchAlerts = async () => {
     try {

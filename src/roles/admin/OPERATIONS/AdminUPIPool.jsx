@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import { Link } from 'react-router-dom';
 import { 
   Database, Search, RefreshCw, CheckCircle, ToggleLeft, ToggleRight, 
@@ -224,6 +225,8 @@ export default function AdminUPIPool() {
   }, []);
 
   useEffect(() => { fetchPool(); fetchPayins(); }, [fetchPool, fetchPayins]);
+
+  useRealtimeSubscription('upi_pool', () => fetchPool());
 
   // Calculate stats per UPI
   const upiStats = useMemo(() => {

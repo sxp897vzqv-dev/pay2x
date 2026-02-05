@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, memo } from "react";
 import { supabase } from "../../../supabase";
+import { useRealtimeSubscription } from "../../../hooks/useRealtimeSubscription";
 import {
   CheckCircle, XCircle, Edit, Search, FileText, AlertCircle,
   MoreHorizontal, Download, TrendingUp, RefreshCw, Filter, X,
@@ -261,6 +262,21 @@ export default function TraderPayin() {
     };
     init();
   }, []);
+
+  // Realtime: refresh when payins change for this trader
+  useRealtimeSubscription('payins', async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', user.id).order('requested_at', { ascending: false }).limit(200);
+    setPayins((rows || []).map(r => ({
+      ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
+      userId: r.merchant_id, transactionId: r.transaction_id,
+      screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
+      requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+      completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
+      rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
+    })));
+  });
 
   /* Auto-reject expired */
   useEffect(() => {
