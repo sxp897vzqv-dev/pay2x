@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
-import '../../../firebase'; // Keep Firebase app init for Cloud Functions
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { createMerchant } from '../../../supabaseAdmin';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Store, Search, Filter, Plus, Eye, CheckCircle, AlertCircle,
@@ -17,9 +16,6 @@ import { Toast, FilterPills, SearchInput, CardSkeleton } from '../../../componen
 // Extracted components
 import MerchantModal from './components/MerchantModal';
 import MerchantCard from './components/MerchantCard';
-
-// Initialize Firebase Functions
-const functions = getFunctions();
 
 /* ─── Generate API Keys ─── */
 function generateApiKey() {
@@ -130,51 +126,21 @@ export default function AdminMerchantList() {
 
         setToast({ msg: '✅ Merchant updated successfully!', success: true });
       } else {
-        // Try Cloud Function first
-        try {
-          const createMerchantComplete = httpsCallable(functions, 'createMerchantComplete');
+        await createMerchant({
+          email: formData.email,
+          password: formData.password,
+          name: formData.name || formData.businessName,
+          businessName: formData.businessName || formData.name,
+          phone: formData.phone || '',
+          website: formData.website || '',
+          callbackUrl: formData.callbackUrl || '',
+          webhookUrl: formData.webhookUrl || '',
+          payinCommissionRate: Number(formData.payinCommission) || 2,
+          payoutCommissionRate: Number(formData.payoutCommission) || 1,
+          active: formData.active !== undefined ? formData.active : true,
+        });
 
-          const result = await createMerchantComplete({
-            email: formData.email,
-            password: formData.password,
-            name: formData.name || formData.businessName,
-            businessName: formData.businessName || formData.name,
-            phone: formData.phone || '',
-            website: formData.website || '',
-            callbackUrl: formData.callbackUrl || '',
-            webhookUrl: formData.webhookUrl || '',
-            payinCommission: Number(formData.payinCommission) || 2,
-            payoutCommission: Number(formData.payoutCommission) || 1,
-            active: formData.active !== undefined ? formData.active : true,
-          });
-
-          setToast({ msg: '✅ Merchant created successfully!', success: true });
-
-        } catch (cfError) {
-          console.warn('Cloud Function failed, creating directly in Supabase:', cfError);
-          
-          const apiKey = generateApiKey();
-          const secretKey = generateSecretKey();
-
-          const { error } = await supabase.from('merchants').insert({
-            email: formData.email,
-            name: formData.name || formData.businessName,
-            business_name: formData.businessName || formData.name,
-            phone: formData.phone || '',
-            website: formData.website || '',
-            callback_url: formData.callbackUrl || '',
-            webhook_url: formData.webhookUrl || '',
-            payin_commission: Number(formData.payinCommission) || 2,
-            payout_commission: Number(formData.payoutCommission) || 1,
-            is_active: formData.active !== undefined ? formData.active : true,
-            live_api_key: apiKey,
-            webhook_secret: secretKey,
-            balance: 0,
-          });
-
-          if (error) throw error;
-          setToast({ msg: '✅ Merchant created! Note: Auth account not created (Cloud Function needed)', success: true });
-        }
+        setToast({ msg: '✅ Merchant created successfully!', success: true });
       }
 
       setShowModal(false);

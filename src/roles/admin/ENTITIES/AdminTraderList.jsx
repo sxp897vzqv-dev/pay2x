@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
-import '../../../firebase'; // Keep Firebase app init for Cloud Functions
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { createTrader } from '../../../supabaseAdmin';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Users, Search, Filter, Plus, RefreshCw, Eye, CheckCircle, AlertCircle,
@@ -17,9 +16,6 @@ import { Toast, FilterPills, SearchInput, CardSkeleton } from '../../../componen
 // Extracted components
 import TraderModal from './components/TraderModal';
 import TraderCard from './components/TraderCard';
-
-// Initialize Firebase Functions
-const functions = getFunctions();
 
 /* ─── Map Supabase row → camelCase for child components ─── */
 const mapTrader = (row) => ({
@@ -168,9 +164,7 @@ export default function AdminTraderList() {
 
         setToast({ msg: '✅ Trader updated successfully!', success: true });
       } else {
-        const createTraderComplete = httpsCallable(functions, 'createTraderComplete');
-
-        const result = await createTraderComplete({
+        const result = await createTrader({
           email: formData.email,
           password: formData.password,
           name: formData.name,
@@ -184,12 +178,8 @@ export default function AdminTraderList() {
           telegramGroupLink: formData.telegramGroupLink || '',
           active: formData.active !== undefined ? formData.active : true,
         });
-        
-        if (!result.data.success) {
-          throw new Error(result.data.message || 'Failed to create trader');
-        }
 
-        const uid = result.data.uid;
+        const uid = result.uid;
 
         // Generate USDT address
         try {
