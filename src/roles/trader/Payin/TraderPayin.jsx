@@ -1,10 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, memo } from "react";
-import { db } from "../../../firebase";
-import {
-  collection, query, where, onSnapshot, updateDoc, doc,
-  serverTimestamp, runTransaction, getDocs, orderBy, limit
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from "../../../supabase";
 import {
   CheckCircle, XCircle, Edit, Search, FileText, AlertCircle,
   MoreHorizontal, Download, TrendingUp, RefreshCw, Filter, X,
@@ -240,18 +235,31 @@ export default function TraderPayin() {
   }, [search]);
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-    const fetchComm = async () => {
-      const s = await getDocs(query(collection(db,'trader'), where('uid','==',user.uid)));
-      if (!s.empty) setCommissionRate(s.docs[0].data().commissionRate || 4);
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      // Fetch commission rate
+      const { data: trader } = await supabase.from('traders').select('commission_rate').eq('id', user.id).single();
+      if (trader) setCommissionRate(trader.commission_rate || 4);
+      // Fetch payins
+      const { data: rows } = await supabase
+        .from('payins')
+        .select('*')
+        .eq('trader_id', user.id)
+        .order('requested_at', { ascending: false })
+        .limit(200);
+      setPayins((rows || []).map(r => ({
+        ...r,
+        traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
+        userId: r.merchant_id, transactionId: r.transaction_id,
+        screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
+        requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+        completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
+        rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
+      })));
+      setLoading(false);
     };
-    fetchComm();
-    const unsub = onSnapshot(
-      query(collection(db,"payin"), where("traderId","==",user.uid), orderBy("requestedAt","desc"), limit(200)),
-      snap => { const d=[]; snap.forEach(doc => d.push({id:doc.id,...doc.data()})); setPayins(d); setLoading(false); }
-    );
-    return () => unsub();
+    init();
   }, []);
 
   /* Auto-reject expired */
@@ -261,11 +269,13 @@ export default function TraderPayin() {
       for (const p of payins.filter(p => p.status==='pending' && !p.utrId)) {
         if (p.requestedAt?.seconds && (now - p.requestedAt.seconds*1000)/60000 >= 25) {
           try {
-            await updateDoc(doc(db,"payin",p.id), {
-              status:"rejected", rejectedAt: serverTimestamp(),
-              rejectionReason:"Time expired – UTR not submitted within 25 minutes",
-              autoRejected:true, expiredAt: serverTimestamp()
-            });
+            const ts = new Date().toISOString();
+            await supabase.from('payins').update({
+              status: 'rejected', rejected_at: ts,
+              rejection_reason: 'Time expired – UTR not submitted within 25 minutes',
+              auto_rejected: true, expired_at: ts,
+            }).eq('id', p.id);
+            setPayins(prev => prev.map(x => x.id === p.id ? { ...x, status: 'rejected', autoRejected: true } : x));
           } catch(e) { console.error(e); }
         }
       }
@@ -288,28 +298,32 @@ export default function TraderPayin() {
   const onAccept = useCallback(async (payin) => {
     setProcessing(true);
     try {
-      await runTransaction(db, async (tx) => {
-        const payinRef = doc(db,"payin",payin.id);
-        const comm = Math.round((Number(payin.amount)*commissionRate)/100);
-        tx.update(payinRef, { status:"completed", completedAt: serverTimestamp(), commission: comm });
-        const user = getAuth().currentUser;
-        const tSnap = await getDocs(query(collection(db,'trader'), where('uid','==',user.uid)));
-        if (!tSnap.empty) {
-          const tRef = doc(db,'trader',tSnap.docs[0].id);
-          const td   = tSnap.docs[0].data();
-          tx.update(tRef, {
-            balance: (Number(td.balance)||0) - Number(payin.amount) + comm,
-            overallCommission: (Number(td.overallCommission)||0) + comm,
-          });
+      const comm = Math.round((Number(payin.amount) * commissionRate) / 100);
+      const ts = new Date().toISOString();
+      // Update payin status
+      await supabase.from('payins').update({ status: 'completed', completed_at: ts, commission: comm }).eq('id', payin.id);
+      // Update trader balance
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: td } = await supabase.from('traders').select('balance, overall_commission').eq('id', user.id).single();
+        if (td) {
+          await supabase.from('traders').update({
+            balance: (Number(td.balance) || 0) - Number(payin.amount) + comm,
+            overall_commission: (Number(td.overall_commission) || 0) + comm,
+          }).eq('id', user.id);
         }
-      });
+      }
+      setPayins(prev => prev.map(x => x.id === payin.id ? { ...x, status: 'completed', commission: comm } : x));
     } catch(e) { console.error(e); }
     setProcessing(false);
   }, [commissionRate]);
 
   const onReject = useCallback(async (payin) => {
     setProcessing(true);
-    try { await updateDoc(doc(db,"payin",payin.id), { status:"rejected", rejectedAt: serverTimestamp(), rejectionReason:"Rejected by trader" }); }
+    try {
+      await supabase.from('payins').update({ status: 'rejected', rejected_at: new Date().toISOString(), rejection_reason: 'Rejected by trader' }).eq('id', payin.id);
+      setPayins(prev => prev.map(x => x.id === payin.id ? { ...x, status: 'rejected' } : x));
+    }
     catch(e) { console.error(e); }
     setProcessing(false);
   }, []);
@@ -318,7 +332,11 @@ export default function TraderPayin() {
   const onEditConfirm  = useCallback(async () => {
     if (!editValue||Number(editValue)<1000||Number(editValue)>50000) { alert("Amount must be ₹1,000–₹50,000"); return; }
     setProcessing(true);
-    try { await updateDoc(doc(db,"payin",editingId), { amount: Number(editValue) }); setEditingId(null); setEditValue(""); }
+    try {
+      await supabase.from('payins').update({ amount: Number(editValue) }).eq('id', editingId);
+      setPayins(prev => prev.map(x => x.id === editingId ? { ...x, amount: Number(editValue) } : x));
+      setEditingId(null); setEditValue("");
+    }
     catch(e) { alert("Error: "+e.message); }
     setProcessing(false);
   }, [editValue, editingId]);
@@ -326,13 +344,12 @@ export default function TraderPayin() {
 
   const onViewUser = useCallback(async (userId) => {
     try {
-      const [piS, poS] = await Promise.all([
-        getDocs(query(collection(db,"payin"),  where("userId","==",userId), where("status","==","completed"), orderBy("completedAt","desc"), limit(5))),
-        getDocs(query(collection(db,"payouts"),where("userId","==",userId), where("status","==","completed"), orderBy("completedAt","desc"), limit(5))),
+      const [piRes, poRes] = await Promise.all([
+        supabase.from('payins').select('*').eq('merchant_id', userId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(5),
+        supabase.from('payouts').select('*').eq('merchant_id', userId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(5),
       ]);
-      const pi=[],po=[];
-      piS.forEach(d=>pi.push(d.data())); poS.forEach(d=>po.push(d.data()));
-      setUserModal({ open:true, userId, data:{payins:pi, payouts:po} });
+      const mapTs = r => ({ ...r, completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null });
+      setUserModal({ open:true, userId, data:{ payins: (piRes.data||[]).map(mapTs), payouts: (poRes.data||[]).map(mapTs) } });
     } catch(e) { alert("Error: "+e.message); }
   }, []);
 

@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../../../firebase';
-import {
-  doc, getDoc, updateDoc, collection, query, where, getDocs, onSnapshot,
-  orderBy, limit, addDoc, serverTimestamp,
-} from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   User, Wallet, CreditCard, Activity, ArrowLeft, RefreshCw, Edit, Save,
@@ -54,19 +50,26 @@ function ProfileTab({ trader, onUpdate, saving }) {
       name: trader.name || '',
       email: trader.email || '',
       phone: trader.phone || '',
-      commissionRate: trader.commissionRate || 4,
-      payoutCommission: trader.payoutCommission || 1,
+      commissionRate: trader.payin_commission || trader.commissionRate || 4,
+      payoutCommission: trader.payout_commission || trader.payoutCommission || 1,
       priority: trader.priority || 'Normal',
     });
   }, [trader]);
 
   const handleSave = async () => {
-    await onUpdate(form);
+    await onUpdate({
+      name: form.name,
+      email: form.email,
+      phone: form.phone,
+      payin_commission: Number(form.commissionRate) || 4,
+      payout_commission: Number(form.payoutCommission) || 1,
+      priority: form.priority,
+    });
     setEditing(false);
   };
 
-  const isActive = trader.isActive || trader.status === 'active';
-  const workingBalance = (Number(trader.balance) || 0) - (Number(trader.securityHold) || 0);
+  const isActive = trader.is_active;
+  const workingBalance = (Number(trader.balance) || 0) - (Number(trader.security_hold) || 0);
 
   return (
     <div className="space-y-4">
@@ -96,11 +99,11 @@ function ProfileTab({ trader, onUpdate, saving }) {
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3">
           <p className="text-xs text-slate-400 mb-1">Security Hold</p>
-          <p className="text-lg font-bold text-orange-600">₹{(trader.securityHold || 0).toLocaleString()}</p>
+          <p className="text-lg font-bold text-orange-600">₹{(trader.security_hold || 0).toLocaleString()}</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3">
           <p className="text-xs text-slate-400 mb-1">Total Commission</p>
-          <p className="text-lg font-bold text-purple-600">₹{(trader.overallCommission || 0).toLocaleString()}</p>
+          <p className="text-lg font-bold text-purple-600">₹{(trader.overall_commission || 0).toLocaleString()}</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-3">
           <p className="text-xs text-slate-400 mb-1">Priority</p>
@@ -127,12 +130,12 @@ function ProfileTab({ trader, onUpdate, saving }) {
         </div>
         <div className="p-4 space-y-4">
           {[
-            { key: 'name', label: 'Full Name', icon: User, type: 'text' },
-            { key: 'email', label: 'Email', icon: Mail, type: 'email' },
-            { key: 'phone', label: 'Phone', icon: Phone, type: 'tel' },
-            { key: 'commissionRate', label: 'Payin Commission (%)', icon: DollarSign, type: 'number' },
-            { key: 'payoutCommission', label: 'Payout Commission (%)', icon: DollarSign, type: 'number' },
-            { key: 'priority', label: 'Priority', icon: Shield, type: 'select', options: ['Low', 'Normal', 'High', 'VIP'] },
+            { key: 'name', label: 'Full Name', icon: User, type: 'text', display: trader.name },
+            { key: 'email', label: 'Email', icon: Mail, type: 'email', display: trader.email },
+            { key: 'phone', label: 'Phone', icon: Phone, type: 'tel', display: trader.phone },
+            { key: 'commissionRate', label: 'Payin Commission (%)', icon: DollarSign, type: 'number', display: trader.payin_commission || trader.commissionRate },
+            { key: 'payoutCommission', label: 'Payout Commission (%)', icon: DollarSign, type: 'number', display: trader.payout_commission || trader.payoutCommission },
+            { key: 'priority', label: 'Priority', icon: Shield, type: 'select', options: ['Low', 'Normal', 'High', 'VIP'], display: trader.priority },
           ].map(field => {
             const Icon = field.icon;
             return (
@@ -154,7 +157,7 @@ function ProfileTab({ trader, onUpdate, saving }) {
                         className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
                     )
                   ) : (
-                    <p className="text-sm font-semibold text-slate-900">{trader[field.key] || '—'}{field.key.includes('Commission') && '%'}</p>
+                    <p className="text-sm font-semibold text-slate-900">{field.display || '—'}{field.key.includes('Commission') || field.key === 'commissionRate' ? '%' : ''}</p>
                   )}
                 </div>
               </div>
@@ -167,7 +170,7 @@ function ProfileTab({ trader, onUpdate, saving }) {
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <Calendar className="w-4 h-4" />
-          <span>Created: {trader.createdAt?.seconds ? new Date(trader.createdAt.seconds * 1000).toLocaleDateString('en-IN') : '—'}</span>
+          <span>Created: {trader.created_at ? new Date(trader.created_at).toLocaleDateString('en-IN') : '—'}</span>
         </div>
       </div>
     </div>
@@ -175,22 +178,25 @@ function ProfileTab({ trader, onUpdate, saving }) {
 }
 
 /* ─── Balance Tab ─── */
-function BalanceTab({ trader, setToast }) {
+function BalanceTab({ trader, setToast, onRefresh }) {
   const [amount, setAmount] = useState('');
   const [action, setAction] = useState('topup');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState([]);
 
-  const workingBalance = (Number(trader.balance) || 0) - (Number(trader.securityHold) || 0);
+  const workingBalance = (Number(trader.balance) || 0) - (Number(trader.security_hold) || 0);
 
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'transactions'), where('traderId', '==', trader.id), orderBy('createdAt', 'desc'), limit(20)));
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setHistory(list);
+        const { data } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('trader_id', trader.id)
+          .order('created_at', { ascending: false })
+          .limit(20);
+        setHistory(data || []);
       } catch (e) { console.error(e); }
     };
     if (trader.id) fetchHistory();
@@ -206,7 +212,7 @@ function BalanceTab({ trader, setToast }) {
       const updates = {};
       let txType = '';
       const balanceBefore = Number(trader.balance) || 0;
-      const securityBefore = Number(trader.securityHold) || 0;
+      const securityBefore = Number(trader.security_hold) || 0;
 
       switch (action) {
         case 'topup':
@@ -219,80 +225,56 @@ function BalanceTab({ trader, setToast }) {
           txType = 'admin_deduct';
           break;
         case 'security_add':
-          updates.securityHold = securityBefore + amt;
+          updates.security_hold = securityBefore + amt;
           txType = 'security_hold_add';
           break;
         case 'security_release':
           if (amt > securityBefore) { setToast({ msg: 'Cannot release more than current hold', success: false }); setSaving(false); return; }
-          updates.securityHold = securityBefore - amt;
+          updates.security_hold = securityBefore - amt;
           txType = 'security_hold_release';
           break;
       }
 
-      // Update Firestore
-      await updateDoc(doc(db, 'trader', trader.id), updates);
+      // Update trader
+      await supabase.from('traders').update(updates).eq('id', trader.id);
       
       // Create transaction record
-      await addDoc(collection(db, 'transactions'), { 
-        traderId: trader.id, 
+      await supabase.from('transactions').insert({ 
+        trader_id: trader.id, 
         type: txType, 
         amount: amt, 
         note, 
-        createdAt: serverTimestamp(), 
-        adminAction: true 
+        admin_action: true,
       });
 
-      // 🔥 AUDIT LOG: Balance/Hold Changes (Priority #2)
+      // Audit logs
       switch (action) {
         case 'topup':
-          await logBalanceTopup(
-            trader.id,
-            trader.name || 'Unknown Trader',
-            amt,
-            balanceBefore,
-            updates.balance,
-            note
-          );
+          await logBalanceTopup(trader.id, trader.name || 'Unknown Trader', amt, balanceBefore, updates.balance, note);
           break;
         case 'deduct':
-          await logBalanceDeduct(
-            trader.id,
-            trader.name || 'Unknown Trader',
-            amt,
-            balanceBefore,
-            updates.balance,
-            note
-          );
+          await logBalanceDeduct(trader.id, trader.name || 'Unknown Trader', amt, balanceBefore, updates.balance, note);
           break;
         case 'security_add':
-          await logSecurityHoldAdded(
-            trader.id,
-            trader.name || 'Unknown Trader',
-            amt,
-            securityBefore,
-            updates.securityHold,
-            note
-          );
+          await logSecurityHoldAdded(trader.id, trader.name || 'Unknown Trader', amt, securityBefore, updates.security_hold, note);
           break;
         case 'security_release':
-          await logSecurityHoldReleased(
-            trader.id,
-            trader.name || 'Unknown Trader',
-            amt,
-            securityBefore,
-            updates.securityHold,
-            note
-          );
+          await logSecurityHoldReleased(trader.id, trader.name || 'Unknown Trader', amt, securityBefore, updates.security_hold, note);
           break;
       }
 
       setToast({ msg: 'Balance updated successfully', success: true });
       setAmount(''); setNote('');
+      if (onRefresh) onRefresh();
 
-      const snap = await getDocs(query(collection(db, 'transactions'), where('traderId', '==', trader.id), orderBy('createdAt', 'desc'), limit(20)));
-      const list = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-      setHistory(list);
+      // Refresh history
+      const { data } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('trader_id', trader.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setHistory(data || []);
     } catch (e) { console.error(e); setToast({ msg: 'Failed to update balance', success: false }); }
     setSaving(false);
   };
@@ -306,7 +288,7 @@ function BalanceTab({ trader, setToast }) {
         </div>
         <div className="bg-gradient-to-br from-orange-500 to-amber-600 rounded-xl p-4 text-white">
           <p className="text-orange-100 text-xs font-semibold mb-1">Security Hold</p>
-          <p className="text-2xl font-bold">₹{(trader.securityHold || 0).toLocaleString()}</p>
+          <p className="text-2xl font-bold">₹{(trader.security_hold || 0).toLocaleString()}</p>
         </div>
       </div>
 
@@ -367,7 +349,7 @@ function BalanceTab({ trader, setToast }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-slate-900 capitalize">{tx.type?.replace(/_/g, ' ') || 'Transaction'}</p>
-                <p className="text-xs text-slate-400">{tx.createdAt?.seconds ? new Date(tx.createdAt.seconds * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</p>
+                <p className="text-xs text-slate-400">{tx.created_at ? new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</p>
               </div>
               <p className={`text-sm font-bold ${tx.type?.includes('topup') || tx.type?.includes('release') ? 'text-green-600' : 'text-red-600'}`}>
                 {tx.type?.includes('topup') || tx.type?.includes('release') ? '+' : '−'}₹{(Number(tx.amount) || 0).toLocaleString()}
@@ -441,16 +423,16 @@ function ActivityTab({ trader }) {
   useEffect(() => {
     const fetchActivity = async () => {
       try {
-        const [payinsSnap, payoutsSnap, disputesSnap] = await Promise.all([
-          getDocs(query(collection(db, 'payin'), where('traderId', '==', trader.id), orderBy('requestedAt', 'desc'), limit(10))),
-          getDocs(query(collection(db, 'payouts'), where('traderId', '==', trader.id), orderBy('createdAt', 'desc'), limit(10))),
-          getDocs(query(collection(db, 'disputes'), where('traderId', '==', trader.id), orderBy('createdAt', 'desc'), limit(10))),
+        const [payinsRes, payoutsRes, disputesRes] = await Promise.all([
+          supabase.from('payins').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(10),
+          supabase.from('payouts').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(10),
+          supabase.from('disputes').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(10),
         ]);
-        const payins = [], payouts = [], disputes = [];
-        payinsSnap.forEach(d => payins.push({ id: d.id, ...d.data() }));
-        payoutsSnap.forEach(d => payouts.push({ id: d.id, ...d.data() }));
-        disputesSnap.forEach(d => disputes.push({ id: d.id, ...d.data() }));
-        setActivity({ payins, payouts, disputes });
+        setActivity({
+          payins: payinsRes.data || [],
+          payouts: payoutsRes.data || [],
+          disputes: disputesRes.data || [],
+        });
       } catch (e) { console.error(e); }
       setLoading(false);
     };
@@ -484,7 +466,7 @@ function ActivityTab({ trader }) {
                       ₹{(Number(p.amount) || 0).toLocaleString()}
                     </p>
                     <p className="text-xs text-slate-400">
-                      {(p.requestedAt || p.createdAt)?.seconds ? new Date((p.requestedAt || p.createdAt).seconds * 1000).toLocaleDateString('en-IN') : '—'}
+                      {p.created_at ? new Date(p.created_at).toLocaleDateString('en-IN') : '—'}
                     </p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
@@ -512,27 +494,28 @@ export default function AdminTraderDetail() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
+  const fetchTrader = async () => {
     if (!id) return;
-    const unsub = onSnapshot(doc(db, 'trader', id), (snap) => {
-      if (snap.exists()) setTrader({ id: snap.id, ...snap.data() });
-      else setTrader(null);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [id]);
+    const { data, error } = await supabase
+      .from('traders')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) { console.error(error); setTrader(null); }
+    else setTrader(data);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchTrader(); }, [id]);
 
   const handleUpdate = async (updates) => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'trader', id), updates);
+      await supabase.from('traders').update(updates).eq('id', id);
       
-      // 🔥 AUDIT LOG: Trader Profile Updates (Week 3)
-      // Check which fields were updated (excluding status changes, those are logged separately)
+      // Audit log for profile updates
       const changedFields = Object.keys(updates).filter(key => 
-        key !== 'isActive' && 
-        key !== 'status' && 
-        updates[key] !== trader[key]
+        key !== 'is_active' && updates[key] !== trader[key]
       );
       
       if (changedFields.length > 0) {
@@ -556,28 +539,23 @@ export default function AdminTraderDetail() {
       }
       
       setToast({ msg: 'Trader updated successfully', success: true });
+      fetchTrader();
     } catch (e) { console.error(e); setToast({ msg: 'Failed to update trader', success: false }); }
     setSaving(false);
   };
 
   const handleToggleStatus = async () => {
-    const newStatus = !(trader.isActive || trader.status === 'active');
-    await handleUpdate({ isActive: newStatus, status: newStatus ? 'active' : 'inactive' });
+    const newStatus = !trader.is_active;
+    await supabase.from('traders').update({ is_active: newStatus }).eq('id', id);
     
-    // 🔥 AUDIT LOG: Trader Activation/Deactivation (Week 3)
     if (newStatus) {
-      await logTraderActivated(
-        trader.id,
-        trader.name || 'Unknown Trader',
-        'Admin toggled trader to active status'
-      );
+      await logTraderActivated(trader.id, trader.name || 'Unknown Trader', 'Admin toggled trader to active status');
     } else {
-      await logTraderDeactivated(
-        trader.id,
-        trader.name || 'Unknown Trader',
-        'Admin toggled trader to inactive status'
-      );
+      await logTraderDeactivated(trader.id, trader.name || 'Unknown Trader', 'Admin toggled trader to inactive status');
     }
+    
+    setToast({ msg: `Trader ${newStatus ? 'activated' : 'deactivated'}`, success: true });
+    fetchTrader();
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><RefreshCw className="w-10 h-10 text-indigo-500 animate-spin" /></div>;
@@ -589,7 +567,7 @@ export default function AdminTraderDetail() {
     </div>
   );
 
-  const isActive = trader.isActive || trader.status === 'active';
+  const isActive = trader.is_active;
   const upiCount = (trader.currentMerchantUpis?.length || 0) + (trader.corporateMerchantUpis?.length || 0) + (trader.normalUpis?.length || 0) + (trader.bigUpis?.length || 0) + (trader.impsAccounts?.length || 0);
 
   return (
@@ -617,7 +595,7 @@ export default function AdminTraderDetail() {
       </div>
 
       {activeTab === 'profile' && <ProfileTab trader={trader} onUpdate={handleUpdate} saving={saving} />}
-      {activeTab === 'balance' && <BalanceTab trader={trader} setToast={setToast} />}
+      {activeTab === 'balance' && <BalanceTab trader={trader} setToast={setToast} onRefresh={fetchTrader} />}
       {activeTab === 'upis' && <UPIsTab trader={trader} />}
       {activeTab === 'activity' && <ActivityTab trader={trader} />}
     </div>

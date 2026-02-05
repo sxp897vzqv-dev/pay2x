@@ -1,8 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import {
-  collection, query, doc, updateDoc, onSnapshot, orderBy, limit, deleteDoc, serverTimestamp,
-} from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { supabase } from '../../../supabase';
+import '../../../firebase'; // Keep Firebase app init for Cloud Functions
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -23,12 +21,6 @@ import MerchantCard from './components/MerchantCard';
 // Initialize Firebase Functions
 const functions = getFunctions();
 
-// ═══════════════════════════════════════════════════════════════
-// IMPORTANT: Change this to match your Firestore collection name
-// Common names: 'merchant', 'merchants', 'Merchant'
-// ═══════════════════════════════════════════════════════════════
-const MERCHANT_COLLECTION = 'merchant';  // ← Change if needed
-
 /* ─── Generate API Keys ─── */
 function generateApiKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -44,6 +36,28 @@ function generateSecretKey() {
   return key;
 }
 
+/* ─── Map Supabase row → camelCase for child components ─── */
+const mapMerchant = (row) => ({
+  ...row,
+  isActive: row.is_active,
+  active: row.is_active,
+  status: row.is_active ? 'active' : 'inactive',
+  businessName: row.business_name,
+  payinCommission: row.payin_commission,
+  payoutCommission: row.payout_commission,
+  liveApiKey: row.live_api_key,
+  apiKey: row.live_api_key,
+  webhookUrl: row.webhook_url,
+  webhookSecret: row.webhook_secret,
+  callbackUrl: row.callback_url,
+  totalVolume: row.total_volume || 0,
+  totalOrders: row.total_orders || 0,
+  successRate: row.success_rate || 0,
+  disputeCount: row.dispute_count || 0,
+  createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+  updatedAt: row.updated_at ? { seconds: new Date(row.updated_at).getTime() / 1000 } : null,
+});
+
 /* ─── Main Component ─── */
 export default function AdminMerchantList() {
   const [merchants, setMerchants] = useState([]);
@@ -55,37 +69,23 @@ export default function AdminMerchantList() {
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, MERCHANT_COLLECTION), orderBy('createdAt', 'desc'), limit(100)),
-      (snap) => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setMerchants(list);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Error loading merchants:', error);
-        // Try without orderBy (in case createdAt doesn't exist)
-        const unsubRetry = onSnapshot(
-          query(collection(db, MERCHANT_COLLECTION), limit(100)),
-          (snap) => {
-            const list = [];
-            snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-            setMerchants(list);
-            setLoading(false);
-          },
-          (err) => {
-            console.error('Still failing:', err);
-            setToast({ msg: 'Error loading merchants: ' + err.message, success: false });
-            setLoading(false);
-          }
-        );
-        return () => unsubRetry();
-      }
-    );
-    return () => unsub();
+  const fetchMerchants = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('merchants')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      console.error('Error loading merchants:', error);
+      setToast({ msg: 'Error loading merchants: ' + error.message, success: false });
+      setLoading(false);
+      return;
+    }
+    setMerchants((data || []).map(mapMerchant));
+    setLoading(false);
   }, []);
+
+  useEffect(() => { fetchMerchants(); }, [fetchMerchants]);
 
   const filtered = useMemo(() => {
     let result = merchants;
@@ -116,20 +116,17 @@ export default function AdminMerchantList() {
       if (selectedMerchant) {
         const { password, ...updateData } = formData;
 
-        await updateDoc(doc(db, MERCHANT_COLLECTION, selectedMerchant.id), {
+        await supabase.from('merchants').update({
           name: updateData.name || updateData.businessName,
-          businessName: updateData.businessName || updateData.name,
+          business_name: updateData.businessName || updateData.name,
           phone: updateData.phone || '',
           website: updateData.website || '',
-          callbackUrl: updateData.callbackUrl || '',
-          webhookUrl: updateData.webhookUrl || '',
-          payinCommission: Number(updateData.payinCommission) || 2,
-          payoutCommission: Number(updateData.payoutCommission) || 1,
-          active: updateData.active,
-          isActive: updateData.active,
-          status: updateData.active ? 'active' : 'inactive',
-          updatedAt: serverTimestamp(),
-        });
+          callback_url: updateData.callbackUrl || '',
+          webhook_url: updateData.webhookUrl || '',
+          payin_commission: Number(updateData.payinCommission) || 2,
+          payout_commission: Number(updateData.payoutCommission) || 1,
+          is_active: updateData.active,
+        }).eq('id', selectedMerchant.id);
 
         setToast({ msg: '✅ Merchant updated successfully!', success: true });
       } else {
@@ -154,51 +151,35 @@ export default function AdminMerchantList() {
           setToast({ msg: '✅ Merchant created successfully!', success: true });
 
         } catch (cfError) {
-          console.warn('Cloud Function failed, creating directly in Firestore:', cfError);
-          
-          // Fallback: Create directly in Firestore (won't create Auth user)
-          const { addDoc } = await import('firebase/firestore');
+          console.warn('Cloud Function failed, creating directly in Supabase:', cfError);
           
           const apiKey = generateApiKey();
           const secretKey = generateSecretKey();
 
-          const merchantData = {
+          const { error } = await supabase.from('merchants').insert({
             email: formData.email,
             name: formData.name || formData.businessName,
-            businessName: formData.businessName || formData.name,
+            business_name: formData.businessName || formData.name,
             phone: formData.phone || '',
             website: formData.website || '',
-            callbackUrl: formData.callbackUrl || '',
-            webhookUrl: formData.webhookUrl || '',
-            payinCommission: Number(formData.payinCommission) || 2,
-            payoutCommission: Number(formData.payoutCommission) || 1,
-            active: formData.active !== undefined ? formData.active : true,
-            isActive: formData.active !== undefined ? formData.active : true,
-            status: formData.active ? 'active' : 'inactive',
-            role: 'merchant',
-            userType: 'merchant',
-            apiKey: apiKey,
-            secretKey: secretKey,
-            totalOrders: 0,
-            totalVolume: 0,
-            successRate: 0,
-            disputeCount: 0,
+            callback_url: formData.callbackUrl || '',
+            webhook_url: formData.webhookUrl || '',
+            payin_commission: Number(formData.payinCommission) || 2,
+            payout_commission: Number(formData.payoutCommission) || 1,
+            is_active: formData.active !== undefined ? formData.active : true,
+            live_api_key: apiKey,
+            webhook_secret: secretKey,
             balance: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          };
+          });
 
-          const docRef = await addDoc(collection(db, MERCHANT_COLLECTION), merchantData);
-          
-          // Update with uid
-          await updateDoc(doc(db, MERCHANT_COLLECTION, docRef.id), { uid: docRef.id });
-
+          if (error) throw error;
           setToast({ msg: '✅ Merchant created! Note: Auth account not created (Cloud Function needed)', success: true });
         }
       }
 
       setShowModal(false);
       setSelectedMerchant(null);
+      fetchMerchants();
     } catch (error) {
       console.error('Error saving merchant:', error);
       throw error;
@@ -210,7 +191,7 @@ export default function AdminMerchantList() {
     if (!window.confirm(`Delete ${merchant.businessName || merchant.name}?\n\nThis cannot be undone.`)) return;
 
     try {
-      await deleteDoc(doc(db, MERCHANT_COLLECTION, merchant.id));
+      await supabase.from('merchants').delete().eq('id', merchant.id);
       
       await logDataDeleted(
         'merchant',
@@ -220,6 +201,7 @@ export default function AdminMerchantList() {
       );
       
       setToast({ msg: '✅ Merchant deleted', success: true });
+      fetchMerchants();
     } catch (error) {
       setToast({ msg: '❌ Error: ' + error.message, success: false });
     }
@@ -229,12 +211,11 @@ export default function AdminMerchantList() {
   const handleToggleStatus = async (merchant) => {
     const isActive = merchant.active || merchant.isActive || merchant.status === 'active';
     try {
-      await updateDoc(doc(db, MERCHANT_COLLECTION, merchant.id), {
-        active: !isActive,
-        isActive: !isActive,
-        status: !isActive ? 'active' : 'inactive',
-      });
+      await supabase.from('merchants').update({
+        is_active: !isActive,
+      }).eq('id', merchant.id);
       setToast({ msg: `Merchant ${!isActive ? 'activated' : 'deactivated'}`, success: true });
+      fetchMerchants();
     } catch (error) {
       setToast({ msg: 'Error: ' + error.message, success: false });
     }

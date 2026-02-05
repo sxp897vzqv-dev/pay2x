@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { getAuth, signOut } from 'firebase/auth';
-import { query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Building2,
   AlertCircle, Wallet, LogOut, Menu, X, User,
@@ -61,47 +59,61 @@ const allSidebarLinks = [...bottomLinks, ...drawerOnlyLinks];
 export default function TraderLayout() {
   const [sidebarOpen, setSidebarOpen]       = useState(false);
   const [traderInfo, setTraderInfo]         = useState(null);
-  const [workingBalance, setWorkingBalance] = useState(0);   // ← derived state
+  const [workingBalance, setWorkingBalance] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => { 
-    const unsubscribe = setupTraderListener();
-    return () => { if (unsubscribe) unsubscribe(); };
-  }, []);
-  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    let channel;
 
-  // 🔒 Real-time listener - auto logout if account becomes inactive
-  const setupTraderListener = () => {
-    const user = getAuth().currentUser;
-    if (!user) return null;
-    
-    const q = query(collection(db, 'trader'), where('uid', '==', user.uid));
-    
-    return onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const d = snap.docs[0].data();
-        
-        // 🔒 CHECK IF ACCOUNT IS STILL ACTIVE
-        const isActive = d.isActive === true || d.status === 'active';
+    const setup = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Initial fetch
+      const { data: trader } = await supabase
+        .from('traders')
+        .select('*')
+        .eq('profile_id', user.id)
+        .single();
+
+      if (trader) {
+        const isActive = trader.is_active === true;
         if (!isActive) {
-          // Account deactivated - force logout
           alert('Your account has been deactivated. Please contact admin.');
           handleLogout();
           return;
         }
-        
-        setTraderInfo(d);
-        /* ✅ BUG FIX: no `workingBalance` field in Firestore — derive it */
-        setWorkingBalance((Number(d.balance) || 0) - (Number(d.securityHold) || 0));
+        setTraderInfo(trader);
+        setWorkingBalance((Number(trader.balance) || 0) - (Number(trader.security_hold) || 0));
       }
-    }, (error) => {
-      console.error('Trader listener error:', error);
-    });
-  };
+
+      // Real-time subscription for active status changes
+      channel = supabase.channel('trader-layout')
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'traders',
+          filter: `profile_id=eq.${user.id}`
+        }, (payload) => {
+          const d = payload.new;
+          if (!d.is_active) {
+            alert('Your account has been deactivated. Please contact admin.');
+            handleLogout();
+            return;
+          }
+          setTraderInfo(d);
+          setWorkingBalance((Number(d.balance) || 0) - (Number(d.security_hold) || 0));
+        })
+        .subscribe();
+    };
+
+    setup();
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
   const handleLogout = async () => {
-    try { await signOut(getAuth()); navigate('/signin'); }
+    try { await supabase.auth.signOut(); navigate('/signin'); }
     catch (e) { alert('Logout failed: ' + e.message); }
   };
 
@@ -143,7 +155,6 @@ export default function TraderLayout() {
             <Menu className="w-5 h-5 text-slate-700" />
           </button>
           <h1 className="text-sm font-bold text-slate-900 tracking-tight">{currentTitle}</h1>
-          {/* ✅ displays computed workingBalance */}
           <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-1">
             <span className="text-xs font-bold text-green-700">₹{workingBalance.toLocaleString()}</span>
           </div>
@@ -164,7 +175,6 @@ export default function TraderLayout() {
           </div>
         </div>
 
-        {/* ✅ computed workingBalance */}
         {traderInfo && (
           <div className="mx-4 mt-4 bg-white/10 backdrop-blur-sm rounded-xl p-3">
             <div className="flex items-center gap-2 text-white mb-1.5">
@@ -189,7 +199,6 @@ export default function TraderLayout() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden anim-fade">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          {/* ✅ slide-in-left keyframe animation */}
           <div className="absolute inset-y-0 left-0 w-72 bg-gradient-to-b from-green-600 via-emerald-600 to-teal-700 shadow-2xl flex flex-col anim-slide-left" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
             <div className="flex items-center justify-between px-5 pt-4 pb-4">
               <div className="flex items-center gap-3">
@@ -203,7 +212,6 @@ export default function TraderLayout() {
               </button>
             </div>
 
-            {/* ✅ computed workingBalance */}
             {traderInfo && (
               <div className="mx-4 mb-2 bg-white/10 rounded-xl p-3">
                 <div className="flex items-center gap-2 text-white mb-1">
@@ -243,7 +251,6 @@ export default function TraderLayout() {
             const isActive = location.pathname.startsWith(link.to);
             return (
               <NavLink key={link.to} to={link.to} className="flex-1 flex flex-col items-center gap-0.5">
-                {/* ✅ pill bg, 44px-wide touch target */}
                 <div
                   className="flex items-center justify-center rounded-full transition-colors duration-200"
                   style={{ width: 44, height: 26, backgroundColor: isActive ? '#dcfce7' : 'transparent' }}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import { Bell, AlertCircle, TrendingDown, TrendingUp, X } from 'lucide-react';
 
 const LAST_SEEN_KEY = 'pay2x_notif_last_seen';
@@ -50,50 +49,24 @@ export default function NotificationCenter() {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // Real-time listeners
+  // Fetch notifications (polling instead of real-time for now)
   useEffect(() => {
-    const unsubs = [];
-
-    // Disputes
-    try {
-      const dq = query(
-        collection(db, 'disputes'),
-        where('status', 'in', ['pending', 'routed_to_trader', 'trader_accepted', 'trader_rejected']),
-        orderBy('createdAt', 'desc'),
-        limit(10)
-      );
-      unsubs.push(onSnapshot(dq, (snap) => {
-        setDisputes(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }, (err) => console.warn('Disputes listener error:', err)));
-    } catch (e) { console.warn('Disputes query error:', e); }
-
-    // Payouts
-    try {
-      const pq = query(
-        collection(db, 'payouts'),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc'),
-        limit(10)
-      );
-      unsubs.push(onSnapshot(pq, (snap) => {
-        setPayouts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }, (err) => console.warn('Payouts listener error:', err)));
-    } catch (e) { console.warn('Payouts query error:', e); }
-
-    // Payins
-    try {
-      const iq = query(
-        collection(db, 'payin'),
-        where('status', '==', 'pending'),
-        orderBy('requestedAt', 'desc'),
-        limit(10)
-      );
-      unsubs.push(onSnapshot(iq, (snap) => {
-        setPayins(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }, (err) => console.warn('Payins listener error:', err)));
-    } catch (e) { console.warn('Payins query error:', e); }
-
-    return () => unsubs.forEach((u) => u && u());
+    const fetchNotifications = async () => {
+      try {
+        const [dRes, pRes, iRes] = await Promise.all([
+          supabase.from('disputes').select('*').in('status', ['pending', 'routed_to_trader', 'trader_accepted', 'trader_rejected']).order('created_at', { ascending: false }).limit(10),
+          supabase.from('payouts').select('*').eq('status', 'pending').order('created_at', { ascending: false }).limit(10),
+          supabase.from('payins').select('*').eq('status', 'pending').order('created_at', { ascending: false }).limit(10),
+        ]);
+        const mapTs = (r) => ({ ...r, createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null, requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null });
+        setDisputes((dRes.data || []).map(mapTs));
+        setPayouts((pRes.data || []).map(mapTs));
+        setPayins((iRes.data || []).map(mapTs));
+      } catch (e) { console.warn('Notification fetch error:', e); }
+    };
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000); // Poll every 30s
+    return () => clearInterval(interval);
   }, []);
 
   // Count new items since last seen

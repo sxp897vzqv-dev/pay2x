@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, storage } from '../../firebase';
-import {
-  collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, orderBy, limit,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   AlertCircle, Plus, Search, Filter, X,
   RefreshCw,
@@ -21,19 +16,19 @@ export default function MerchantDispute() {
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
-    const unsub = onSnapshot(
-      query(collection(db, 'merchantDisputes'), where('merchantId', '==', user.uid), orderBy('createdAt', 'desc'), limit(200)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setDisputes(list);
-        setLoading(false);
-      }
-    );
-    return () => unsub();
+    const fetchDisputes = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('disputes').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(200);
+      setDisputes((data || []).map(d => ({
+        ...d,
+        merchantId: d.merchant_id, disputeId: d.dispute_id,
+        transactionId: d.transaction_id, evidenceUrl: d.evidence_url,
+        createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
+      })));
+      setLoading(false);
+    };
+    fetchDisputes();
   }, []);
 
   const filtered = useMemo(() => {
@@ -59,27 +54,29 @@ export default function MerchantDispute() {
   }), [disputes]);
 
   const handleCreateDispute = async (formData, evidence) => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     let evidenceUrl = null;
     if (evidence) {
-      const storageRef = ref(storage, `dispute-evidence/${Date.now()}_${evidence.name}`);
-      await uploadBytes(storageRef, evidence);
-      evidenceUrl = await getDownloadURL(storageRef);
+      const filename = `${Date.now()}_${evidence.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('dispute-proofs').upload(filename, evidence);
+      if (!upErr) {
+        const { data: urlData } = supabase.storage.from('dispute-proofs').getPublicUrl(filename);
+        evidenceUrl = urlData.publicUrl;
+      }
     }
 
-    await addDoc(collection(db, 'merchantDisputes'), {
-      merchantId: user.uid,
-      disputeId: 'DSP' + Date.now(),
-      transactionId: formData.transactionId,
+    await supabase.from('disputes').insert({
+      merchant_id: user.id,
+      dispute_id: 'DSP' + Date.now(),
+      transaction_id: formData.transactionId,
       amount: Number(formData.amount),
       reason: formData.reason,
       type: formData.type,
-      evidenceUrl,
+      evidence_url: evidenceUrl,
       status: 'open',
-      createdAt: serverTimestamp(),
-      deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+      deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
     setShowModal(false);

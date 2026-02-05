@@ -1,9 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import {
-  collection, query, onSnapshot, orderBy, where, getDocs, doc, updateDoc, deleteDoc, serverTimestamp, limit,
-} from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { supabase } from '../../../supabase';
 import { useSearchParams } from 'react-router-dom';
 import {
   TrendingDown, Filter, Download, RefreshCw, User, Calendar, Clock,
@@ -20,8 +16,7 @@ import PayoutDetailsModal from './components/PayoutDetailsModal';
 /* ─── Main Component ─── */
 export default function AdminPayouts() {
   const [searchParams] = useSearchParams();
-  const auth = getAuth();
-  const adminId = auth.currentUser?.uid;
+  const [adminId, setAdminId] = useState(null);
 
   const [payouts, setPayouts] = useState([]);
   const [waitingRequests, setWaitingRequests] = useState([]);
@@ -38,92 +33,100 @@ export default function AdminPayouts() {
   const [modalType, setModalType] = useState('payout');
   const traderFilter = searchParams.get('trader');
 
-  // Fetch payouts with limit
+  // Get admin ID from Supabase auth
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAdminId(session?.user?.id || null);
+    });
+  }, []);
+
+  // Fetch payouts
+  const fetchPayouts = useCallback(async () => {
     setLoading(true);
     setError(null);
-    
-    let q;
-    if (traderFilter) {
-      q = query(collection(db, 'payouts'), where('traderId', '==', traderFilter), limit(200));
-    } else {
-      q = query(collection(db, 'payouts'), limit(200));
-    }
-
-    const unsub = onSnapshot(q,
-      (snap) => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        
-        // Sort client-side by createdAt or assignedAt (newest first)
-        list.sort((a, b) => {
-          const timeA = (a.createdAt?.seconds || a.assignedAt?.seconds || 0);
-          const timeB = (b.createdAt?.seconds || b.assignedAt?.seconds || 0);
-          return timeB - timeA;
-        });
-        
-        setPayouts(list);
-        setLoading(false);
-      },
-      (err) => {
-        setError(`Failed to load payouts: ${err.message}`);
-        setLoading(false);
+    try {
+      let q = supabase.from('payouts').select('*').limit(200);
+      if (traderFilter) {
+        q = q.eq('trader_id', traderFilter);
       }
-    );
 
-    return () => unsub();
+      const { data, error: fetchError } = await q;
+      if (fetchError) throw fetchError;
+
+      const list = data || [];
+      // Sort client-side by created_at or assigned_at (newest first)
+      list.sort((a, b) => {
+        const timeA = new Date(a.created_at || a.assigned_at || 0).getTime();
+        const timeB = new Date(b.created_at || b.assigned_at || 0).getTime();
+        return timeB - timeA;
+      });
+
+      setPayouts(list);
+    } catch (err) {
+      setError(`Failed to load payouts: ${err.message}`);
+    }
+    setLoading(false);
   }, [traderFilter]);
 
-  // Fetch waiting requests with limit
   useEffect(() => {
-    const q = query(collection(db, 'payoutRequest'), limit(50));
-    
-    const unsub = onSnapshot(q,
-      async (snap) => {
-        const requests = [];
-        
-        for (const docSnap of snap.docs) {
-          const data = { id: docSnap.id, ...docSnap.data() };
-          
-          const isWaiting = 
-            (data.status === 'waiting') ||
-            (data.status === 'partially_assigned') ||
-            (data.inWaitingList === true) ||
-            (data.remainingAmount > 0 && data.status !== 'completed' && data.status !== 'cancelled');
-          
-          if (!isWaiting) continue;
-          
-          if (data.traderId) {
-            try {
-              const traderQ = query(collection(db, 'trader'), where('uid', '==', data.traderId));
-              const traderSnap = await getDocs(traderQ);
-              if (!traderSnap.empty) {
-                data.trader = traderSnap.docs[0].data();
-              }
-            } catch (_err) {
-              // Trader lookup failed, continue without trader info
-            }
-          }
-          
-          requests.push(data);
-        }
-        
-        // Sort by requestedAt (oldest first - FIFO)
-        requests.sort((a, b) => {
-          const timeA = a.requestedAt?.seconds || 0;
-          const timeB = b.requestedAt?.seconds || 0;
-          return timeA - timeB;
-        });
-        
-        setWaitingRequests(requests);
-      },
-      (_err) => {
-        // Don't set error state - waiting list is optional
-      }
-    );
+    fetchPayouts();
+  }, [fetchPayouts]);
 
-    return () => unsub();
+  // Fetch waiting requests
+  const fetchWaitingRequests = useCallback(async () => {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('payout_requests')
+        .select('*')
+        .limit(50);
+
+      if (fetchError) throw fetchError;
+
+      const requests = [];
+      for (const row of (data || [])) {
+        const isWaiting =
+          (row.status === 'waiting') ||
+          (row.status === 'partially_assigned') ||
+          (row.in_waiting_list === true) ||
+          (row.remaining_amount > 0 && row.status !== 'completed' && row.status !== 'cancelled');
+
+        if (!isWaiting) continue;
+
+        // Lookup trader info if trader_id exists
+        if (row.trader_id) {
+          try {
+            const { data: traderData } = await supabase
+              .from('traders')
+              .select('*')
+              .eq('id', row.trader_id)
+              .single();
+            if (traderData) {
+              row.trader = traderData;
+            }
+          } catch (_err) {
+            // Trader lookup failed, continue without trader info
+          }
+        }
+
+        requests.push(row);
+      }
+
+      // Sort by created_at (oldest first - FIFO)
+      requests.sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeA - timeB;
+      });
+
+      setWaitingRequests(requests);
+    } catch (_err) {
+      // Don't set error state - waiting list is optional
+    }
   }, []);
+
+  useEffect(() => {
+    fetchWaitingRequests();
+  }, [fetchWaitingRequests]);
 
   // Computed Data
   const assignedPayouts = useMemo(() => {
@@ -149,7 +152,7 @@ export default function AdminPayouts() {
   const overduePayouts = useMemo(() => {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     return assignedPayouts.filter(p => {
-      const assignedTime = p.assignedAt?.seconds ? p.assignedAt.seconds * 1000 : 0;
+      const assignedTime = p.assigned_at ? new Date(p.assigned_at).getTime() : 0;
       return assignedTime > 0 && assignedTime < oneHourAgo;
     });
   }, [assignedPayouts]);
@@ -157,7 +160,7 @@ export default function AdminPayouts() {
   // Stats
   const stats = useMemo(() => ({
     waiting: waitingRequests.length,
-    waitingAmount: waitingRequests.reduce((sum, r) => sum + (Number(r.remainingAmount) || Number(r.requestedAmount) || 0), 0),
+    waitingAmount: waitingRequests.reduce((sum, r) => sum + (Number(r.remaining_amount) || Number(r.amount) || 0), 0),
     pending: pendingPayouts.length,
     pendingAmount: pendingPayouts.reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
     assigned: assignedPayouts.length,
@@ -189,11 +192,11 @@ export default function AdminPayouts() {
       const s = search.toLowerCase();
       data = data.filter(p => 
         p.id?.toLowerCase().includes(s) || 
-        p.utrId?.toLowerCase().includes(s) || 
-        p.traderId?.toLowerCase().includes(s) || 
-        p.userId?.toLowerCase().includes(s) ||
-        p.upiId?.toLowerCase().includes(s) || 
-        p.accountNumber?.toLowerCase().includes(s) ||
+        p.utr?.toLowerCase().includes(s) || 
+        p.trader_id?.toLowerCase().includes(s) || 
+        p.merchant_id?.toLowerCase().includes(s) ||
+        p.upi_id?.toLowerCase().includes(s) || 
+        p.account_number?.toLowerCase().includes(s) ||
         p.amount?.toString().includes(s)
       );
     }
@@ -201,14 +204,14 @@ export default function AdminPayouts() {
     if (dateFrom) {
       const fromTime = new Date(dateFrom).getTime();
       data = data.filter(p => {
-        const time = (p.createdAt?.seconds || p.assignedAt?.seconds || 0) * 1000;
+        const time = (p.created_at || p.assigned_at) ? new Date(p.created_at || p.assigned_at).getTime() : 0;
         return time >= fromTime;
       });
     }
     if (dateTo) {
       const toTime = new Date(dateTo).getTime() + 86399999;
       data = data.filter(p => {
-        const time = (p.createdAt?.seconds || p.assignedAt?.seconds || 0) * 1000;
+        const time = (p.created_at || p.assigned_at) ? new Date(p.created_at || p.assigned_at).getTime() : 0;
         return time <= toTime;
       });
     }
@@ -225,8 +228,10 @@ export default function AdminPayouts() {
     if (!window.confirm(`⚠️ Permanently remove payout?\n\nAmount: ₹${payout.amount?.toLocaleString()}\n\nThis cannot be undone.`)) return;
     setProcessing(true);
     try {
-      await deleteDoc(doc(db, 'payouts', payout.id));
+      const { error: deleteError } = await supabase.from('payouts').delete().eq('id', payout.id);
+      if (deleteError) throw deleteError;
       setToast({ msg: '✅ Payout removed', success: true });
+      fetchPayouts(); // Refresh list
     } catch (err) {
       setToast({ msg: '❌ Error: ' + err.message, success: false });
     }
@@ -237,15 +242,14 @@ export default function AdminPayouts() {
     if (!window.confirm(`Reassign payout to pool?\n\nAmount: ₹${payout.amount?.toLocaleString()}\n\nThis will make it available for assignment again.`)) return;
     setProcessing(true);
     try {
-      await updateDoc(doc(db, 'payouts', payout.id), { 
+      const { error: updateError } = await supabase.from('payouts').update({ 
         status: 'pending', 
-        traderId: null, 
-        assignedAt: null, 
-        cancelReason: null, 
-        reassignedAt: serverTimestamp(), 
-        reassignedBy: adminId 
-      });
+        trader_id: null, 
+        assigned_at: null,
+      }).eq('id', payout.id);
+      if (updateError) throw updateError;
       setToast({ msg: '✅ Payout returned to pool', success: true });
+      fetchPayouts(); // Refresh list
     } catch (err) {
       setToast({ msg: '❌ Error: ' + err.message, success: false });
     }
@@ -263,11 +267,11 @@ export default function AdminPayouts() {
     
     const exportData = activeTab === 'waiting' ? waitingRequests : currentData;
     const headers = activeTab === 'waiting' 
-      ? ['ID', 'Trader ID', 'Trader Name', 'Requested', 'Assigned', 'Remaining', 'Status', 'Date'] 
-      : ['ID', 'Amount', 'Status', 'Trader ID', 'User ID', 'UPI/Account', 'UTR', 'Date'];
+      ? ['ID', 'Trader ID', 'Trader Name', 'Amount', 'Status', 'Date'] 
+      : ['ID', 'Amount', 'Status', 'Trader ID', 'Merchant ID', 'UPI/Account', 'UTR', 'Date'];
     const rows = exportData.map(item => activeTab === 'waiting'
-      ? [item.id, item.traderId || '', item.trader?.name || '', Number(item.requestedAmount) || 0, Number(item.assignedAmount) || 0, Number(item.remainingAmount) || 0, item.status || '', item.requestedAt?.seconds ? new Date(item.requestedAt.seconds * 1000).toISOString() : '']
-      : [item.id, Number(item.amount) || 0, item.status || '', item.traderId || '', item.userId || '', item.upiId || item.accountNumber || '', item.utrId || '', item.createdAt?.seconds ? new Date(item.createdAt.seconds * 1000).toISOString() : '']);
+      ? [item.id, item.trader_id || '', item.trader?.name || '', Number(item.amount) || 0, item.status || '', item.created_at || '']
+      : [item.id, Number(item.amount) || 0, item.status || '', item.trader_id || '', item.merchant_id || '', item.upi_id || item.account_number || '', item.utr || '', item.created_at || '']);
     const csv = [headers, ...rows.map(r => r.map(escapeCSV))].map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -315,7 +319,7 @@ export default function AdminPayouts() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handleExport} className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-semibold"><Download className="w-4 h-4" /> Export</button>
-          <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm font-semibold"><RefreshCw className="w-4 h-4" /> Refresh</button>
+          <button onClick={fetchPayouts} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 text-sm font-semibold"><RefreshCw className="w-4 h-4" /> Refresh</button>
         </div>
       </div>
 
@@ -324,7 +328,7 @@ export default function AdminPayouts() {
         <h1 className="text-lg font-bold text-slate-900">Payouts ({stats.total})</h1>
         <div className="flex items-center gap-2">
           <button onClick={handleExport} className="p-2 bg-slate-100 rounded-xl"><Download className="w-4 h-4 text-slate-600" /></button>
-          <button onClick={() => window.location.reload()} className="p-2 bg-indigo-600 rounded-xl"><RefreshCw className="w-4 h-4 text-white" /></button>
+          <button onClick={fetchPayouts} className="p-2 bg-indigo-600 rounded-xl"><RefreshCw className="w-4 h-4 text-white" /></button>
         </div>
       </div>
 
@@ -334,7 +338,7 @@ export default function AdminPayouts() {
           <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
           <div className="text-xs text-red-800">
             <span className="font-bold">Error:</span> {error}
-            <button onClick={() => window.location.reload()} className="ml-2 underline">Retry</button>
+            <button onClick={fetchPayouts} className="ml-2 underline">Retry</button>
           </div>
         </div>
       )}
@@ -395,7 +399,7 @@ export default function AdminPayouts() {
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search ID, UTR, trader, user, account, amount..."
+            placeholder="Search ID, UTR, trader, merchant, account, amount..."
             accentColor="indigo"
             className="flex-1"
           />

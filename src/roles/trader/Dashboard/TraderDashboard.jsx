@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { db } from '../../../firebase';
-import {
-  collection, query, where, getDocs, Timestamp,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from '../../../supabase';
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet, Activity, RefreshCw,
 } from 'lucide-react';
@@ -24,38 +20,46 @@ export default function TraderDashboard() {
   const fetchStats = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     setError("");
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); setRefreshing(false); setError("User not logged in."); return; }
 
     try {
-      const traderSnap = await getDocs(query(collection(db, 'trader'), where('uid', '==', user.uid)));
-      const trader = !traderSnap.empty ? traderSnap.docs[0].data() : {};
+      // Get trader record
+      const { data: trader } = await supabase
+        .from('traders')
+        .select('*')
+        .eq('profile_id', user.id)
+        .single();
 
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const todayStart = Timestamp.fromDate(today);
+      if (!trader) { setLoading(false); setRefreshing(false); setError("Trader not found."); return; }
 
-      const [piC, piP, poC, poP] = await Promise.all([
-        getDocs(query(collection(db, "payin"),  where("traderId","==",user.uid), where("status","==","completed"), where("completedAt",">=",todayStart))),
-        getDocs(query(collection(db, "payin"),  where("traderId","==",user.uid), where("status","==","pending"))),
-        getDocs(query(collection(db, "payouts"),where("traderId","==",user.uid), where("status","==","completed"), where("completedAt",">=",todayStart))),
-        getDocs(query(collection(db, "payouts"),where("traderId","==",user.uid), where("status","==","pending"))),
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      const [piCRes, piPRes, poCRes, poPRes] = await Promise.all([
+        supabase.from('payins').select('amount,commission').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', todayISO),
+        supabase.from('payins').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).eq('status', 'pending'),
+        supabase.from('payouts').select('amount').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', todayISO),
+        supabase.from('payouts').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).eq('status', 'pending'),
       ]);
 
       let todaysPayins = 0, todaysCommission = 0;
-      piC.forEach(d => { const v = d.data(); todaysPayins += Number(v.amount||0); todaysCommission += Number(v.commission||0); });
+      (piCRes.data || []).forEach(v => { todaysPayins += Number(v.amount || 0); todaysCommission += Number(v.commission || 0); });
+
       let todaysPayouts = 0;
-      poC.forEach(d => { todaysPayouts += Number(d.data().amount||0); });
+      (poCRes.data || []).forEach(v => { todaysPayouts += Number(v.amount || 0); });
 
       /* ✅ BUG FIX: show working balance (balance − securityHold), not raw balance */
       const rawBalance    = Number(trader.balance || 0);
-      const securityHold  = Number(trader.securityHold || 0);
+      const securityHold  = Number(trader.security_hold || 0);
 
       setStats({
         todaysPayins, todaysPayouts, todaysCommission,
-        overallCommission: Number(trader.overallCommission || 0),
-        balance: rawBalance - securityHold,   // ← working balance
-        pendingPayins: piP.size,
-        pendingPayouts: poP.size,
+        overallCommission: Number(trader.overall_commission || 0),
+        balance: rawBalance - securityHold,
+        pendingPayins: piPRes.count || 0,
+        pendingPayouts: poPRes.count || 0,
       });
     } catch (e) {
       setError("Failed to load stats: " + e.message);
@@ -144,7 +148,6 @@ export default function TraderDashboard() {
                 href={item.href}
                 className={`flex items-center gap-3 p-4 bg-gradient-to-br ${item.bg} hover:shadow-md active:scale-[0.98] transition-all`}
                 style={{
-                  /* ✅ FIX: border-b on mobile (vertical stack), border-r on sm+ (horizontal) */
                   borderBottom: i < 2 ? '1px solid #e2e8f0' : 'none',
                   borderRight : 'none',
                 }}

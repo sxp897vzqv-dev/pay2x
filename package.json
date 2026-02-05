@@ -11,9 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.95.0",
     "firebase": "^11.10.0",
     "firebase-admin": "^13.6.0",
     "lucide-react": "^0.525.0",
+    "pg": "^8.18.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-qr-code": "^2.0.18",

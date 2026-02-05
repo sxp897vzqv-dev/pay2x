@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { collection, query, where, getDocs, updateDoc, doc, addDoc, serverTimestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   Key, Copy, CheckCircle, RefreshCw, AlertCircle, Code, Book, Download,
   Globe, Shield, Eye, EyeOff, Terminal, FileText, Zap, X, ExternalLink,
@@ -128,47 +126,24 @@ export default function MerchantAPI() {
   const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
     const fetchData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
       try {
-        const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-        
-        if (!merchantSnap.empty) {
-          const data = merchantSnap.docs[0].data();
-          
-          // Support both old structure (apiKey) and new structure (liveApiKey/testApiKey)
-          const liveKey = data.liveApiKey || data.apiKey || '';
-          const testKey = data.testApiKey || '';
-          
-          setApiKeys({
-            live: liveKey,
-            test: testKey,
-          });
-          setWebhookUrl(data.webhookUrl || '');
-          setWebhookSecret(data.webhookSecret || '');
-          setWebhookEvents(data.webhookEvents || ['payin.success', 'payin.failed', 'payout.completed']);
+        const { data } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+        if (data) {
+          setApiKeys({ live: data.live_api_key || data.api_key || '', test: data.test_api_key || '' });
+          setWebhookUrl(data.webhook_url || '');
+          setWebhookSecret(data.webhook_secret || '');
+          setWebhookEvents(data.webhook_events || ['payin.success', 'payin.failed', 'payout.completed']);
         }
-      } catch (e) {
-        console.error('Error fetching API data:', e);
-      }
+        // Webhook logs
+        const { data: logs } = await supabase.from('webhook_logs').select('*').eq('merchant_id', user.id).order('timestamp', { ascending: false }).limit(50);
+        setWebhookLogs((logs || []).map(l => ({ ...l, merchantId: l.merchant_id, responseCode: l.response_code, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
+      } catch (e) { console.error('Error fetching API data:', e); }
       setLoading(false);
     };
-
     fetchData();
-
-    // Listen to webhook logs
-    const unsub = onSnapshot(
-      query(collection(db, 'webhookLogs'), where('merchantId', '==', user.uid), orderBy('timestamp', 'desc'), limit(50)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setWebhookLogs(list);
-      }
-    );
-
-    return () => unsub();
   }, []);
 
   const handleCopyKey = (key) => {
@@ -183,42 +158,20 @@ export default function MerchantAPI() {
       if (!confirmed) return;
     }
 
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     setRegenerating(true);
     const newKey = `${mode === 'live' ? 'live' : 'test'}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    
+
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      
-      if (!merchantSnap.empty) {
-        const docId = merchantSnap.docs[0].id;
-        const merchantData = merchantSnap.docs[0].data();
-        
-        // Use liveApiKey/testApiKey structure (ignore legacy apiKey field)
-        const fieldName = mode === 'live' ? 'liveApiKey' : 'testApiKey';
-        
-        const updateData = {
-          [fieldName]: newKey,
-          apiKeyUpdatedAt: serverTimestamp()
-        };
-        
-        // If this is the first time setting liveApiKey and there's a legacy apiKey, clear it
-        if (mode === 'live' && merchantData.apiKey && !merchantData.liveApiKey) {
-          updateData.apiKey = null;
-        }
-        
-        await updateDoc(doc(db, 'merchant', docId), updateData);
-        
-        setApiKeys(prev => ({ ...prev, [mode]: newKey }));
-        
-        const successMsg = `✅ ${mode === 'live' ? 'Live' : 'Test'} API key ${hasExistingKey ? 'regenerated' : 'generated'} successfully!`;
-        setSuccessMessage(successMsg);
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        alert('Error: Merchant profile not found');
-      }
+      const fieldName = mode === 'live' ? 'live_api_key' : 'test_api_key';
+      const updateData = { [fieldName]: newKey, api_key_updated_at: new Date().toISOString() };
+      await supabase.from('merchants').update(updateData).eq('id', user.id);
+      setApiKeys(prev => ({ ...prev, [mode]: newKey }));
+      const successMsg = `✅ ${mode === 'live' ? 'Live' : 'Test'} API key ${hasExistingKey ? 'regenerated' : 'generated'} successfully!`;
+      setSuccessMessage(successMsg);
+      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (e) {
       console.error('Error regenerating key:', e);
       alert('Error: ' + e.message);
@@ -228,47 +181,26 @@ export default function MerchantAPI() {
   };
 
   const handleSaveWebhook = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    if (!webhookUrl || !webhookUrl.startsWith('https://')) {
-      alert('Webhook URL must start with https://');
-      return;
-    }
-
+    if (!webhookUrl || !webhookUrl.startsWith('https://')) { alert('Webhook URL must start with https://'); return; }
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
-          webhookUrl,
-          webhookEvents,
-          updatedAt: serverTimestamp(),
-        });
-        alert('✅ Webhook configuration saved!');
-      }
-    } catch (e) {
-      alert('Error: ' + e.message);
-    }
+      await supabase.from('merchants').update({ webhook_url: webhookUrl, webhook_events: webhookEvents }).eq('id', user.id);
+      alert('✅ Webhook configuration saved!');
+    } catch (e) { alert('Error: ' + e.message); }
   };
 
   const handleTestWebhook = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     try {
-      await addDoc(collection(db, 'webhookLogs'), {
-        merchantId: user.uid,
-        event: 'test.webhook',
-        url: webhookUrl,
-        status: 'delivered',
-        responseCode: 200,
+      await supabase.from('webhook_logs').insert({
+        merchant_id: user.id, event: 'test.webhook', url: webhookUrl,
+        status: 'delivered', response_code: 200,
         payload: { test: true, timestamp: Date.now() },
-        timestamp: serverTimestamp(),
       });
       alert('✅ Test webhook fired! Check logs below.');
-    } catch (e) {
-      alert('Error: ' + e.message);
-    }
+    } catch (e) { alert('Error: ' + e.message); }
   };
 
   if (loading) {

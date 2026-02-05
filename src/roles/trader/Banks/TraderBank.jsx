@@ -1,7 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from '../../../firebase';
+import { supabase } from '../../../supabase';
+
+// Map camelCase CARD_TYPES keys ↔ snake_case DB columns
+const toSnake = { currentMerchantUpis: 'current_merchant_upis', corporateMerchantUpis: 'corporate_merchant_upis', normalUpis: 'normal_upis', bigUpis: 'big_upis', impsAccounts: 'imps_accounts' };
+const mapTraderRow = (row) => {
+  if (!row) return {};
+  return {
+    ...row,
+    currentMerchantUpis: row.current_merchant_upis || [],
+    corporateMerchantUpis: row.corporate_merchant_upis || [],
+    normalUpis: row.normal_upis || [],
+    bigUpis: row.big_upis || [],
+    impsAccounts: row.imps_accounts || [],
+    balance: Number(row.balance) || 0,
+    securityHold: Number(row.security_hold) || 0,
+    priority: row.priority || 'Normal',
+  };
+};
 import {
   Edit, Trash2, Plus, Building2, Wallet, RefreshCw, X, Copy, Shield,
   Briefcase, DollarSign, CheckCircle, AlertCircle, Smartphone, Hash, User,
@@ -79,40 +94,42 @@ export default function TraderBank() {
   const [filterType,    setFilterType]    = useState('all'); // 'all' or card.key
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      setTraderId(user.uid);
+      setTraderId(user.id);
       setLoading(true);
       try {
-        const snap = await getDoc(doc(db, 'trader', user.uid));
-        if (snap.exists()) {
-          const d = snap.data();
+        const { data } = await supabase.from('traders').select('*').eq('id', user.id).single();
+        if (data) {
+          const d = mapTraderRow(data);
           setTraderData(d);
-          /* ✅ BUG FIX: derive workingBalance — field doesn't exist in Firestore */
-          const wb = (Number(d.balance) || 0) - (Number(d.securityHold) || 0);
+          const wb = (d.balance || 0) - (d.securityHold || 0);
           setWorkingBalance(wb);
-          if (wb < 30000) await autoDisableUPIs(user.uid, d);
+          if (wb < 30000) await autoDisableUPIs(user.id, d);
         }
       } catch (e) { console.error(e); setToast({ msg: 'Error loading data', success: false }); }
       setLoading(false);
-    });
-    return () => unsub();
+    };
+    init();
   }, []);
 
   const autoDisableUPIs = async (uid, data) => {
     try {
       const updated = { ...data };
       let changed = false;
+      const dbUpdates = {};
       for (const type of ['currentMerchantUpis','corporateMerchantUpis','normalUpis','bigUpis']) {
         if (Array.isArray(updated[type])) {
           updated[type] = updated[type].map(e => {
             if (e.active) { changed = true; return { ...e, active: false }; }
             return e;
           });
+          if (changed) dbUpdates[toSnake[type]] = updated[type];
         }
       }
       if (changed) {
-        await setDoc(doc(db, 'trader', uid), updated, { merge: true });
+        await supabase.from('traders').update(dbUpdates).eq('id', uid);
         setTraderData(updated);
         setToast({ msg: '⚠️ UPIs disabled – working balance below ₹30,000', success: false });
       }
@@ -125,15 +142,16 @@ export default function TraderBank() {
   const saveToSavedBanks = async (entry, type, isDelete = false) => {
     try {
       const id = `${traderId}_${entry.upiId || entry.accountNumber}_${type}`;
-      await setDoc(doc(db, 'savedBanks', id), {
-        traderId, type,
-        upiId: entry.upiId || null, accountNumber: entry.accountNumber || null,
-        ifscCode: entry.ifscCode || null, holderName: entry.holderName || null,
-        isActive: entry.active || false, isDeleted: isDelete,
-        deletedAt: isDelete ? serverTimestamp() : null,
-        lastModified: serverTimestamp(),
-        ...(isDelete ? {} : { addedAt: serverTimestamp() }),
-      }, { merge: true });
+      await supabase.from('saved_banks').upsert({
+        id,
+        trader_id: traderId, type,
+        upi_id: entry.upiId || null, account_number: entry.accountNumber || null,
+        ifsc_code: entry.ifscCode || null, holder_name: entry.holderName || null,
+        is_active: entry.active || false, is_deleted: isDelete,
+        deleted_at: isDelete ? new Date().toISOString() : null,
+        last_modified: new Date().toISOString(),
+        ...(isDelete ? {} : { added_at: new Date().toISOString() }),
+      }, { onConflict: 'id' });
     } catch (e) { console.error(e); }
   };
 
@@ -171,7 +189,7 @@ export default function TraderBank() {
       if (editIndex !== null) { arr = [...existing]; arr[editIndex] = entry; }
       else { arr = [...existing, entry]; await saveToSavedBanks(entry, type); }
 
-      await setDoc(doc(db, 'trader', traderId), { [type]: arr }, { merge: true });
+      await supabase.from('traders').update({ [toSnake[type]]: arr }).eq('id', traderId);
       setTraderData(prev => ({ ...prev, [type]: arr }));
       setOpenModal(null); setForm({}); setEditIndex(null);
       setToast({ msg: editIndex !== null ? '✅ Account updated!' : '✅ Account added!', success: true });
@@ -181,15 +199,17 @@ export default function TraderBank() {
 
   const syncPool = async (entry, active, type) => {
     try {
-      const id  = entry.upiId || entry.accountNumber;
-      const ref = doc(db, 'upi_pool', id);
+      const id = entry.upiId || entry.accountNumber;
       if (active) {
-        await setDoc(ref, {
-          upiId: entry.upiId||'', accountNumber: entry.accountNumber||'',
-          traderId, type, priority: traderData.priority||'Normal',
-          active: true, holderName: entry.holderName||'', ifscCode: entry.ifscCode||'',
-        });
-      } else { await deleteDoc(ref); }
+        await supabase.from('upi_pool').upsert({
+          id,
+          upi_id: entry.upiId || '', account_number: entry.accountNumber || '',
+          trader_id: traderId, type, priority: traderData.priority || 'Normal',
+          status: 'active', holder_name: entry.holderName || '', ifsc_code: entry.ifscCode || '',
+        }, { onConflict: 'id' });
+      } else {
+        await supabase.from('upi_pool').delete().eq('id', id);
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -205,7 +225,7 @@ export default function TraderBank() {
       const arr = [...(traderData[type]||[])];
       arr[index].active = !arr[index].active;
       setTraderData(prev => ({ ...prev, [type]: arr }));
-      await setDoc(doc(db, 'trader', traderId), { [type]: arr }, { merge: true });
+      await supabase.from('traders').update({ [toSnake[type]]: arr }).eq('id', traderId);
       await syncPool(arr[index], arr[index].active, type);
       await saveToSavedBanks(arr[index], type);
     } catch (e) {
@@ -221,8 +241,8 @@ export default function TraderBank() {
     try {
       const arr = [...(traderData[type]||[])];
       const [deleted] = arr.splice(index, 1);
-      await setDoc(doc(db, 'trader', traderId), { [type]: arr }, { merge: true });
-      await deleteDoc(doc(db, 'upi_pool', deleted.upiId || deleted.accountNumber));
+      await supabase.from('traders').update({ [toSnake[type]]: arr }).eq('id', traderId);
+      await supabase.from('upi_pool').delete().eq('id', deleted.upiId || deleted.accountNumber);
       await saveToSavedBanks(deleted, type, true);
       setTraderData(prev => ({ ...prev, [type]: arr }));
       setToast({ msg: '✅ Account deleted!', success: true });
@@ -235,11 +255,11 @@ export default function TraderBank() {
     if (!traderId) return;
     setLoading(true);
     try {
-      const snap = await getDoc(doc(db, 'trader', traderId));
-      if (snap.exists()) {
-        const d = snap.data();
+      const { data } = await supabase.from('traders').select('*').eq('id', traderId).single();
+      if (data) {
+        const d = mapTraderRow(data);
         setTraderData(d);
-        setWorkingBalance((Number(d.balance)||0) - (Number(d.securityHold)||0));
+        setWorkingBalance((d.balance || 0) - (d.securityHold || 0));
       }
     } catch (e) { setToast({ msg: 'Error refreshing', success: false }); }
     setLoading(false);

@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, getDocs, where, Timestamp } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import { 
   DollarSign, Search, Filter, Download, RefreshCw, User, Calendar, 
@@ -209,53 +208,47 @@ export default function AdminCommission() {
     setError(null);
     try {
       // Fetch traders
-      const tradersSnap = await getDocs(collection(db, 'trader'));
-      const tradersList = [];
-      tradersSnap.forEach(d => tradersList.push({ id: d.id, ...d.data() }));
+      const { data: tradersData } = await supabase.from('traders').select('*');
+      const tradersList = (tradersData || []).map(t => ({
+        ...t,
+        payinRate: t.payin_commission,
+        payinCommission: t.payin_commission,
+        payoutRate: t.payout_commission,
+        payoutCommission: t.payout_commission,
+        overallCommission: t.overall_commission,
+      }));
       setTraders(tradersList);
 
-      // Build date constraints
-      const fromDate = dateFrom ? Timestamp.fromDate(new Date(dateFrom)) : null;
-      const toDate = dateTo ? Timestamp.fromDate(new Date(dateTo + 'T23:59:59')) : null;
+      // Fetch completed payins (with optional date filters)
+      let payinQ = supabase.from('payins').select('amount, trader_id, completed_at').eq('status', 'completed');
+      if (dateFrom) payinQ = payinQ.gte('completed_at', new Date(dateFrom).toISOString());
+      if (dateTo) payinQ = payinQ.lte('completed_at', new Date(dateTo + 'T23:59:59').toISOString());
+      const { data: payinsRaw } = await payinQ;
 
-      // Fetch completed payins
-      let payinQuery = query(collection(db, 'payin'), where('status', '==', 'completed'));
-      const payinsSnap = await getDocs(payinQuery);
-
-      // Fetch completed payouts
-      let payoutQuery = query(collection(db, 'payouts'), where('status', '==', 'completed'));
-      const payoutsSnap = await getDocs(payoutQuery);
+      // Fetch completed payouts (with optional date filters)
+      let payoutQ = supabase.from('payouts').select('amount, trader_id, completed_at').eq('status', 'completed');
+      if (dateFrom) payoutQ = payoutQ.gte('completed_at', new Date(dateFrom).toISOString());
+      if (dateTo) payoutQ = payoutQ.lte('completed_at', new Date(dateTo + 'T23:59:59').toISOString());
+      const { data: payoutsRaw } = await payoutQ;
 
       // Aggregate payins by trader
       const payinsData = {};
-      payinsSnap.forEach(d => {
-        const data = d.data();
-        const tid = data.traderId;
+      (payinsRaw || []).forEach(p => {
+        const tid = p.trader_id;
         if (!tid) return;
-
-        // Date filter (client-side since Firestore compound queries are limited)
-        if (fromDate && data.completedAt && data.completedAt < fromDate) return;
-        if (toDate && data.completedAt && data.completedAt > toDate) return;
-
         if (!payinsData[tid]) payinsData[tid] = { totalAmount: 0, count: 0 };
-        payinsData[tid].totalAmount += Number(data.amount) || 0;
+        payinsData[tid].totalAmount += Number(p.amount) || 0;
         payinsData[tid].count += 1;
       });
       setPayinsByTrader(payinsData);
 
       // Aggregate payouts by trader
       const payoutsData = {};
-      payoutsSnap.forEach(d => {
-        const data = d.data();
-        const tid = data.traderId;
+      (payoutsRaw || []).forEach(p => {
+        const tid = p.trader_id;
         if (!tid) return;
-
-        // Date filter
-        if (fromDate && data.completedAt && data.completedAt < fromDate) return;
-        if (toDate && data.completedAt && data.completedAt > toDate) return;
-
         if (!payoutsData[tid]) payoutsData[tid] = { totalAmount: 0, count: 0 };
-        payoutsData[tid].totalAmount += Number(data.amount) || 0;
+        payoutsData[tid].totalAmount += Number(p.amount) || 0;
         payoutsData[tid].count += 1;
       });
       setPayoutsByTrader(payoutsData);

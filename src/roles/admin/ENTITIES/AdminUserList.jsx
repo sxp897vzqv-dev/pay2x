@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserCircle, Search, RefreshCw, Eye, Clock, TrendingUp, TrendingDown, Download } from 'lucide-react';
 
@@ -46,16 +45,20 @@ export default function AdminUserList() {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(100)),
-      (snap) => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setUsers(list);
-        setLoading(false);
-      }
-    );
-    return () => unsub();
+    const fetchUsers = async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      setUsers((data || []).map(u => ({
+        ...u,
+        name: u.display_name || u.email,
+        createdAt: u.created_at ? { seconds: new Date(u.created_at).getTime() / 1000 } : null,
+      })));
+      setLoading(false);
+    };
+    fetchUsers();
   }, []);
 
   const filtered = useMemo(() => {

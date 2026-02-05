@@ -1,9 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import {
-  collection, query, where, getDocs, addDoc, onSnapshot, serverTimestamp, orderBy, limit,
-} from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   Wallet, TrendingUp, TrendingDown, Download, RefreshCw, CheckCircle,
   AlertCircle, Clock, Lock, Plus, Building, ArrowDown, History, Shield,
@@ -161,125 +157,70 @@ export default function MerchantBalance() {
   const [activeTab, setActiveTab] = useState('ledger');
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
     const fetchData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       try {
-        // Fetch merchant data
-        const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-        if (!merchantSnap.empty) {
-          const data = merchantSnap.docs[0].data();
-          
-          // Calculate balance from transactions
-          // Commission rates in DB can be stored as 5 (meaning 5%) or 0.05
-          // Normalize to decimal format
-          let payinCommissionRate = data.payinCommissionRate || 6;
-          let payoutCommissionRate = data.payoutCommissionRate || 2;
-          
-          // Convert to decimal if stored as whole number (5 → 0.05)
+        const { data: mData } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+        if (mData) {
+          let payinCommissionRate = mData.payin_commission_rate || 6;
+          let payoutCommissionRate = mData.payout_commission_rate || 2;
           if (payinCommissionRate > 1) payinCommissionRate = payinCommissionRate / 100;
           if (payoutCommissionRate > 1) payoutCommissionRate = payoutCommissionRate / 100;
-          
-          console.log('💰 MerchantBalance: Commission rates:', {
-            payin: `${(payinCommissionRate * 100).toFixed(1)}%`,
-            payout: `${(payoutCommissionRate * 100).toFixed(1)}%`
-          });
-          
-          // Fetch all completed payins
-          const payinsSnap = await getDocs(
-            query(collection(db, 'payin'), 
-              where('merchantId', '==', user.uid),
-              where('status', '==', 'completed'))
-          );
-          
-          let totalPayinRevenue = 0;
-          let totalPayinCommission = 0;
-          
-          payinsSnap.forEach(doc => {
-            const amount = Number(doc.data().amount || 0);
+
+          const { data: payins } = await supabase.from('payins').select('amount').eq('merchant_id', user.id).eq('status', 'completed');
+          let totalPayinRevenue = 0, totalPayinCommission = 0;
+          (payins || []).forEach(d => {
+            const amount = Number(d.amount || 0);
             const commission = amount * payinCommissionRate;
-            totalPayinRevenue += (amount - commission); // Merchant gets amount - commission
+            totalPayinRevenue += (amount - commission);
             totalPayinCommission += commission;
           });
-          
-          // Fetch all completed/processing payouts
-          const payoutsSnap = await getDocs(
-            query(collection(db, 'payouts'), 
-              where('createdBy', '==', user.uid),
-              where('status', 'in', ['completed', 'processing', 'queued']))
-          );
-          
-          let totalPayoutAmount = 0;
-          let totalPayoutCommission = 0;
-          
-          payoutsSnap.forEach(doc => {
-            const amount = Number(doc.data().amount || 0);
+
+          const { data: payouts } = await supabase.from('payouts').select('amount').eq('merchant_id', user.id).in('status', ['completed', 'processing', 'queued']);
+          let totalPayoutAmount = 0, totalPayoutCommission = 0;
+          (payouts || []).forEach(d => {
+            const amount = Number(d.amount || 0);
             const commission = amount * payoutCommissionRate;
             totalPayoutAmount += amount;
             totalPayoutCommission += commission;
           });
-          
-          // Calculate net balance
-          // Positive = We owe merchant (they can withdraw)
-          // Negative = Merchant owes us (they need to add funds)
+
           const netBalance = totalPayinRevenue - (totalPayoutAmount + totalPayoutCommission);
-          
           setBalance({
-            available: Math.max(0, netBalance), // Only show positive as available
-            pending: data.pendingSettlement || 0,
-            reserved: data.reservedAmount || 0,
-            totalPayinRevenue,
-            totalPayinCommission,
-            totalPayoutAmount,
-            totalPayoutCommission,
-            netBalance,
+            available: Math.max(0, netBalance),
+            pending: mData.pending_settlement || 0,
+            reserved: mData.reserved_amount || 0,
+            totalPayinRevenue, totalPayinCommission, totalPayoutAmount, totalPayoutCommission, netBalance,
           });
         }
+
+        // Ledger
+        const { data: ledgerData } = await supabase.from('merchant_ledger').select('*').eq('merchant_id', user.id).order('timestamp', { ascending: false }).limit(50);
+        setLedger((ledgerData || []).map(l => ({ ...l, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
+
+        // Settlements
+        const { data: settData } = await supabase.from('merchant_settlements').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(20);
+        setSettlements((settData || []).map(s => ({ ...s, createdAt: s.created_at ? { seconds: new Date(s.created_at).getTime() / 1000 } : null, usdtAddress: s.usdt_address })));
       } catch (e) {
         console.error(e);
       }
+      setLoading(false);
     };
-
     fetchData();
-
-    // Listen to ledger
-    const unsubLedger = onSnapshot(
-      query(collection(db, 'merchantLedger'), where('merchantId', '==', user.uid), orderBy('timestamp', 'desc'), limit(50)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setLedger(list);
-        setLoading(false);
-      }
-    );
-
-    // Listen to settlements
-    const unsubSettlements = onSnapshot(
-      query(collection(db, 'merchantSettlements'), where('merchantId', '==', user.uid), orderBy('createdAt', 'desc'), limit(20)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setSettlements(list);
-      }
-    );
-
-    return () => { unsubLedger(); unsubSettlements(); };
   }, []);
 
   const handleSettlementRequest = async (data) => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    await addDoc(collection(db, 'merchantSettlements'), {
-      merchantId: user.uid,
+    await supabase.from('merchant_settlements').insert({
+      merchant_id: user.id,
       amount: data.amount,
-      usdtAddress: data.usdtAddress,
+      usdt_address: data.usdtAddress,
       network: 'TRC20',
       status: 'pending',
-      createdAt: serverTimestamp(),
     });
-
     setShowModal(false);
   };
 

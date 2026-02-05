@@ -1,8 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import {
-  collection, query, where, getDocs, onSnapshot, orderBy, limit, Timestamp,
-} from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, DollarSign, Users, Store, Activity, RefreshCw,
@@ -30,7 +27,7 @@ const AlertCard = ({ alert, onView }) => {
         <p className="font-semibold text-slate-900 text-sm">{alert.title}</p>
         <p className="text-xs text-slate-600 mt-0.5 line-clamp-2">{alert.message}</p>
         <p className="text-xs text-slate-400 mt-1">
-          {new Date(alert.createdAt?.seconds * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+          {alert.createdAt ? new Date(alert.createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
         </p>
       </div>
       {onView && (
@@ -58,29 +55,29 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchStats();
-    
-    // Real-time listener for alerts/disputes
-    const unsubDisputes = onSnapshot(
-      query(collection(db, 'disputes'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(5)),
-      (snap) => {
-        const list = [];
-        snap.forEach(d => {
-          const data = d.data();
-          list.push({
-            id: d.id,
-            type: 'warning',
-            title: `Dispute: ₹${(Number(data.amount) || 0).toLocaleString()}`,
-            message: data.reason || 'Pending response from trader',
-            createdAt: data.createdAt,
-            link: `/admin/disputes/${d.id}`,
-          });
-        });
-        setAlerts(list);
-      }
-    );
-
-    return () => unsubDisputes();
+    fetchAlerts();
   }, []);
+
+  const fetchAlerts = async () => {
+    try {
+      const { data } = await supabase
+        .from('disputes')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const list = (data || []).map(d => ({
+        id: d.id,
+        type: 'warning',
+        title: `Dispute: ₹${(Number(d.amount) || 0).toLocaleString()}`,
+        message: d.reason || 'Pending response from trader',
+        createdAt: d.created_at,
+        link: `/admin/disputes/${d.id}`,
+      }));
+      setAlerts(list);
+    } catch (e) { console.error(e); }
+  };
 
   const fetchStats = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -89,63 +86,57 @@ export default function AdminDashboard() {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const todayStart = Timestamp.fromDate(today);
+      const todayISO = today.toISOString();
 
       // Parallel queries
       const [
-        tradersSnap, merchantsSnap,
-        todayPayinsSnap, todayPayoutsSnap,
-        pendingPayinsSnap, pendingPayoutsSnap,
-        pendingDisputesSnap, upiPoolSnap,
+        tradersRes, merchantsRes,
+        todayPayinsRes, todayPayoutsRes,
+        pendingPayinsRes, pendingPayoutsRes,
+        pendingDisputesRes, upiPoolRes,
       ] = await Promise.all([
-        getDocs(query(collection(db, 'trader'), limit(200))),
-        getDocs(query(collection(db, 'merchants'), limit(200))),
-        getDocs(query(collection(db, 'payin'), where('status', '==', 'completed'), where('completedAt', '>=', todayStart))),
-        getDocs(query(collection(db, 'payouts'), where('status', '==', 'completed'), where('completedAt', '>=', todayStart))),
-        getDocs(query(collection(db, 'payin'), where('status', '==', 'pending'), limit(500))),
-        getDocs(query(collection(db, 'payouts'), where('status', '==', 'pending'), limit(500))),
-        getDocs(query(collection(db, 'disputes'), where('status', '==', 'pending'), limit(500))),
-        getDocs(query(collection(db, 'upi_pool'), where('active', '==', true))),
+        supabase.from('traders').select('id, is_active').limit(200),
+        supabase.from('merchants').select('id, is_active').limit(200),
+        supabase.from('payins').select('amount, commission').eq('status', 'completed').gte('completed_at', todayISO),
+        supabase.from('payouts').select('amount').eq('status', 'completed').gte('completed_at', todayISO),
+        supabase.from('payins').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('payouts').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('disputes').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('upi_pool').select('*', { count: 'exact', head: true }).eq('status', 'active'),
       ]);
 
-      // Calculate stats
-      let activeTraders = 0;
-      tradersSnap.forEach(d => {
-        const data = d.data();
-        if (data.isActive || data.status === 'active') activeTraders++;
-      });
+      const traders = tradersRes.data || [];
+      const merchants = merchantsRes.data || [];
+      const todayPayins = todayPayinsRes.data || [];
+      const todayPayouts = todayPayoutsRes.data || [];
 
-      let activeMerchants = 0;
-      merchantsSnap.forEach(d => {
-        const data = d.data();
-        if (data.isActive || data.status === 'active') activeMerchants++;
-      });
+      const activeTraders = traders.filter(t => t.is_active).length;
+      const activeMerchants = merchants.filter(m => m.is_active).length;
 
       let todaysPayinAmount = 0, todaysCommission = 0;
-      todayPayinsSnap.forEach(d => {
-        const data = d.data();
-        todaysPayinAmount += Number(data.amount || 0);
-        todaysCommission += Number(data.commission || 0);
+      todayPayins.forEach(d => {
+        todaysPayinAmount += Number(d.amount || 0);
+        todaysCommission += Number(d.commission || 0);
       });
 
       let todaysPayoutAmount = 0;
-      todayPayoutsSnap.forEach(d => {
-        todaysPayoutAmount += Number(d.data().amount || 0);
+      todayPayouts.forEach(d => {
+        todaysPayoutAmount += Number(d.amount || 0);
       });
 
       setStats({
-        totalTraders: tradersSnap.size,
+        totalTraders: traders.length,
         activeTraders,
-        totalMerchants: merchantsSnap.size,
+        totalMerchants: merchants.length,
         activeMerchants,
         todaysPayins: todaysPayinAmount,
         todaysPayouts: todaysPayoutAmount,
         todaysVolume: todaysPayinAmount + todaysPayoutAmount,
         todaysCommission,
-        pendingPayins: pendingPayinsSnap.size,
-        pendingPayouts: pendingPayoutsSnap.size,
-        pendingDisputes: pendingDisputesSnap.size,
-        activeUPIs: upiPoolSnap.size,
+        pendingPayins: pendingPayinsRes.count || 0,
+        pendingPayouts: pendingPayoutsRes.count || 0,
+        pendingDisputes: pendingDisputesRes.count || 0,
+        activeUPIs: upiPoolRes.count || 0,
       });
 
     } catch (e) {

@@ -1,9 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { db } from "../../../firebase";
-import {
-  collection, query, where, getDocs, doc, onSnapshot, orderBy, limit,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from '../../../supabase';
 import {
   Wallet, TrendingUp, TrendingDown, RefreshCw, DollarSign,
   Copy, CheckCircle, AlertCircle, Download, History,
@@ -25,7 +21,7 @@ function TransactionItem({ transaction }) {
           {isDeposit ? 'Deposit' : transaction.type === 'withdrawal' ? 'Withdrawal' : 'Transaction'}
         </p>
         <p className="text-xs text-slate-400 truncate">
-          {new Date(transaction.createdAt?.seconds ? transaction.createdAt.seconds * 1000 : Date.now())
+          {new Date(transaction.created_at || Date.now())
             .toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
         </p>
       </div>
@@ -39,8 +35,8 @@ function TransactionItem({ transaction }) {
           'bg-red-100 text-red-700'
         }`}>{transaction.status}</span>
       </div>
-      {transaction.txHash && (
-        <a href={`https://tronscan.org/#/transaction/${transaction.txHash}`} target="_blank" rel="noopener noreferrer"
+      {transaction.tx_hash && (
+        <a href={`https://tronscan.org/#/transaction/${transaction.tx_hash}`} target="_blank" rel="noopener noreferrer"
           className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">
           <ExternalLink size={14} />
         </a>
@@ -67,10 +63,11 @@ export default function TraderBalance() {
   const [usdtBuyRate,      setUsdtBuyRate]      = useState(92);
   const [convertAmount,    setConvertAmount]    = useState('');
   const [depositStats,     setDepositStats]     = useState({ count: 0, totalUSDT: 0, totalINR: 0 });
+  const [traderId,         setTraderId]         = useState(null);
   const balanceRef = useRef(null);
   const qrRef = useRef(null);
 
-  /* USDT rate polling */
+  /* USDT rate polling — kept as-is (Cloud Function) */
   useEffect(() => {
     const fetchRate = async () => {
       try {
@@ -84,59 +81,90 @@ export default function TraderBalance() {
     return () => clearInterval(iv);
   }, []);
 
-  /* Firestore listeners */
+  /* Fetch data + realtime subscription */
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) { setLoading(false); return; }
-    setLoading(false);
+    let traderChannel;
 
-    const unsubTrader = onSnapshot(doc(db, 'trader', user.uid), snap => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      if (balanceRef.current !== null && balanceRef.current !== d.balance) {
-        setBalanceFlash(true);
-        setTimeout(() => setBalanceFlash(false), 900);
-        setToast({ msg: '✅ Balance updated!', success: true });
-      }
-      const total    = d.balance || 0;
-      const security = d.securityHold || 0;
+    const setup = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
+
+      // Get trader record
+      const { data: trader } = await supabase
+        .from('traders')
+        .select('*')
+        .eq('profile_id', user.id)
+        .single();
+
+      if (!trader) { setLoading(false); return; }
+      setTraderId(trader.id);
+
+      const total    = Number(trader.balance) || 0;
+      const security = Number(trader.security_hold) || 0;
       setBalance(total);
       setSecurityHold(security);
       setWorkingBalance(total - security);
-      setUsdtDepositAddress(d.usdtDepositAddress || '');
-      setDerivationIndex(d.derivationIndex || null);
+      setUsdtDepositAddress(trader.usdt_deposit_address || '');
+      setDerivationIndex(trader.derivation_index || null);
       balanceRef.current = total;
-    });
 
-    const unsubTx = onSnapshot(
-      query(collection(db, 'transactions'), where('traderId','==',user.uid), orderBy('createdAt','desc'), limit(50)),
-      snap => {
-        const list = [];
+      // Fetch transactions
+      const { data: txData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('trader_id', trader.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (txData) {
         let totalUSDT = 0, totalINR = 0, count = 0;
-        snap.forEach(d => {
-          const data = d.data();
-          list.push({ id: d.id, ...data });
+        txData.forEach(data => {
           if (data.type === 'deposit' && data.status === 'completed') {
-            totalUSDT += data.usdtAmount || 0;
+            totalUSDT += data.usdt_amount || 0;
             totalINR += data.amount || 0;
             count++;
           }
         });
-        setTransactions(list);
+        setTransactions(txData);
         setDepositStats({ count, totalUSDT: Math.round(totalUSDT * 100) / 100, totalINR: Math.round(totalINR) });
       }
-    );
 
-    const unsubPending = onSnapshot(
-      query(collection(db, 'sweepQueue'), where('traderId','==',user.uid), where('status','==','pending')),
-      snap => {
-        const pending = [];
-        snap.forEach(d => pending.push({ id: d.id, ...d.data() }));
-        setPendingDeposits(pending);
-      }
-    );
+      // Fetch pending deposits (sweep queue)
+      const { data: pendingData } = await supabase
+        .from('sweep_queue')
+        .select('*')
+        .eq('trader_id', trader.id)
+        .eq('status', 'pending');
+      setPendingDeposits(pendingData || []);
 
-    return () => { unsubTrader(); unsubTx(); unsubPending(); };
+      setLoading(false);
+
+      // Real-time subscription for trader balance changes
+      traderChannel = supabase.channel('trader-balance')
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'traders',
+          filter: `id=eq.${trader.id}`
+        }, (payload) => {
+          const d = payload.new;
+          const newTotal = Number(d.balance) || 0;
+          if (balanceRef.current !== null && balanceRef.current !== newTotal) {
+            setBalanceFlash(true);
+            setTimeout(() => setBalanceFlash(false), 900);
+            setToast({ msg: '✅ Balance updated!', success: true });
+          }
+          const sec = Number(d.security_hold) || 0;
+          setBalance(newTotal);
+          setSecurityHold(sec);
+          setWorkingBalance(newTotal - sec);
+          setUsdtDepositAddress(d.usdt_deposit_address || '');
+          setDerivationIndex(d.derivation_index || null);
+          balanceRef.current = newTotal;
+        })
+        .subscribe();
+    };
+
+    setup();
+    return () => { if (traderChannel) supabase.removeChannel(traderChannel); };
   }, []);
 
   const copyAddress = () => {
@@ -147,8 +175,9 @@ export default function TraderBalance() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  /* Cloud Function call — kept as-is */
   const generateAddress = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     
     setGenerating(true);
@@ -158,7 +187,7 @@ export default function TraderBalance() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ traderId: user.uid })
+          body: JSON.stringify({ traderId: user.id })
         }
       );
 
@@ -210,10 +239,21 @@ export default function TraderBalance() {
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   };
 
-  const refreshBalance = () => {
+  const refreshBalance = async () => {
     setRefreshing(true);
     setToast({ msg: 'Checking for new deposits…', success: true });
-    setTimeout(() => setRefreshing(false), 2000);
+    // Re-fetch trader data
+    if (traderId) {
+      const { data: trader } = await supabase.from('traders').select('*').eq('id', traderId).single();
+      if (trader) {
+        const total = Number(trader.balance) || 0;
+        const security = Number(trader.security_hold) || 0;
+        setBalance(total);
+        setSecurityHold(security);
+        setWorkingBalance(total - security);
+      }
+    }
+    setTimeout(() => setRefreshing(false), 1000);
   };
 
   const convertCurrency = () => {
@@ -226,8 +266,8 @@ export default function TraderBalance() {
     const csv = [
       ['Date','Type','Amount (INR)','Status','Transaction Hash'],
       ...transactions.map(t => [
-        new Date((t.createdAt?.seconds||0)*1000).toLocaleDateString(),
-        t.type||'', t.amount||'', t.status||'', t.txHash||''
+        new Date(t.created_at || '').toLocaleDateString(),
+        t.type||'', t.amount||'', t.status||'', t.tx_hash||''
       ])
     ].map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });

@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { supabase } from './supabase';
+import { checkEntityActive } from './utils/supabaseAuth';
 import {
   Mail,
   Lock,
@@ -24,7 +22,6 @@ const getUserAgent = () => {
 
 const getClientIP = async () => {
   try {
-    // Use a free IP lookup service (fallback to "unknown" if fails)
     const response = await fetch('https://api.ipify.org?format=json', { timeout: 3000 });
     const data = await response.json();
     return data.ip || 'unknown';
@@ -39,8 +36,8 @@ const SignIn = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const navigate = useNavigate();
 
   // Load saved email if remember me was checked
   useEffect(() => {
@@ -85,9 +82,16 @@ const SignIn = () => {
     const clientIP = await getClientIP();
 
     try {
-      // Sign in with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const uid = userCredential.user.uid;
+      // Sign in with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (authError) throw authError;
+
+      const user = authData.user;
+      const userId = user.id;
 
       // Save email if remember me is checked
       if (rememberMe) {
@@ -96,129 +100,115 @@ const SignIn = () => {
         localStorage.removeItem('pay2x_remember_email');
       }
 
-      // Check role in collections using query (more reliable than doc lookup)
-      const roleCollections = [
-        { name: 'worker', route: '/admin/dashboard' },
-        { name: 'admin', route: '/admin/dashboard' },
-        { name: 'merchant', route: '/merchant/dashboard' },
-        { name: 'trader', route: '/trader/dashboard' }
-      ];
+      // Get role from profiles table
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-      let roleFound = null;
-      let entityData = null;
+      if (profileError || !profile) {
+        setError('No role assigned to this account. Please contact support.');
 
-      for (let roleData of roleCollections) {
-        const q = query(
-          collection(db, roleData.name),
-          where('uid', '==', uid)
-        );
-        const querySnapshot = await getDocs(q);
+        // 🔥 AUDIT LOG: Login Failed - No Profile
+        await logAuditEvent({
+          action: 'login_failed',
+          category: 'security',
+          entityType: 'user',
+          entityId: userId,
+          entityName: email,
+          details: {
+            note: 'Login failed: No profile/role assigned to account',
+            metadata: { email, userAgent, reason: 'no_profile' },
+          },
+          performedByIp: clientIP,
+          severity: 'warning',
+        });
 
-        if (!querySnapshot.empty) {
-          roleFound = roleData.name;
-          entityData = querySnapshot.docs[0].data();
-          
-          // 🔒 CHECK IF ACCOUNT IS ACTIVE (Skip for admin)
-          if (roleFound !== 'admin') {
-            const isActive = entityData.isActive === true || entityData.status === 'active';
-            
-            if (!isActive) {
-              // Account is inactive - block login
-              setError('Your account is currently inactive. Please contact admin for assistance.');
-              
-              // 🔥 AUDIT LOG: Login Blocked - Inactive Account
-              await logAuditEvent({
-                action: 'login_blocked_inactive',
-                category: 'security',
-                entityType: roleFound,
-                entityId: uid,
-                entityName: entityData.name || entityData.businessName || email,
-                details: {
-                  note: `${roleFound.charAt(0).toUpperCase() + roleFound.slice(1)} login blocked: Account inactive`,
-                  metadata: {
-                    email,
-                    userAgent,
-                    accountStatus: entityData.status || (entityData.isActive ? 'active' : 'inactive'),
-                  },
-                },
-                performedByIp: clientIP,
-                severity: 'warning',
-                requiresReview: true,
-              });
-              
-              await auth.signOut();
-              setLoading(false);
-              return;
-            }
-          }
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
 
-          // 🔑 STORE ROLE & PERMISSIONS in localStorage
-          if (roleFound === 'worker') {
-            localStorage.setItem('pay2x_worker_permissions', JSON.stringify(entityData.permissions || []));
-            localStorage.setItem('pay2x_user_role', 'worker');
-          } else if (roleFound === 'admin') {
-            localStorage.setItem('pay2x_user_role', 'admin');
-            localStorage.removeItem('pay2x_worker_permissions');
-          } else {
-            localStorage.removeItem('pay2x_user_role');
-            localStorage.removeItem('pay2x_worker_permissions');
-          }
-          
-          // 🔥 AUDIT LOG: Successful Login (Week 4 - Security Logs)
+      const role = profile.role;
+
+      // 🔒 CHECK IF ACCOUNT IS ACTIVE (Skip for admin)
+      if (role !== 'admin') {
+        // Check profile-level active flag
+        if (profile.is_active === false) {
+          setError('Your account is currently inactive. Please contact admin for assistance.');
+
           await logAuditEvent({
-            action: 'login_success',
+            action: 'login_blocked_inactive',
             category: 'security',
-            entityType: roleFound,
-            entityId: uid,
-            entityName: entityData.name || entityData.businessName || email,
+            entityType: role,
+            entityId: userId,
+            entityName: profile.display_name || email,
             details: {
-              note: `${roleFound.charAt(0).toUpperCase() + roleFound.slice(1)} logged in successfully`,
-              metadata: {
-                email,
-                userAgent,
-                rememberMe,
-              },
+              note: `${role.charAt(0).toUpperCase() + role.slice(1)} login blocked: Account inactive`,
+              metadata: { email, userAgent, accountStatus: 'inactive' },
             },
             performedByIp: clientIP,
-            severity: 'info',
+            severity: 'warning',
+            requiresReview: true,
           });
-          
-          // Role found, navigate to appropriate dashboard
-          navigate(roleData.route);
+
+          await supabase.auth.signOut();
+          setLoading(false);
+          return;
+        }
+
+        // Check entity-level active flag (traders/merchants/workers table)
+        const { isActive } = await checkEntityActive(role, userId);
+        if (!isActive) {
+          setError('Your account is currently inactive. Please contact admin for assistance.');
+
+          await logAuditEvent({
+            action: 'login_blocked_inactive',
+            category: 'security',
+            entityType: role,
+            entityId: userId,
+            entityName: profile.display_name || email,
+            details: {
+              note: `${role.charAt(0).toUpperCase() + role.slice(1)} login blocked: Entity inactive`,
+              metadata: { email, userAgent, accountStatus: 'entity_inactive' },
+            },
+            performedByIp: clientIP,
+            severity: 'warning',
+            requiresReview: true,
+          });
+
+          await supabase.auth.signOut();
+          setLoading(false);
           return;
         }
       }
 
-      // No role found
-      setError('No role assigned to this account. Please contact support.');
-      
-      // 🔥 AUDIT LOG: Login Failed - No Role (Week 4 - Security Logs)
+      // 🔥 AUDIT LOG: Successful Login
       await logAuditEvent({
-        action: 'login_failed',
+        action: 'login_success',
         category: 'security',
-        entityType: 'user',
-        entityId: uid,
-        entityName: email,
+        entityType: role,
+        entityId: userId,
+        entityName: profile.display_name || email,
         details: {
-          note: 'Login failed: No role assigned to account',
-          metadata: {
-            email,
-            userAgent,
-            reason: 'no_role_assigned',
-          },
+          note: `${role.charAt(0).toUpperCase() + role.slice(1)} logged in successfully`,
+          metadata: { email, userAgent, rememberMe },
         },
         performedByIp: clientIP,
-        severity: 'warning',
+        severity: 'info',
       });
-      
-      await auth.signOut(); // Sign out if no role found
+
+      // Don't navigate manually — App.jsx's onAuthStateChange will
+      // detect the session, resolve the role, and redirect automatically.
+      setSuccess(true);
     } catch (err) {
       console.error('Login error:', err);
-      
-      // 🔥 AUDIT LOG: Login Failed - Auth Error (Week 4 - Security Logs)
-      const failureReason = err.code || 'unknown_error';
-      const isSuspicious = err.code === 'auth/too-many-requests' || err.code === 'auth/user-disabled';
-      
+
+      // 🔥 AUDIT LOG: Login Failed - Auth Error
+      const failureReason = err.message || 'unknown_error';
+      const isSuspicious = err.message?.includes('locked') || err.status === 429;
+
       await logAuditEvent({
         action: 'login_failed',
         category: 'security',
@@ -227,40 +217,25 @@ const SignIn = () => {
         entityName: email,
         details: {
           note: `Login attempt failed: ${failureReason}`,
-          metadata: {
-            email,
-            userAgent,
-            errorCode: err.code,
-            errorMessage: err.message,
-          },
+          metadata: { email, userAgent, errorMessage: err.message },
         },
         performedByIp: clientIP,
         severity: isSuspicious ? 'critical' : 'warning',
         requiresReview: isSuspicious,
       });
-      
-      // User-friendly error messages
-      switch (err.code) {
-        case 'auth/user-not-found':
-          setError('No account found with this email address');
-          break;
-        case 'auth/wrong-password':
-          setError('Incorrect password. Please try again');
-          break;
-        case 'auth/invalid-email':
-          setError('Invalid email address format');
-          break;
-        case 'auth/user-disabled':
-          setError('This account has been disabled. Contact support');
-          break;
-        case 'auth/too-many-requests':
-          setError('Too many failed attempts. Please try again later');
-          break;
-        case 'auth/network-request-failed':
-          setError('Network error. Please check your connection');
-          break;
-        default:
-          setError('Login failed. Please try again');
+
+      // User-friendly error messages (Supabase error codes)
+      const msg = err.message?.toLowerCase() || '';
+      if (msg.includes('invalid login credentials')) {
+        setError('Invalid email or password. Please try again');
+      } else if (msg.includes('email not confirmed')) {
+        setError('Please confirm your email address first');
+      } else if (msg.includes('too many requests') || err.status === 429) {
+        setError('Too many failed attempts. Please try again later');
+      } else if (msg.includes('network') || msg.includes('fetch')) {
+        setError('Network error. Please check your connection');
+      } else {
+        setError('Login failed. Please try again');
       }
     } finally {
       setLoading(false);
@@ -436,10 +411,15 @@ const SignIn = () => {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || success}
                 className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                {loading ? (
+                {success ? (
+                  <>
+                    <Loader className="w-5 h-5 animate-spin" />
+                    Redirecting...
+                  </>
+                ) : loading ? (
                   <>
                     <Loader className="w-5 h-5 animate-spin" />
                     Signing in...

@@ -1,9 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { db } from '../../../firebase';
-import {
-  collection, query, where, onSnapshot, orderBy, updateDoc, doc, serverTimestamp, limit,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from '../../../supabase';
 import {
   AlertCircle, RefreshCw, Search, Filter, Bell, BellOff,
 } from "lucide-react";
@@ -36,46 +32,47 @@ export default function TraderDispute() {
 
   // Load disputes
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-    
-    const unsub = onSnapshot(
-      query(collection(db, 'disputes'), where('traderId', '==', user.uid), orderBy('createdAt', 'desc'), limit(200)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setDisputes(list);
-        setLoading(false);
-        
-        // Check for new disputes and notify
-        if (notificationsEnabled) {
-          notificationManager.checkNewDisputes(list);
-        }
-      }
-    );
-    return () => unsub();
+    const fetchDisputes = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('disputes')
+        .select('*')
+        .eq('trader_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      const mapped = (data || []).map(d => ({
+        ...d,
+        traderId: d.trader_id, merchantId: d.merchant_id,
+        orderId: d.order_id || d.payin_id || d.payout_id,
+        upiId: d.upi_id, traderNote: d.trader_note,
+        traderAction: d.trader_action, proofUrl: d.proof_url,
+        createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
+        respondedAt: d.responded_at ? { seconds: new Date(d.responded_at).getTime() / 1000 } : null,
+      }));
+      setDisputes(mapped);
+      setLoading(false);
+      if (notificationsEnabled) notificationManager.checkNewDisputes(mapped);
+    };
+    fetchDisputes();
   }, [notificationsEnabled]);
 
   // Load unread message counts
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
-    const unsubscribers = disputes.map(dispute => {
-      return onSnapshot(
-        query(
-          collection(db, 'disputeMessages'),
-          where('disputeId', '==', dispute.id),
-          where('from', '!=', 'trader'),
-          where('readByTrader', '==', false)
-        ),
-        snap => {
-          setUnreadCounts(prev => ({ ...prev, [dispute.id]: snap.size }));
-        }
-      );
-    });
-
-    return () => unsubscribers.forEach(unsub => unsub());
+    const fetchUnread = async () => {
+      const counts = {};
+      for (const dispute of disputes) {
+        const { count } = await supabase
+          .from('dispute_messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('dispute_id', dispute.id)
+          .neq('from', 'trader')
+          .eq('read_by_trader', false);
+        counts[dispute.id] = count || 0;
+      }
+      setUnreadCounts(counts);
+    };
+    if (disputes.length > 0) fetchUnread();
   }, [disputes]);
 
   // Request notification permission on mount
@@ -120,13 +117,13 @@ export default function TraderDispute() {
   const handleResponseSubmit = async ({ action, note, proofUrl }) => {
     if (!selectedDispute) return;
     try {
-      await updateDoc(doc(db, 'disputes', selectedDispute.id), {
+      await supabase.from('disputes').update({
         status: action === 'accept' ? 'approved' : 'rejected',
-        traderNote: note,
-        traderAction: action,
-        proofUrl: proofUrl || null,
-        respondedAt: serverTimestamp(),
-      });
+        trader_note: note,
+        trader_action: action,
+        proof_url: proofUrl || null,
+        responded_at: new Date().toISOString(),
+      }).eq('id', selectedDispute.id);
       
       // Mark as seen
       notificationManager.markAsSeen(selectedDispute.id);

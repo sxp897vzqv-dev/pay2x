@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import { Search, Users, Store, TrendingUp, TrendingDown, AlertCircle, X, Loader2 } from 'lucide-react';
 
 const SEARCH_CONFIGS = [
@@ -9,8 +8,7 @@ const SEARCH_CONFIGS = [
     key: 'traders',
     label: 'Traders',
     icon: Users,
-    collection: 'trader',
-    orderField: 'createdAt',
+    table: 'traders',
     searchFields: ['name', 'email', 'phone'],
     getRoute: (id) => `/admin/traders/${id}`,
     getTitle: (doc) => doc.name || doc.email || doc.id,
@@ -20,44 +18,40 @@ const SEARCH_CONFIGS = [
     key: 'merchants',
     label: 'Merchants',
     icon: Store,
-    collection: 'merchant',
-    orderField: 'createdAt',
-    searchFields: ['name', 'email', 'businessName'],
+    table: 'merchants',
+    searchFields: ['name', 'email', 'business_name'],
     getRoute: (id) => `/admin/merchants/${id}`,
-    getTitle: (doc) => doc.businessName || doc.name || doc.email || doc.id,
+    getTitle: (doc) => doc.business_name || doc.name || doc.email || doc.id,
     getSubtitle: (doc) => doc.email || '',
   },
   {
     key: 'payins',
     label: 'Payins',
     icon: TrendingUp,
-    collection: 'payin',
-    orderField: 'requestedAt',
-    searchFields: ['transactionId', 'utrId', 'merchantOrderId'],
+    table: 'payins',
+    searchFields: ['transaction_id', 'utr', 'order_id'],
     getRoute: (id) => `/admin/payins`,
-    getTitle: (doc) => doc.transactionId || doc.id,
-    getSubtitle: (doc) => doc.utrId ? `UTR: ${doc.utrId}` : `₹${doc.amount || ''}`,
+    getTitle: (doc) => doc.transaction_id || doc.id,
+    getSubtitle: (doc) => doc.utr ? `UTR: ${doc.utr}` : `₹${doc.amount || ''}`,
   },
   {
     key: 'payouts',
     label: 'Payouts',
     icon: TrendingDown,
-    collection: 'payouts',
-    orderField: 'createdAt',
-    searchFields: ['id', 'merchantOrderId', 'utr'],
+    table: 'payouts',
+    searchFields: ['id', 'payout_id', 'utr'],
     getRoute: (id) => `/admin/payouts`,
-    getTitle: (doc) => doc.merchantOrderId || doc.id,
+    getTitle: (doc) => doc.payout_id || doc.id,
     getSubtitle: (doc) => doc.utr ? `UTR: ${doc.utr}` : `₹${doc.amount || ''}`,
   },
   {
     key: 'disputes',
     label: 'Disputes',
     icon: AlertCircle,
-    collection: 'disputes',
-    orderField: 'createdAt',
-    searchFields: ['id', 'transactionId', 'utrId'],
+    table: 'disputes',
+    searchFields: ['id', 'transaction_id', 'dispute_id'],
     getRoute: (id) => `/admin/disputes`,
-    getTitle: (doc) => doc.transactionId || doc.id,
+    getTitle: (doc) => doc.transaction_id || doc.dispute_id || doc.id,
     getSubtitle: (doc) => doc.status || '',
   },
 ];
@@ -103,30 +97,21 @@ export default function GlobalSearch({ isOpen, onClose }) {
     try {
       const promises = SEARCH_CONFIGS.map(async (config) => {
         try {
-          const q = query(
-            collection(db, config.collection),
-            orderBy(config.orderField, 'desc'),
-            limit(20)
-          );
-          const snapshot = await getDocs(q);
-          const matches = [];
-          snapshot.forEach((docSnap) => {
-            const data = { ...docSnap.data(), id: docSnap.id };
-            const matchesSearch = config.searchFields.some((field) => {
-              const val = data[field];
-              return val && String(val).toLowerCase().includes(lowerTerm);
-            });
-            // Also match against the document ID
-            const idMatch = docSnap.id.toLowerCase().includes(lowerTerm);
-            if (matchesSearch || idMatch) {
-              matches.push(data);
-            }
-          });
-          if (matches.length > 0) {
-            newResults[config.key] = matches.slice(0, 5);
+          // Build OR filter for text search across fields
+          const orFilters = config.searchFields
+            .map(f => `${f}.ilike.%${lowerTerm}%`)
+            .join(',');
+          const { data } = await supabase
+            .from(config.table)
+            .select('*')
+            .or(orFilters)
+            .order('created_at', { ascending: false })
+            .limit(5);
+          if (data?.length > 0) {
+            newResults[config.key] = data;
           }
         } catch (err) {
-          console.warn(`Search error for ${config.collection}:`, err);
+          console.warn(`Search error for ${config.table}:`, err);
         }
       });
 

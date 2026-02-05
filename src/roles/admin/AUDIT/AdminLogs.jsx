@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, onSnapshot, orderBy, limit, startAfter, getDocs } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import {
   FileText, Search, Filter, Download, RefreshCw, User, Calendar, Clock,
@@ -268,7 +267,6 @@ export default function AdminLogs() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
-  const [lastDoc, setLastDoc] = useState(null);
   const [hasMore, setHasMore] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -281,63 +279,66 @@ export default function AdminLogs() {
   const [dateTo, setDateTo] = useState('');
   const [datePreset, setDatePreset] = useState('all');
 
-  // Initial load with real-time updates
-  useEffect(() => {
+  // Map Supabase row → camelCase for LogCard compatibility
+  const mapLog = (row) => ({
+    ...row,
+    createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    performedBy: row.performed_by,
+    performedByName: row.performed_by_name,
+    performedByRole: row.performed_by_role,
+    performedByIp: row.performed_by_ip,
+    balanceBefore: row.balance_before,
+    balanceAfter: row.balance_after,
+    requiresReview: row.requires_review,
+  });
+
+  // Initial load
+  const fetchLogs = useCallback(async () => {
     setError(null);
     setLoading(true);
-    
-    const q = query(
-      collection(db, 'adminLog'),
-      orderBy('createdAt', 'desc'),
-      limit(PAGE_SIZE)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list = [];
-        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-        setLogs(list);
-        setLastDoc(snap.docs[snap.docs.length - 1] || null);
-        setHasMore(snap.docs.length === PAGE_SIZE);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('AdminLogs fetch error:', err);
-        setError(err.message || 'Failed to load audit logs');
-        setLoading(false);
-      }
-    );
-
-    return () => unsub();
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('admin_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, PAGE_SIZE - 1);
+      if (fetchError) throw fetchError;
+      const mapped = (data || []).map(mapLog);
+      setLogs(mapped);
+      setHasMore((data || []).length === PAGE_SIZE);
+    } catch (err) {
+      console.error('AdminLogs fetch error:', err);
+      setError(err.message || 'Failed to load audit logs');
+    }
+    setLoading(false);
   }, []);
 
-  // Load more logs (pagination)
+  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  // Load more logs (offset-based pagination)
   const loadMore = useCallback(async () => {
-    if (!lastDoc || loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore) return;
     
     setLoadingMore(true);
     try {
-      const q = query(
-        collection(db, 'adminLog'),
-        orderBy('createdAt', 'desc'),
-        startAfter(lastDoc),
-        limit(PAGE_SIZE)
-      );
-      
-      const snap = await getDocs(q);
-      const newLogs = [];
-      snap.forEach((d) => newLogs.push({ id: d.id, ...d.data() }));
-      
+      const { data, error: fetchError } = await supabase
+        .from('admin_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(logs.length, logs.length + PAGE_SIZE - 1);
+      if (fetchError) throw fetchError;
+      const newLogs = (data || []).map(mapLog);
       setLogs((prev) => [...prev, ...newLogs]);
-      setLastDoc(snap.docs[snap.docs.length - 1] || null);
-      setHasMore(snap.docs.length === PAGE_SIZE);
+      setHasMore(newLogs.length === PAGE_SIZE);
     } catch (err) {
       console.error('Load more error:', err);
       setError('Failed to load more logs');
     }
     setLoadingMore(false);
-  }, [lastDoc, loadingMore, hasMore]);
+  }, [logs.length, loadingMore, hasMore]);
 
   // 🔥 Phase 2.1: Debounced search (300ms delay like trader panels)
   useEffect(() => {

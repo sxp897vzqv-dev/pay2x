@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, onSnapshot, orderBy, where, doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import {
   ClipboardCheck, Search, RefreshCw, User, Clock, CheckCircle, XCircle,
@@ -149,44 +148,47 @@ export default function AdminReviewQueue() {
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState('all');
 
+  // Map Supabase row → camelCase for ReviewCard
+  const mapLog = (row) => ({
+    ...row,
+    createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    entityName: row.entity_name,
+    performedByName: row.performed_by_name,
+    performedByIp: row.performed_by_ip,
+    requiresReview: row.requires_review,
+  });
+
   useEffect(() => {
     setError(null);
-    const q = query(
-      collection(db, 'adminLog'),
-      where('requiresReview', '==', true),
-      where('reviewedAt', '==', null), // Only unreviewed items
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list = [];
-        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-        setLogs(list);
-        setLoading(false);
-      },
-      (err) => {
+    const fetchReviewQueue = async () => {
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('admin_logs')
+          .select('*')
+          .eq('requires_review', true)
+          .is('reviewed_at', null)
+          .order('created_at', { ascending: false });
+        if (fetchError) throw fetchError;
+        setLogs((data || []).map(mapLog));
+      } catch (err) {
         console.error('Review queue error:', err);
-        // Fallback: fetch all requiresReview logs without the reviewedAt filter
-        const fallbackQ = query(
-          collection(db, 'adminLog'),
-          where('requiresReview', '==', true),
-          orderBy('createdAt', 'desc')
-        );
-        onSnapshot(fallbackQ, (snap) => {
-          const list = [];
-          snap.forEach((d) => {
-            const data = d.data();
-            if (!data.reviewedAt) list.push({ id: d.id, ...data });
-          });
-          setLogs(list);
-          setLoading(false);
-        });
+        // Fallback: fetch all requires_review logs, filter client-side
+        try {
+          const { data } = await supabase
+            .from('admin_logs')
+            .select('*')
+            .eq('requires_review', true)
+            .order('created_at', { ascending: false });
+          setLogs((data || []).filter(d => !d.reviewed_at).map(mapLog));
+        } catch (e) {
+          setError(e.message);
+        }
       }
-    );
-
-    return () => unsub();
+      setLoading(false);
+    };
+    fetchReviewQueue();
   }, []);
 
   // Filter logs
@@ -206,12 +208,13 @@ export default function AdminReviewQueue() {
   // Mark as reviewed
   const handleMarkReviewed = async (logId, status, note) => {
     try {
-      await updateDoc(doc(db, 'adminLog', logId), {
-        reviewedAt: new Date(),
-        reviewStatus: status,
-        reviewNote: note || null,
-        reviewedBy: 'admin', // Could get current user
-      });
+      await supabase.from('admin_logs').update({
+        reviewed_at: new Date().toISOString(),
+        review_status: status,
+        review_note: note || null,
+        reviewed_by: 'admin',
+      }).eq('id', logId);
+      setLogs(prev => prev.filter(l => l.id !== logId));
     } catch (err) {
       console.error('Failed to mark as reviewed:', err);
       alert('Failed to update. Please try again.');
@@ -221,12 +224,13 @@ export default function AdminReviewQueue() {
   // Dismiss (mark reviewed without approval)
   const handleDismiss = async (logId, note) => {
     try {
-      await updateDoc(doc(db, 'adminLog', logId), {
-        reviewedAt: new Date(),
-        reviewStatus: 'dismissed',
-        reviewNote: note || null,
-        reviewedBy: 'admin',
-      });
+      await supabase.from('admin_logs').update({
+        reviewed_at: new Date().toISOString(),
+        review_status: 'dismissed',
+        review_note: note || null,
+        reviewed_by: 'admin',
+      }).eq('id', logId);
+      setLogs(prev => prev.filter(l => l.id !== logId));
     } catch (err) {
       console.error('Failed to dismiss:', err);
       alert('Failed to update. Please try again.');

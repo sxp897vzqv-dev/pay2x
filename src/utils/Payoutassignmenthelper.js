@@ -1,72 +1,24 @@
-// payoutAssignmentHelper.js
-// FINAL FIX: Removed orderBy to avoid index issues
-
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  updateDoc, 
-  doc, 
-  serverTimestamp,
-  writeBatch,
-  addDoc
-} from 'firebase/firestore';
-import { db } from '../firebase';
+// payoutAssignmentHelper.js — Supabase version
+import { supabase } from '../supabase';
 
 /**
- * FINAL FIX: Immediate auto-assign without orderBy
+ * Immediate auto-assign payouts to trader
  */
 export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
   try {
     console.log(`🚀 Starting auto-assignment for trader ${traderId}, amount: ₹${requestedAmount}`);
 
-    // Simple query WITHOUT orderBy (no index needed)
-    const payoutsQuery = query(
-      collection(db, 'payouts'),
-      where('status', '==', 'pending')
-    );
+    // Fetch unassigned pending payouts
+    const { data: pendingPayouts } = await supabase
+      .from('payouts')
+      .select('*')
+      .eq('status', 'pending')
+      .is('trader_id', null);
 
-    const payoutsSnapshot = await getDocs(payoutsQuery);
-    
-    console.log(`✅ Found ${payoutsSnapshot.size} pending payouts in database`);
-    
-    // Filter and sort in JavaScript
-    const unassignedPayouts = [];
-    payoutsSnapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      // Only unassigned payouts (no traderId)
-      if (!data.traderId || data.traderId === null || data.traderId === '') {
-        unassignedPayouts.push({ 
-          id: docSnap.id, 
-          ...data,
-          // Use any available timestamp for sorting
-          sortTime: data.requestTime?.seconds || 
-                    data.createdAt?.seconds || 
-                    data.timestamp?.seconds ||
-                    Date.now() / 1000
-        });
-      }
-    });
-
-    // Sort by time (oldest first - FIFO)
-    unassignedPayouts.sort((a, b) => a.sortTime - b.sortTime);
+    const unassignedPayouts = (pendingPayouts || [])
+      .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
     console.log(`✅ Found ${unassignedPayouts.length} unassigned payouts`);
-
-    if (unassignedPayouts.length === 0) {
-      console.log(`⚠️ NO UNASSIGNED PAYOUTS FOUND!`);
-      console.log(`Total pending in DB: ${payoutsSnapshot.size}`);
-      
-      // Debug: Show what payouts exist
-      let assignedCount = 0;
-      payoutsSnapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.traderId) assignedCount++;
-      });
-      console.log(`Already assigned: ${assignedCount}`);
-      console.log(`Available: ${payoutsSnapshot.size - assignedCount}`);
-    }
 
     // Select payouts to assign
     const payoutsToAssign = [];
@@ -74,11 +26,9 @@ export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
 
     for (const payout of unassignedPayouts) {
       if (totalAmount >= requestedAmount) break;
-      
       const payoutAmount = Number(payout.amount || 0);
       payoutsToAssign.push(payout);
       totalAmount += payoutAmount;
-      
       console.log(`  ➕ Selected: ₹${payoutAmount} (${payout.id.substring(0, 8)}...)`);
     }
 
@@ -86,349 +36,134 @@ export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
     const remainingAmount = requestedAmount - totalAmount;
     const fullyAssigned = remainingAmount <= 0;
 
-    console.log(`📊 Summary:`);
-    console.log(`  Requested: ₹${requestedAmount}`);
-    console.log(`  Assigned: ₹${assignedAmount}`);
-    console.log(`  Remaining: ₹${remainingAmount}`);
-    console.log(`  Status: ${fullyAssigned ? 'FULLY' : payoutsToAssign.length > 0 ? 'PARTIAL' : 'WAITING'}`);
-
     // Create request document
-    const requestData = {
-      traderId: traderId,
-      requestedAmount: requestedAmount,
-      assignedAmount: assignedAmount,
-      remainingAmount: remainingAmount > 0 ? remainingAmount : 0,
-      status: fullyAssigned ? 'fully_assigned' : (payoutsToAssign.length > 0 ? 'partially_assigned' : 'waiting'),
-      requestedAt: serverTimestamp(),
-      assignedPayouts: payoutsToAssign.map(p => p.id),
-      fullyAssigned: fullyAssigned,
-      inWaitingList: !fullyAssigned
-    };
+    const { data: requestDoc, error: reqErr } = await supabase
+      .from('payout_requests')
+      .insert({
+        trader_id: traderId,
+        requested_amount: requestedAmount,
+        assigned_amount: assignedAmount,
+        remaining_amount: remainingAmount > 0 ? remainingAmount : 0,
+        status: fullyAssigned ? 'fully_assigned' : (payoutsToAssign.length > 0 ? 'partially_assigned' : 'waiting'),
+        assigned_payouts: payoutsToAssign.map(p => p.id),
+        fully_assigned: fullyAssigned,
+        in_waiting_list: !fullyAssigned,
+      })
+      .select()
+      .single();
 
-    const requestRef = await addDoc(collection(db, 'payoutRequest'), requestData);
-    const requestId = requestRef.id;
-
+    if (reqErr) throw reqErr;
+    const requestId = requestDoc.id;
     console.log(`✅ Created request: ${requestId}`);
 
-    // Assign payouts if any available
+    // Assign payouts
     if (payoutsToAssign.length > 0) {
-      console.log(`💾 Assigning ${payoutsToAssign.length} payouts...`);
-      const batch = writeBatch(db);
-      const now = serverTimestamp();
-
-      payoutsToAssign.forEach((payout, index) => {
-        const payoutRef = doc(db, 'payouts', payout.id);
-        batch.update(payoutRef, {
-          traderId: traderId,
-          payoutRequestId: requestId,
-          assignedAt: now,
-          status: 'assigned'
-        });
-        console.log(`  ${index + 1}. ✓ ${payout.id.substring(0, 8)}...`);
-      });
-
-      await batch.commit();
-      console.log(`✅ SUCCESS! Assigned ${payoutsToAssign.length} payouts`);
-    } else {
-      console.log(`⚠️ No payouts to assign - added to waiting list`);
+      const ts = new Date().toISOString();
+      await Promise.all(payoutsToAssign.map(p =>
+        supabase.from('payouts').update({
+          trader_id: traderId,
+          payout_request_id: requestId,
+          assigned_at: ts,
+          status: 'assigned',
+        }).eq('id', p.id)
+      ));
+      console.log(`✅ Assigned ${payoutsToAssign.length} payouts`);
     }
 
-    const message = fullyAssigned 
+    const message = fullyAssigned
       ? `✅ Fully assigned! ${payoutsToAssign.length} payouts ready to process.`
       : payoutsToAssign.length > 0
         ? `⚠️ Partially assigned! ${payoutsToAssign.length} payouts ready. ₹${remainingAmount.toLocaleString()} in waiting list.`
         : `⏳ No payouts available right now. Request added to waiting list for ₹${requestedAmount.toLocaleString()}.`;
 
-    console.log(`\n${message}\n`);
-
     return {
-      success: true,
-      requestId: requestId,
-      status: requestData.status,
-      assignedCount: payoutsToAssign.length,
-      assignedAmount: assignedAmount,
+      success: true, requestId, status: requestDoc.status,
+      assignedCount: payoutsToAssign.length, assignedAmount,
       remainingAmount: remainingAmount > 0 ? remainingAmount : 0,
-      fullyAssigned: fullyAssigned,
-      inWaitingList: !fullyAssigned,
-      message: message
+      fullyAssigned, inWaitingList: !fullyAssigned, message,
     };
-
   } catch (error) {
     console.error('❌ ERROR in auto-assignment:', error);
-    console.error('Error details:', error.message);
     throw error;
   }
 }
 
 /**
- * Process waiting list - FIXED without orderBy
+ * Process waiting list
  */
 export async function processWaitingList() {
   try {
     console.log('🔄 Processing waiting list...');
 
-    // Get waiting requests WITHOUT orderBy
-    const waitingQuery = query(
-      collection(db, 'payoutRequest'),
-      where('inWaitingList', '==', true)
-    );
+    const { data: waitingRequests } = await supabase
+      .from('payout_requests')
+      .select('*')
+      .eq('in_waiting_list', true)
+      .order('created_at', { ascending: true });
 
-    const waitingSnapshot = await getDocs(waitingQuery);
-    
-    if (waitingSnapshot.empty) {
+    if (!waitingRequests?.length) {
       console.log('No requests in waiting list');
       return { processed: 0 };
     }
 
-    // Sort in JavaScript by requestedAt
-    const waitingRequests = [];
-    waitingSnapshot.forEach(doc => {
-      waitingRequests.push({
-        id: doc.id,
-        ...doc.data(),
-        sortTime: doc.data().requestedAt?.seconds || 0
-      });
-    });
-    waitingRequests.sort((a, b) => a.sortTime - b.sortTime);
-
-    console.log(`Found ${waitingRequests.length} requests in waiting list`);
-
     let processedCount = 0;
 
     for (const request of waitingRequests) {
-      const remainingAmount = request.remainingAmount || 0;
-
+      const remainingAmount = request.remaining_amount || 0;
       if (remainingAmount <= 0) continue;
 
-      console.log(`Processing request ${request.id}, remaining: ₹${remainingAmount}`);
+      const { data: unassigned } = await supabase
+        .from('payouts')
+        .select('*')
+        .eq('status', 'pending')
+        .is('trader_id', null)
+        .order('created_at', { ascending: true });
 
-      // Get available payouts WITHOUT orderBy
-      const payoutsQuery = query(
-        collection(db, 'payouts'),
-        where('status', '==', 'pending')
-      );
+      if (!unassigned?.length) break;
 
-      const payoutsSnapshot = await getDocs(payoutsQuery);
-      
-      if (payoutsSnapshot.empty) {
-        console.log('No payouts available');
-        break;
-      }
-
-      // Filter and sort
-      const unassignedPayouts = [];
-      payoutsSnapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (!data.traderId || data.traderId === null || data.traderId === '') {
-          unassignedPayouts.push({ 
-            id: docSnap.id, 
-            ...data,
-            sortTime: data.requestTime?.seconds || 
-                      data.createdAt?.seconds || 
-                      Date.now() / 1000
-          });
-        }
-      });
-
-      if (unassignedPayouts.length === 0) {
-        console.log('No unassigned payouts');
-        break;
-      }
-
-      unassignedPayouts.sort((a, b) => a.sortTime - b.sortTime);
-
-      // Select payouts
       const payoutsToAssign = [];
       let additionalAmount = 0;
 
-      for (const payout of unassignedPayouts) {
+      for (const payout of unassigned) {
         if (additionalAmount >= remainingAmount) break;
-        
-        const payoutAmount = Number(payout.amount || 0);
         payoutsToAssign.push(payout);
-        additionalAmount += payoutAmount;
+        additionalAmount += Number(payout.amount || 0);
       }
 
       if (payoutsToAssign.length === 0) break;
 
-      // Assign payouts
-      const batch = writeBatch(db);
-      const now = serverTimestamp();
+      const ts = new Date().toISOString();
+      await Promise.all(payoutsToAssign.map(p =>
+        supabase.from('payouts').update({
+          trader_id: request.trader_id,
+          payout_request_id: request.id,
+          assigned_at: ts,
+          status: 'assigned',
+        }).eq('id', p.id)
+      ));
 
-      payoutsToAssign.forEach(payout => {
-        const payoutRef = doc(db, 'payouts', payout.id);
-        batch.update(payoutRef, {
-          traderId: request.traderId,
-          payoutRequestId: request.id,
-          assignedAt: now,
-          status: 'assigned'
-        });
-      });
-
-      // Update request
-      const newAssignedAmount = (request.assignedAmount || 0) + additionalAmount;
-      const newRemainingAmount = request.requestedAmount - newAssignedAmount;
+      const newAssignedAmount = (request.assigned_amount || 0) + additionalAmount;
+      const newRemainingAmount = request.requested_amount - newAssignedAmount;
       const nowFullyAssigned = newRemainingAmount <= 0;
 
-      const requestRef = doc(db, 'payoutRequest', request.id);
-      batch.update(requestRef, {
-        assignedAmount: newAssignedAmount,
-        remainingAmount: newRemainingAmount > 0 ? newRemainingAmount : 0,
-        assignedPayouts: [...(request.assignedPayouts || []), ...payoutsToAssign.map(p => p.id)],
-        fullyAssigned: nowFullyAssigned,
-        inWaitingList: !nowFullyAssigned,
+      await supabase.from('payout_requests').update({
+        assigned_amount: newAssignedAmount,
+        remaining_amount: newRemainingAmount > 0 ? newRemainingAmount : 0,
+        assigned_payouts: [...(request.assigned_payouts || []), ...payoutsToAssign.map(p => p.id)],
+        fully_assigned: nowFullyAssigned,
+        in_waiting_list: !nowFullyAssigned,
         status: nowFullyAssigned ? 'fully_assigned' : 'partially_assigned',
-        lastAssignedAt: now
-      });
+        last_assigned_at: ts,
+      }).eq('id', request.id);
 
-      await batch.commit();
-      
-      console.log(`✅ Assigned ${payoutsToAssign.length} more payouts`);
       processedCount++;
-
-      if (nowFullyAssigned) {
-        console.log(`✅ Request ${request.id} now fully assigned!`);
-      }
+      if (nowFullyAssigned) console.log(`✅ Request ${request.id} now fully assigned!`);
     }
 
     console.log(`🎉 Processed ${processedCount} waiting requests`);
     return { processed: processedCount };
-
   } catch (error) {
     console.error('❌ Error processing waiting list:', error);
-    throw error;
-  }
-}
-
-/**
- * Check if trader can create request
- */
-export async function canTraderCreateRequest(traderId) {
-  try {
-    const requestQuery = query(
-      collection(db, 'payoutRequest'),
-      where('traderId', '==', traderId),
-      where('status', 'in', ['fully_assigned', 'partially_assigned', 'waiting'])
-    );
-
-    const requestSnap = await getDocs(requestQuery);
-    
-    if (!requestSnap.empty) {
-      const request = requestSnap.docs[0].data();
-      const requestId = requestSnap.docs[0].id;
-
-      const assignedPayoutsQuery = query(
-        collection(db, 'payouts'),
-        where('payoutRequestId', '==', requestId),
-        where('status', '==', 'assigned')
-      );
-
-      const assignedPayoutsSnap = await getDocs(assignedPayoutsQuery);
-
-      if (!assignedPayoutsSnap.empty) {
-        return {
-          canCreate: false,
-          reason: 'You have pending payouts to process',
-          pendingCount: assignedPayoutsSnap.size,
-          activeRequest: { id: requestId, ...request }
-        };
-      }
-
-      await updateDoc(doc(db, 'payoutRequest', requestId), {
-        status: 'completed',
-        completedAt: serverTimestamp()
-      });
-    }
-
-    return {
-      canCreate: true,
-      reason: null
-    };
-
-  } catch (error) {
-    console.error('Error checking eligibility:', error);
-    throw error;
-  }
-}
-
-/**
- * Complete payout
- */
-export async function completePayoutWithProof(payoutId, traderId, utrId, proofUrl) {
-  try {
-    const payoutDoc = await getDocs(
-      query(collection(db, 'payouts'), where('__name__', '==', payoutId))
-    );
-    
-    if (payoutDoc.empty) {
-      throw new Error('Payout not found');
-    }
-
-    const payoutData = payoutDoc.docs[0].data();
-    const payoutAmount = Number(payoutData.amount || 0);
-
-    const batch = writeBatch(db);
-
-    const payoutRef = doc(db, 'payouts', payoutId);
-    batch.update(payoutRef, {
-      status: 'completed',
-      completedAt: serverTimestamp(),
-      utrId: utrId,
-      proofUrl: proofUrl
-    });
-
-    const traderQuery = query(
-      collection(db, 'trader'),
-      where('uid', '==', traderId)
-    );
-    const traderSnap = await getDocs(traderQuery);
-
-    if (!traderSnap.empty) {
-      const traderDoc = traderSnap.docs[0];
-      const currentBalance = Number(traderDoc.data().balance || 0);
-      const newBalance = currentBalance + payoutAmount;
-
-      batch.update(doc(db, 'trader', traderDoc.id), {
-        balance: newBalance
-      });
-    }
-
-    await batch.commit();
-
-    console.log(`✅ Payout completed: ₹${payoutAmount} added`);
-
-    // ✅ Auto-complete request if all payouts done
-    const requestId = payoutData.payoutRequestId;
-    if (requestId) {
-      // Check remaining assigned payouts for this request
-      const remainingPayoutsSnap = await getDocs(
-        query(
-          collection(db, 'payouts'),
-          where('payoutRequestId', '==', requestId),
-          where('status', '==', 'assigned')
-        )
-      );
-
-      // If no more assigned payouts, mark request as completed
-      if (remainingPayoutsSnap.empty) {
-        await updateDoc(doc(db, 'payoutRequest', requestId), {
-          status: 'completed',
-          completedAt: serverTimestamp(),
-          fullyCompleted: true,
-        });
-        console.log(`✅ Request ${requestId} auto-completed - all payouts done`);
-      }
-    }
-
-    processWaitingList().catch(err => console.error('Error processing waiting list:', err));
-
-    return {
-      success: true,
-      amountAdded: payoutAmount
-    };
-
-  } catch (error) {
-    console.error('❌ Error completing payout:', error);
     throw error;
   }
 }
@@ -438,77 +173,49 @@ export async function completePayoutWithProof(payoutId, traderId, utrId, proofUr
  */
 export async function cancelPayoutByTrader(payoutId, reason) {
   try {
-    // Get payout data first
-    const payoutSnap = await getDocs(
-      query(collection(db, 'payouts'), where('__name__', '==', payoutId))
-    );
-    
-    if (payoutSnap.empty) {
-      throw new Error('Payout not found');
-    }
+    const { data: payout } = await supabase.from('payouts').select('*').eq('id', payoutId).single();
+    if (!payout) throw new Error('Payout not found');
 
-    const payoutData = payoutSnap.docs[0].data();
-    const payoutAmount = Number(payoutData.amount || 0);
-    const requestId = payoutData.payoutRequestId;
+    const payoutAmount = Number(payout.amount || 0);
+    const requestId = payout.payout_request_id;
+    const ts = new Date().toISOString();
 
-    // Update payout
-    const payoutRef = doc(db, 'payouts', payoutId);
-    await updateDoc(payoutRef, {
+    await supabase.from('payouts').update({
       status: 'cancelled_by_trader',
-      cancelledAt: serverTimestamp(),
-      cancelReason: reason,
-      cancelledBy: 'trader',
-      traderId: null,
-      payoutRequestId: null,
-      assignedAt: null
-    });
+      cancelled_at: ts,
+      cancel_reason: reason,
+      cancelled_by: 'trader',
+      trader_id: null,
+      payout_request_id: null,
+      assigned_at: null,
+    }).eq('id', payoutId);
 
-    console.log(`✅ Payout cancelled`);
-
-    // Update the payoutRequest if it exists
     if (requestId) {
-      const requestSnap = await getDocs(
-        query(collection(db, 'payoutRequest'), where('__name__', '==', requestId))
-      );
+      const { data: req } = await supabase.from('payout_requests').select('*').eq('id', requestId).single();
+      if (req) {
+        const assignedPayouts = (req.assigned_payouts || []).filter(id => id !== payoutId);
+        const newAssignedAmount = (req.assigned_amount || 0) - payoutAmount;
+        const newRemainingAmount = req.requested_amount - newAssignedAmount;
 
-      if (!requestSnap.empty) {
-        const requestData = requestSnap.docs[0].data();
-        const assignedPayouts = (requestData.assignedPayouts || []).filter(id => id !== payoutId);
-        const newAssignedAmount = (requestData.assignedAmount || 0) - payoutAmount;
-        const newRemainingAmount = requestData.requestedAmount - newAssignedAmount;
-
-        const requestRef = doc(db, 'payoutRequest', requestId);
-        
-        // If no more assigned payouts, allow cancellation
         if (assignedPayouts.length === 0) {
-          await updateDoc(requestRef, {
-            assignedPayouts: [],
-            assignedAmount: 0,
-            remainingAmount: requestData.requestedAmount,
-            fullyAssigned: false,
-            inWaitingList: true,
-            status: 'waiting'
-          });
-          console.log(`✅ Request ${requestId} status updated - now waiting (no assigned payouts)`);
+          await supabase.from('payout_requests').update({
+            assigned_payouts: [], assigned_amount: 0,
+            remaining_amount: req.requested_amount,
+            fully_assigned: false, in_waiting_list: true, status: 'waiting',
+          }).eq('id', requestId);
         } else {
-          // Update with remaining assignments
-          await updateDoc(requestRef, {
-            assignedPayouts,
-            assignedAmount: newAssignedAmount,
-            remainingAmount: newRemainingAmount > 0 ? newRemainingAmount : 0,
-            fullyAssigned: newRemainingAmount <= 0,
-            status: newRemainingAmount <= 0 ? 'fully_assigned' : 'partially_assigned'
-          });
-          console.log(`✅ Request ${requestId} updated - remaining ${assignedPayouts.length} payouts`);
+          await supabase.from('payout_requests').update({
+            assigned_payouts, assigned_amount: newAssignedAmount,
+            remaining_amount: newRemainingAmount > 0 ? newRemainingAmount : 0,
+            fully_assigned: newRemainingAmount <= 0,
+            status: newRemainingAmount <= 0 ? 'fully_assigned' : 'partially_assigned',
+          }).eq('id', requestId);
         }
       }
     }
 
-    // Process waiting list for the freed payout slot
     processWaitingList().catch(err => console.error('Error processing waiting list:', err));
-
     return { success: true };
-
   } catch (error) {
     console.error('❌ Error cancelling payout:', error);
     throw error;
@@ -516,43 +223,56 @@ export async function cancelPayoutByTrader(payoutId, reason) {
 }
 
 /**
- * Get overdue payouts - FIXED without orderBy
+ * Cancel request by trader
+ */
+export async function cancelPayoutRequestByTrader(requestId) {
+  try {
+    const { data: req } = await supabase.from('payout_requests').select('*').eq('id', requestId).single();
+    if (!req) throw new Error('Request not found');
+
+    // Check for assigned payouts
+    const { count } = await supabase
+      .from('payouts')
+      .select('*', { count: 'exact', head: true })
+      .eq('payout_request_id', requestId)
+      .eq('status', 'assigned');
+
+    if (count > 0) {
+      throw new Error(`Cannot cancel: ${count} payout(s) still assigned. Cancel them first.`);
+    }
+
+    await supabase.from('payout_requests').update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: 'trader',
+    }).eq('id', requestId);
+
+    console.log(`✅ Request ${requestId} cancelled successfully`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error cancelling request:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get overdue payouts (assigned > 1 hour ago)
  */
 export async function getPayoutsPendingOverOneHour() {
   try {
-    const oneHourAgo = new Date();
-    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-    const payoutsQuery = query(
-      collection(db, 'payouts'),
-      where('status', '==', 'assigned')
-    );
+    const { data } = await supabase
+      .from('payouts')
+      .select('*')
+      .eq('status', 'assigned')
+      .lt('assigned_at', oneHourAgo)
+      .order('assigned_at', { ascending: true });
 
-    const snapshot = await getDocs(payoutsQuery);
-    const overduePayouts = [];
-
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const assignedAt = data.assignedAt?.toDate();
-      
-      if (assignedAt && assignedAt < oneHourAgo) {
-        overduePayouts.push({
-          id: doc.id,
-          ...data,
-          pendingDuration: Math.floor((Date.now() - assignedAt.getTime()) / (1000 * 60))
-        });
-      }
-    });
-
-    // Sort by time (oldest first)
-    overduePayouts.sort((a, b) => {
-      const timeA = a.assignedAt?.seconds || 0;
-      const timeB = b.assignedAt?.seconds || 0;
-      return timeA - timeB;
-    });
-
-    return overduePayouts;
-
+    return (data || []).map(p => ({
+      ...p,
+      pendingDuration: Math.floor((Date.now() - new Date(p.assigned_at).getTime()) / (1000 * 60)),
+    }));
   } catch (error) {
     console.error('Error fetching overdue:', error);
     throw error;
@@ -560,34 +280,17 @@ export async function getPayoutsPendingOverOneHour() {
 }
 
 /**
- * Get cancelled payouts - FIXED without orderBy
+ * Get cancelled payouts
  */
 export async function getCancelledPayouts() {
   try {
-    const payoutsQuery = query(
-      collection(db, 'payouts'),
-      where('status', '==', 'cancelled_by_trader')
-    );
+    const { data } = await supabase
+      .from('payouts')
+      .select('*')
+      .eq('status', 'cancelled_by_trader')
+      .order('cancelled_at', { ascending: false });
 
-    const snapshot = await getDocs(payoutsQuery);
-    const cancelledPayouts = [];
-
-    snapshot.forEach(doc => {
-      cancelledPayouts.push({
-        id: doc.id,
-        ...doc.data()
-      });
-    });
-
-    // Sort by cancelled time (newest first)
-    cancelledPayouts.sort((a, b) => {
-      const timeA = a.cancelledAt?.seconds || 0;
-      const timeB = b.cancelledAt?.seconds || 0;
-      return timeB - timeA;
-    });
-
-    return cancelledPayouts;
-
+    return data || [];
   } catch (error) {
     console.error('Error fetching cancelled:', error);
     throw error;
@@ -599,16 +302,12 @@ export async function getCancelledPayouts() {
  */
 export async function removePayoutByAdmin(payoutId, adminId) {
   try {
-    const payoutRef = doc(db, 'payouts', payoutId);
-    
-    await updateDoc(payoutRef, {
+    await supabase.from('payouts').update({
       status: 'removed_by_admin',
-      removedAt: serverTimestamp(),
-      removedBy: adminId
-    });
-
+      removed_at: new Date().toISOString(),
+      removed_by: adminId,
+    }).eq('id', payoutId);
     return { success: true };
-
   } catch (error) {
     console.error('Error removing payout:', error);
     throw error;
@@ -616,74 +315,25 @@ export async function removePayoutByAdmin(payoutId, adminId) {
 }
 
 /**
- * Admin reassign payout
+ * Admin reassign payout to pool
  */
 export async function reassignPayoutToPool(payoutId) {
   try {
-    const payoutRef = doc(db, 'payouts', payoutId);
-    
-    await updateDoc(payoutRef, {
+    await supabase.from('payouts').update({
       status: 'pending',
-      traderId: null,
-      payoutRequestId: null,
-      assignedAt: null,
-      cancelledAt: null,
-      cancelReason: null,
-      cancelledBy: null
-    });
+      trader_id: null,
+      payout_request_id: null,
+      assigned_at: null,
+      cancelled_at: null,
+      cancel_reason: null,
+      cancelled_by: null,
+    }).eq('id', payoutId);
 
     console.log(`✅ Payout reassigned to pool`);
-
     processWaitingList().catch(err => console.error('Error processing waiting list:', err));
-
     return { success: true };
-
   } catch (error) {
     console.error('Error reassigning:', error);
-    throw error;
-  }
-}
-
-/**
- * Cancel request by trader
- */
-export async function cancelPayoutRequestByTrader(requestId) {
-  try {
-    const requestSnap = await getDocs(
-      query(collection(db, 'payoutRequest'), where('__name__', '==', requestId))
-    );
-
-    if (requestSnap.empty) {
-      throw new Error('Request not found');
-    }
-
-    const requestData = requestSnap.docs[0].data();
-
-    // Check for ACTUAL assigned payouts in database (not just array)
-    const assignedPayoutsQuery = query(
-      collection(db, 'payouts'),
-      where('payoutRequestId', '==', requestId),
-      where('status', '==', 'assigned')
-    );
-
-    const assignedPayoutsSnap = await getDocs(assignedPayoutsQuery);
-
-    if (!assignedPayoutsSnap.empty) {
-      throw new Error(`Cannot cancel: ${assignedPayoutsSnap.size} payout(s) still assigned. Cancel them first.`);
-    }
-
-    await updateDoc(doc(db, 'payoutRequest', requestId), {
-      status: 'cancelled',
-      cancelledAt: serverTimestamp(),
-      cancelledBy: 'trader'
-    });
-
-    console.log(`✅ Request ${requestId} cancelled successfully`);
-
-    return { success: true };
-
-  } catch (error) {
-    console.error('Error cancelling request:', error);
     throw error;
   }
 }

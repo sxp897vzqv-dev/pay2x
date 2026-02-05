@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { getAuth, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import GlobalSearch from '../../components/admin/GlobalSearch';
 import NotificationCenter from '../../components/admin/NotificationCenter';
 import {
@@ -171,15 +169,15 @@ export default function AdminLayout() {
 
   const fetchAdminInfo = async () => {
     try {
-      const user = getAuth().currentUser;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const role = localStorage.getItem('pay2x_user_role');
-      const collectionName = role === 'worker' ? 'worker' : 'admins';
-      const snap = await getDoc(doc(db, collectionName, user.uid));
-      if (snap.exists()) {
-        setAdminInfo(snap.data());
+      if (role === 'worker') {
+        const { data } = await supabase.from('workers').select('*').eq('profile_id', user.id).single();
+        setAdminInfo(data ? { name: data.name, ...data } : { name: user.email?.split('@')[0] || 'Admin' });
       } else {
-        setAdminInfo({ name: user.displayName || user.email?.split('@')[0] || 'Admin' });
+        const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        setAdminInfo(data ? { name: data.display_name || user.email?.split('@')[0] || 'Admin' } : { name: user.email?.split('@')[0] || 'Admin' });
       }
     } catch (e) { console.error(e); }
   };
@@ -188,7 +186,7 @@ export default function AdminLayout() {
     try {
       localStorage.removeItem('pay2x_user_role');
       localStorage.removeItem('pay2x_worker_permissions');
-      await signOut(getAuth());
+      await supabase.auth.signOut();
       navigate('/signin');
     } catch (e) {
       alert('Logout failed: ' + e.message);

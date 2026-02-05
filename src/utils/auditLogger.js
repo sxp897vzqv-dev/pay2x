@@ -1,12 +1,10 @@
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../supabase';
 import { getCachedIP } from './ipCapture';
 
 /**
- * Central audit logging function
+ * Central audit logging function — Supabase version
  * Logs all critical actions across the platform for compliance and security
- * 
+ *
  * @param {Object} params - Logging parameters
  * @param {string} params.action - Action type (e.g., 'upi_enabled', 'trader_balance_topup')
  * @param {string} params.category - Category: 'financial' | 'entity' | 'operational' | 'security' | 'system' | 'analytics'
@@ -22,6 +20,7 @@ import { getCachedIP } from './ipCapture';
  * @param {string} params.performedBy - Override performer ID (optional, uses current user)
  * @param {string} params.performedByName - Override performer name (optional)
  * @param {string} params.performedByRole - Override performer role (optional)
+ * @param {string} params.performedByIp - Override performer IP (optional, uses cached IP)
  */
 export async function logAuditEvent({
   action,
@@ -38,63 +37,57 @@ export async function logAuditEvent({
   performedBy = null,
   performedByName = null,
   performedByRole = null,
+  performedByIp = null,
 }) {
   try {
     // Validate required fields
     if (!action) throw new Error('Action is required for audit logging');
     if (!category) throw new Error('Category is required for audit logging');
 
-    const auth = getAuth();
-    const user = auth.currentUser;
+    // Get current user from Supabase (async)
+    const { data: { user } } = await supabase.auth.getUser();
 
     // Get performer info
-    const performerId = performedBy || user?.uid || 'system';
-    const performerName = performedByName || user?.email || user?.displayName || 'System';
-    const performerRole = performedByRole || 'admin'; // Could fetch from user doc if needed
+    const performerId = performedBy || user?.id || null;
+    const performerName = performedByName || user?.email || user?.user_metadata?.display_name || 'System';
+    const performerRole = performedByRole || 'admin';
 
-    // Prepare log entry
-    const logEntry = {
-      // Core identifiers
-      action,
-      category,
-      entityType: entityType || null,
-      entityId: entityId || null,
-      entityName: entityName || null,
+    // Handle IP — PostgreSQL INET type does NOT accept 'unknown' or empty string
+    const rawIp = performedByIp || getCachedIP();
+    const ipForDb = (rawIp && rawIp !== 'unknown' && rawIp !== '') ? rawIp : null;
 
-      // Performer info
-      performedBy: performerId,
-      performedByName: performerName,
-      performedByRole: performerRole,
-      performedByIp: getCachedIP(), // Auto-captured from ipCapture utility
-
-      // Action details
-      details: {
-        before: details.before !== undefined ? details.before : null,
-        after: details.after !== undefined ? details.after : null,
-        amount: details.amount || null,
-        note: details.note || null,
-        metadata: details.metadata || null,
-      },
-
-      // Financial specifics
-      balanceBefore,
-      balanceAfter,
-
-      // Audit & compliance
-      severity,
-      requiresReview,
-
-      // System context
-      source,
-      version: import.meta.env?.VITE_APP_VERSION || '1.0.0',
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-
-      // Timestamp
-      createdAt: serverTimestamp(),
+    // Build details JSONB
+    const detailsJson = {
+      before: details.before !== undefined ? details.before : null,
+      after: details.after !== undefined ? details.after : null,
+      amount: details.amount || null,
+      note: details.note || null,
+      metadata: details.metadata || null,
     };
 
-    // Write to Firestore
-    await addDoc(collection(db, 'adminLog'), logEntry);
+    // Prepare log entry with snake_case column names
+    const logEntry = {
+      action,
+      category,
+      entity_type: entityType || null,
+      entity_id: entityId || null,
+      entity_name: entityName || null,
+      performed_by: performerId,
+      performed_by_name: performerName,
+      performed_by_role: performerRole,
+      performed_by_ip: ipForDb,
+      details: detailsJson,
+      severity,
+      requires_review: requiresReview,
+      source,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+    };
+
+    // Write to Supabase
+    const { error } = await supabase.from('admin_logs').insert(logEntry);
+
+    if (error) throw error;
 
     console.log(`✅ Audit log created: ${action} [${category}]`, {
       entity: entityType ? `${entityType}:${entityId}` : 'none',
@@ -106,7 +99,7 @@ export async function logAuditEvent({
     // CRITICAL: Never break app functionality if logging fails
     console.error('❌ Failed to create audit log:', error);
     console.error('Log details:', { action, category, entityType, entityId });
-    
+
     // Return error but don't throw (silent failure)
     return { success: false, error: error.message };
   }
@@ -170,7 +163,7 @@ export const logSecurityHoldReleased = (traderId, traderName, amount, balanceBef
     severity: 'info',
   });
 
-// UPI operations (CRITICAL - Your requirement)
+// UPI operations
 export const logUPIEnabled = (upiId, upiAddress, merchantId, reason) =>
   logAuditEvent({
     action: 'upi_enabled',
@@ -184,7 +177,7 @@ export const logUPIEnabled = (upiId, upiAddress, merchantId, reason) =>
       note: reason,
       metadata: { merchantId },
     },
-    severity: 'warning', // UPI changes are important for operations
+    severity: 'warning',
   });
 
 export const logUPIDisabled = (upiId, upiAddress, merchantId, reason) =>
@@ -291,12 +284,12 @@ export const logMerchantAPIKeyGenerated = (merchantId, merchantName, keyPrefix) 
     requiresReview: true,
   });
 
-// Authentication operations (Week 4 - Security Logs)
+// Authentication operations
 export const logLoginSuccess = (role, userId, userName, email, userAgent, clientIP) =>
   logAuditEvent({
     action: 'login_success',
     category: 'security',
-    entityType: role, // 'admin' | 'merchant' | 'trader'
+    entityType: role,
     entityId: userId,
     entityName: userName,
     details: {
@@ -312,7 +305,7 @@ export const logLoginFailure = (email, reason, errorCode, userAgent, clientIP, i
     action: 'login_failed',
     category: 'security',
     entityType: 'user',
-    entityId: 'unknown',
+    entityId: null,
     entityName: email,
     details: {
       note: `Login attempt failed: ${reason}`,
@@ -323,7 +316,7 @@ export const logLoginFailure = (email, reason, errorCode, userAgent, clientIP, i
     requiresReview: isSuspicious,
   });
 
-// Data operations (Week 4 - Security Logs)
+// Data operations
 export const logDataExported = (dataType, recordCount, filters = {}) =>
   logAuditEvent({
     action: 'data_exported',
@@ -341,7 +334,7 @@ export const logDataExported = (dataType, recordCount, filters = {}) =>
       },
     },
     severity: 'info',
-    requiresReview: recordCount > 10000, // Flag large exports
+    requiresReview: recordCount > 10000,
   });
 
 export const logDataDeleted = (entityType, entityId, entityName, reason = '') =>
@@ -361,7 +354,7 @@ export const logDataDeleted = (entityType, entityId, entityName, reason = '') =>
     requiresReview: true,
   });
 
-// System configuration operations (Week 4 - System Config)
+// System configuration operations
 export const logTatumAPIKeyChanged = (oldKeyPrefix, newKeyPrefix) =>
   logAuditEvent({
     action: 'tatum_apikey_changed',
@@ -408,8 +401,8 @@ export const logMasterWalletGenerated = (address, xpubPrefix, wasRegenerated = f
     entityId: 'tatumConfig',
     entityName: 'Master Wallet',
     details: {
-      note: wasRegenerated 
-        ? 'Master wallet regenerated (replaced old wallet)' 
+      note: wasRegenerated
+        ? 'Master wallet regenerated (replaced old wallet)'
         : 'Master wallet generated for first time',
       metadata: {
         address,
@@ -496,5 +489,3 @@ export const logUSDTDepositCredited = (traderId, traderName, amount, usdtAmount,
     severity: 'info',
     source: 'webhook',
   });
-
-// (Duplicate declarations removed - logDataExported and logDataDeleted are defined above)

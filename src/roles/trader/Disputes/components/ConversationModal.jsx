@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, storage } from '../../../../firebase';
-import {
-  collection, query, where, onSnapshot, orderBy, updateDoc, doc, serverTimestamp, addDoc,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { supabase } from '../../../../supabase';
 import {
   CheckCircle, XCircle, X, Upload, Send, Paperclip,
 } from 'lucide-react';
@@ -22,53 +18,51 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
   // Load messages
   useEffect(() => {
     if (!dispute) return;
-
-    const unsub = onSnapshot(
-      query(
-        collection(db, 'disputeMessages'),
-        where('disputeId', '==', dispute.id),
-        orderBy('timestamp', 'asc')
-      ),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setMessages(list);
-        
-        // Mark trader messages as read
-        list.forEach(msg => {
-          if (msg.from !== 'trader' && !msg.readByTrader) {
-            updateDoc(doc(db, 'disputeMessages', msg.id), {
-              readByTrader: true,
-              readByTraderAt: serverTimestamp(),
-            });
-          }
-        });
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from('dispute_messages')
+        .select('*')
+        .eq('dispute_id', dispute.id)
+        .order('timestamp', { ascending: true });
+      const list = (data || []).map(m => ({
+        ...m,
+        disputeId: m.dispute_id,
+        readByTrader: m.read_by_trader,
+        readByMerchant: m.read_by_merchant,
+        isDecision: m.is_decision,
+        proofUrl: m.proof_url,
+        timestamp: m.timestamp ? { seconds: new Date(m.timestamp).getTime() / 1000 } : null,
+      }));
+      setMessages(list);
+      // Mark unread messages as read
+      const unread = list.filter(m => m.from !== 'trader' && !m.readByTrader);
+      for (const msg of unread) {
+        await supabase.from('dispute_messages').update({
+          read_by_trader: true, read_by_trader_at: new Date().toISOString(),
+        }).eq('id', msg.id);
       }
-    );
-
-    return () => unsub();
+    };
+    fetchMessages();
   }, [dispute]);
 
   const handleSendMessage = async () => {
     if (!messageText.trim()) return;
-
+    const ts = new Date().toISOString();
     try {
-      await addDoc(collection(db, 'disputeMessages'), {
-        disputeId: dispute.id,
+      await supabase.from('dispute_messages').insert({
+        dispute_id: dispute.id,
         from: 'trader',
         text: messageText,
-        timestamp: serverTimestamp(),
-        readByMerchant: false,
-        readByTrader: true,
+        timestamp: ts,
+        read_by_merchant: false,
+        read_by_trader: true,
       });
-
-      // Update message count
-      await updateDoc(doc(db, 'disputes', dispute.id), {
-        messageCount: (dispute.messageCount || 0) + 1,
-        lastMessageAt: serverTimestamp(),
-        lastMessageFrom: 'trader',
-      });
-
+      await supabase.from('disputes').update({
+        message_count: (dispute.messageCount || 0) + 1,
+        last_message_at: ts,
+        last_message_from: 'trader',
+      }).eq('id', dispute.id);
+      setMessages(prev => [...prev, { from: 'trader', text: messageText, timestamp: { seconds: new Date(ts).getTime() / 1000 } }]);
       setMessageText('');
     } catch (e) {
       alert('Error: ' + e.message);
@@ -84,22 +78,24 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
     try {
       let proofUrl = null;
       if (proofFile) {
-        const sRef = ref(storage, `disputes/${dispute.id}/${Date.now()}_${proofFile.name}`);
-        await uploadBytes(sRef, proofFile);
-        proofUrl = await getDownloadURL(sRef);
+        const filename = `${dispute.id}/${Date.now()}_${proofFile.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+        const { error: upErr } = await supabase.storage.from('dispute-proofs').upload(filename, proofFile);
+        if (upErr) throw upErr;
+        const { data: urlData } = supabase.storage.from('dispute-proofs').getPublicUrl(filename);
+        proofUrl = urlData.publicUrl;
       }
 
       // Add final decision message
-      await addDoc(collection(db, 'disputeMessages'), {
-        disputeId: dispute.id,
+      await supabase.from('dispute_messages').insert({
+        dispute_id: dispute.id,
         from: 'trader',
         text: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
-        isDecision: true,
+        is_decision: true,
         action,
-        proofUrl,
-        timestamp: serverTimestamp(),
-        readByMerchant: false,
-        readByTrader: true,
+        proof_url: proofUrl,
+        timestamp: new Date().toISOString(),
+        read_by_merchant: false,
+        read_by_trader: true,
       });
 
       await onSubmit({ action, note: finalNote, proofUrl });

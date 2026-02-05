@@ -58,18 +58,18 @@ export async function fetchUSDTSellRate() {
 
 export async function storeRateInFirestore(db, rateData) {
   try {
-    const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-    
-    await addDoc(collection(db, 'usdtRates'), {
-      buyRate: rateData.rate,
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = (await import('../../supabase')).supabase;
+
+    await supabase.from('usdt_rates').insert({
+      buy_rate: rateData.rate,
       merchants: rateData.merchants,
       source: rateData.source,
-      paymentMethods: rateData.paymentMethods,
-      createdAt: serverTimestamp(),
-      lastUpdated: new Date().toISOString()
+      payment_methods: rateData.paymentMethods,
+      last_updated: new Date().toISOString(),
     });
-    
-    console.log('✅ USDT rate stored in Firestore');
+
+    console.log('✅ USDT rate stored');
   } catch (error) {
     console.error('Error storing rate:', error);
   }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../firebase';
-import { collection, query, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
+import { supabase } from '../../supabase';
 import {
   Cpu, Activity, RefreshCw, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Clock, ArrowDownCircle, ArrowUpCircle,
@@ -28,16 +27,34 @@ export default function AdminDisputeEngine() {
   const [savingDisputeConfig, setSavingDisputeConfig] = useState(false);
 
   // Live disputes listener
-  useEffect(() => {
-    const q = query(collection(db, 'disputes'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const list = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-      setDisputes(list);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
+  const fetchDisputes = async () => {
+    const { data } = await supabase
+      .from('disputes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    setDisputes((data || []).map(d => ({
+      ...d,
+      createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
+      traderId: d.trader_id,
+      merchantId: d.merchant_id,
+      payinId: d.payin_id,
+      payoutId: d.payout_id,
+      traderResponse: d.trader_response,
+      traderProofUrl: d.trader_proof_url,
+      traderStatement: d.trader_statement,
+      traderRespondedAt: d.trader_responded_at,
+      adminDecision: d.admin_decision,
+      adminNote: d.admin_note,
+      adminResolvedAt: d.admin_resolved_at,
+      balanceAdjusted: d.balance_adjusted,
+      adjustmentAmount: d.adjustment_amount,
+      slaDeadline: d.sla_deadline,
+      isEscalated: d.is_escalated,
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchDisputes(); }, []);
 
   // Fetch engine logs
   const fetchLogs = async () => {
@@ -153,9 +170,13 @@ export default function AdminDisputeEngine() {
   // Fetch dispute config
   const fetchDisputeConfig = async () => {
     try {
-      const configDoc = await getDoc(doc(db, 'system', 'disputeEngineConfig'));
-      if (configDoc.exists()) {
-        setDisputeConfig(configDoc.data());
+      const { data } = await supabase
+        .from('system_config')
+        .select('value')
+        .eq('key', 'dispute_engine_config')
+        .single();
+      if (data?.value) {
+        setDisputeConfig(data.value);
       }
     } catch (err) {
       console.error('Error fetching dispute config:', err);

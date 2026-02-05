@@ -1,9 +1,7 @@
 // File: src/App.jsx
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { supabase } from './supabase';
 import { initIPCapture } from './utils/ipCapture';
 
 // Initialize IP capture on app load (for audit logging)
@@ -126,45 +124,91 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          const roleCollections = ['worker', 'admin', 'merchant', 'trader'];
-          
-          for (let role of roleCollections) {
-            const q = query(
-              collection(db, role),
-              where('uid', '==', user.uid)
-            );
-            const querySnap = await getDocs(q);
-            
-            if (!querySnap.empty) {
-              console.log(`✅ User role found: ${role}`);
-              // Workers use admin routes
-              setUserRole(role === 'worker' ? 'worker' : role);
-              setLoading(false);
-              setInitializing(false);
-              return;
-            }
-          }
-          
-          console.warn('⚠️ No role found for user:', user.uid);
-          await auth.signOut();
+    // Check initial session
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await resolveRole(session.user.id);
+        } else {
           setUserRole(null);
-        } catch (error) {
-          console.error('❌ Error checking user role:', error);
-          setUserRole(null);
+          setLoading(false);
+          setInitializing(false);
         }
-      } else {
+      } catch (error) {
+        console.error('❌ Error initializing auth:', error);
         setUserRole(null);
+        setLoading(false);
+        setInitializing(false);
       }
-      
-      setLoading(false);
-      setInitializing(false);
+    };
+
+    initAuth();
+
+    // Listen for auth state changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('🔐 Auth event:', event);
+
+      if (event === 'SIGNED_IN' && session?.user) {
+        await resolveRole(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setUserRole(null);
+        localStorage.removeItem('pay2x_user_role');
+        localStorage.removeItem('pay2x_worker_permissions');
+        setLoading(false);
+        setInitializing(false);
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Session refreshed, role stays the same — nothing to do
+      }
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
+
+  // Resolve user role from profiles table + set localStorage
+  const resolveRole = async (userId) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single();
+
+      if (error || !profile) {
+        console.warn('⚠️ No profile found for user:', userId);
+        await supabase.auth.signOut();
+        setUserRole(null);
+      } else {
+        const role = profile.role;
+        console.log(`✅ User role found: ${role}`);
+
+        // Store role & permissions in localStorage
+        if (role === 'worker') {
+          localStorage.setItem('pay2x_user_role', 'worker');
+          const { data: worker } = await supabase
+            .from('workers')
+            .select('permissions')
+            .eq('profile_id', userId)
+            .single();
+          localStorage.setItem('pay2x_worker_permissions', JSON.stringify(worker?.permissions || []));
+        } else if (role === 'admin') {
+          localStorage.setItem('pay2x_user_role', 'admin');
+          localStorage.removeItem('pay2x_worker_permissions');
+        } else {
+          localStorage.removeItem('pay2x_user_role');
+          localStorage.removeItem('pay2x_worker_permissions');
+        }
+
+        setUserRole(role);
+      }
+    } catch (error) {
+      console.error('❌ Error resolving user role:', error);
+      setUserRole(null);
+    }
+
+    setLoading(false);
+    setInitializing(false);
+  };
 
   if (initializing || loading) {
     return <LoadingScreen />;

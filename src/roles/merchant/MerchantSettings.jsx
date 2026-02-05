@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { collection, query, where, getDocs, updateDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getAuth, updatePassword } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   User, Building, Shield, Bell, Users, CreditCard, Key, Save,
   CheckCircle, AlertCircle, Mail, Phone, Globe, FileText, Plus,
@@ -50,128 +48,78 @@ export default function MerchantSettings() {
 
   const fetchData = async () => {
     setLoading(true);
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     try {
-      // Fetch merchant profile
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      if (!merchantSnap.empty) {
-        const data = merchantSnap.docs[0].data();
+      const { data } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+      if (data) {
         setProfile({
-          businessName: data.businessName || '',
+          businessName: data.business_name || data.name || '',
           website: data.website || '',
-          supportEmail: data.supportEmail || '',
-          supportPhone: data.supportPhone || '',
+          supportEmail: data.support_email || '',
+          supportPhone: data.support_phone || '',
           gst: data.gst || '',
         });
         setNotifications(data.notifications || notifications);
-        setTwoFactorEnabled(data.twoFactorEnabled || false);
+        setTwoFactorEnabled(data.two_factor_enabled || false);
       }
 
-      // Fetch bank accounts
-      const banksSnap = await getDocs(query(collection(db, 'merchantBankAccounts'), where('merchantId', '==', user.uid)));
-      const banks = [];
-      banksSnap.forEach(d => {
-        const acc = { id: d.id, ...d.data() };
-        banks.push(acc);
-        if (acc.isPrimary) setPrimaryAccountId(d.id);
-      });
-      setBankAccounts(banks);
+      const { data: banks } = await supabase.from('merchant_bank_accounts').select('*').eq('merchant_id', user.id);
+      const bankList = (banks || []).map(b => ({ ...b, isPrimary: b.is_primary }));
+      bankList.forEach(b => { if (b.is_primary) setPrimaryAccountId(b.id); });
+      setBankAccounts(bankList);
 
-      // Fetch team members
-      const teamSnap = await getDocs(query(collection(db, 'merchantTeam'), where('merchantId', '==', user.uid)));
-      const team = [];
-      teamSnap.forEach(d => team.push({ id: d.id, ...d.data() }));
-      setTeamMembers(team);
-
-    } catch (e) {
-      console.error(e);
-    }
+      const { data: team } = await supabase.from('merchant_team').select('*').eq('merchant_id', user.id);
+      setTeamMembers(team || []);
+    } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   const handleSaveProfile = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
-          ...profile,
-          updatedAt: serverTimestamp(),
-        });
-        setToast({ msg: '✅ Profile updated!', success: true });
-      }
-    } catch (e) {
-      setToast({ msg: 'Error: ' + e.message, success: false });
-    }
+      await supabase.from('merchants').update({
+        business_name: profile.businessName, website: profile.website,
+        support_email: profile.supportEmail, support_phone: profile.supportPhone, gst: profile.gst,
+      }).eq('id', user.id);
+      setToast({ msg: '✅ Profile updated!', success: true });
+    } catch (e) { setToast({ msg: 'Error: ' + e.message, success: false }); }
   };
 
   const handleSaveNotifications = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      if (!merchantSnap.empty) {
-        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
-          notifications,
-          updatedAt: serverTimestamp(),
-        });
-        setToast({ msg: '✅ Notifications updated!', success: true });
-      }
-    } catch (e) {
-      setToast({ msg: 'Error: ' + e.message, success: false });
-    }
+      await supabase.from('merchants').update({ notifications }).eq('id', user.id);
+      setToast({ msg: '✅ Notifications updated!', success: true });
+    } catch (e) { setToast({ msg: 'Error: ' + e.message, success: false }); }
   };
 
   const handleToggle2FA = async () => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     try {
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      if (!merchantSnap.empty) {
-        const newValue = !twoFactorEnabled;
-        await updateDoc(doc(db, 'merchant', merchantSnap.docs[0].id), {
-          twoFactorEnabled: newValue,
-          updatedAt: serverTimestamp(),
-        });
-        setTwoFactorEnabled(newValue);
-        setToast({ msg: `✅ 2FA ${newValue ? 'enabled' : 'disabled'}!`, success: true });
-      }
-    } catch (e) {
-      setToast({ msg: 'Error: ' + e.message, success: false });
-    }
+      const newValue = !twoFactorEnabled;
+      await supabase.from('merchants').update({ two_factor_enabled: newValue }).eq('id', user.id);
+      setTwoFactorEnabled(newValue);
+      setToast({ msg: `✅ 2FA ${newValue ? 'enabled' : 'disabled'}!`, success: true });
+    } catch (e) { setToast({ msg: 'Error: ' + e.message, success: false }); }
   };
 
   const handleChangePassword = async () => {
-    if (!password.current || !password.new || !password.confirm) {
-      setToast({ msg: 'Fill all password fields', success: false });
-      return;
-    }
-    if (password.new.length < 6) {
-      setToast({ msg: 'New password must be at least 6 characters', success: false });
-      return;
-    }
-    if (password.new !== password.confirm) {
-      setToast({ msg: 'New passwords do not match', success: false });
-      return;
-    }
+    if (!password.current || !password.new || !password.confirm) { setToast({ msg: 'Fill all password fields', success: false }); return; }
+    if (password.new.length < 6) { setToast({ msg: 'New password must be at least 6 characters', success: false }); return; }
+    if (password.new !== password.confirm) { setToast({ msg: 'New passwords do not match', success: false }); return; }
 
     try {
-      const user = getAuth().currentUser;
-      await updatePassword(user, password.new);
+      const { error } = await supabase.auth.updateUser({ password: password.new });
+      if (error) throw error;
       setPassword({ current: '', new: '', confirm: '' });
       setToast({ msg: '✅ Password updated successfully!', success: true });
     } catch (e) {
-      if (e.code === 'auth/requires-recent-login') {
-        setToast({ msg: 'Please log out and log in again to change password', success: false });
-      } else {
-        setToast({ msg: 'Error: ' + e.message, success: false });
-      }
+      setToast({ msg: 'Error: ' + e.message, success: false });
     }
   };
 

@@ -1,9 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { db } from "../../firebase";
-import {
-  collection, query, where, onSnapshot, orderBy, getDocs, limit,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from "../../supabase";
 import {
   TrendingUp, Search, Download, Filter, X, CheckCircle, XCircle, Clock,
   AlertCircle, ExternalLink, Calendar, Hash, User, CreditCard, Smartphone,
@@ -257,54 +253,36 @@ export default function MerchantPayin() {
   }, [search]);
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
+    const fetchPayins = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
 
-    // First get merchant doc ID from user's UID
-    const getMerchantAndPayins = async () => {
       try {
-        const merchantQuery = query(
-          collection(db, "merchant"),
-          where("uid", "==", user.uid)
-        );
-        const merchantSnap = await getDocs(merchantQuery);
-        
-        if (merchantSnap.empty) {
-          setLoading(false);
-          return () => {};
-        }
+        // Get merchant doc
+        const { data: merchant } = await supabase.from('merchants').select('id').eq('id', user.id).single();
+        if (!merchant) { setLoading(false); return; }
 
-        const merchantId = merchantSnap.docs[0].id;
-
-        // Now subscribe to payins for this merchant
-        const unsub = onSnapshot(
-          query(
-            collection(db, "payin"),
-            where("merchantId", "==", merchantId),
-            orderBy("requestedAt", "desc"),
-            limit(200)
-          ),
-          snap => {
-            const list = [];
-            snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-            setPayins(list);
-            setLoading(false);
-          }
-        );
-        return unsub;
+        const { data } = await supabase
+          .from('payins')
+          .select('*')
+          .eq('merchant_id', merchant.id)
+          .order('requested_at', { ascending: false })
+          .limit(200);
+        setPayins((data || []).map(r => ({
+          ...r,
+          merchantId: r.merchant_id, traderId: r.trader_id,
+          upiId: r.upi_id, utrId: r.utr,
+          transactionId: r.transaction_id, userId: r.merchant_id,
+          screenshotUrl: r.screenshot_url, orderId: r.order_id,
+          requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+          completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
+        })));
       } catch (error) {
         console.error("Error fetching payins:", error);
-        setLoading(false);
-        return () => {};
       }
+      setLoading(false);
     };
-
-    let unsubscribe = () => {};
-    getMerchantAndPayins().then(unsub => {
-      unsubscribe = unsub;
-    });
-
-    return () => unsubscribe();
+    fetchPayins();
   }, []);
 
   const filtered = useMemo(() => {

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../../../firebase';
-import { doc, onSnapshot, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { UserCircle, ArrowLeft, RefreshCw, Mail, Phone, Calendar, TrendingUp, TrendingDown, Clock, Eye } from 'lucide-react';
 
@@ -21,7 +20,7 @@ function OverviewTab({ user }) {
             <UserCircle className="w-6 h-6 text-indigo-600" />
           </div>
           <div>
-            <h3 className="font-bold text-slate-900">{user.name || user.email || 'Anonymous User'}</h3>
+            <h3 className="font-bold text-slate-900">{user.display_name || user.email || 'Anonymous User'}</h3>
             <p className="text-xs text-slate-500 font-mono" style={{ fontFamily: 'var(--font-mono)' }}>ID: {user.id}</p>
           </div>
         </div>
@@ -43,7 +42,7 @@ function OverviewTab({ user }) {
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100"><h3 className="text-sm font-bold text-slate-900">User Info</h3></div>
         <div className="p-4 space-y-3">
-          {[{ icon: Mail, label: 'Email', value: user.email }, { icon: Phone, label: 'Phone', value: user.phone }, { icon: Calendar, label: 'Joined', value: user.createdAt?.seconds ? new Date(user.createdAt.seconds * 1000).toLocaleDateString('en-IN') : '—' }].map((item, i) => {
+          {[{ icon: Mail, label: 'Email', value: user.email }, { icon: Phone, label: 'Phone', value: user.phone }, { icon: Calendar, label: 'Joined', value: user.created_at ? new Date(user.created_at).toLocaleDateString('en-IN') : '—' }].map((item, i) => {
             const Icon = item.icon;
             return (
               <div key={i} className="flex items-center gap-3">
@@ -61,21 +60,24 @@ function OverviewTab({ user }) {
 function TransactionsTab({ userId, type }) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const collectionName = type === 'payins' ? 'payin' : 'payouts';
-  const dateField = type === 'payins' ? 'requestedAt' : 'createdAt';
+  const tableName = type === 'payins' ? 'payins' : 'payouts';
 
   useEffect(() => {
-    const fetch = async () => {
+    const fetchTxns = async () => {
       try {
-        const snap = await getDocs(query(collection(db, collectionName), where('userId', '==', userId), orderBy(dateField, 'desc'), limit(50)));
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setTransactions(list);
+        // Try merchant_id first (users are typically merchants in this context)
+        const { data } = await supabase
+          .from(tableName)
+          .select('*')
+          .eq('merchant_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        setTransactions(data || []);
       } catch (e) { console.error(e); }
       setLoading(false);
     };
-    fetch();
-  }, [userId, collectionName, dateField]);
+    fetchTxns();
+  }, [userId, tableName]);
 
   if (loading) return <div className="flex items-center justify-center py-12"><RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" /></div>;
 
@@ -93,10 +95,9 @@ function TransactionsTab({ userId, type }) {
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${tx.status === 'completed' ? 'bg-green-100 text-green-700' : tx.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{tx.status?.toUpperCase()}</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{tx[dateField]?.seconds ? new Date(tx[dateField].seconds * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</span>
-            {tx.utrId && <span className="font-mono" style={{ fontFamily: 'var(--font-mono)' }}>UTR: {tx.utrId}</span>}
+            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{tx.created_at ? new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</span>
+            {tx.utr && <span className="font-mono" style={{ fontFamily: 'var(--font-mono)' }}>UTR: {tx.utr}</span>}
           </div>
-          {tx.screenshotUrl && <a href={tx.screenshotUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 font-semibold"><Eye className="w-3 h-3" /> View Proof</a>}
         </div>
       )) : (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
@@ -117,12 +118,17 @@ export default function AdminUserDetail() {
 
   useEffect(() => {
     if (!id) return;
-    const unsub = onSnapshot(doc(db, 'users', id), (snap) => {
-      if (snap.exists()) setUser({ id: snap.id, ...snap.data() });
-      else setUser(null);
+    const fetchUser = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (error) { console.error(error); setUser(null); }
+      else setUser(data);
       setLoading(false);
-    });
-    return () => unsub();
+    };
+    fetchUser();
   }, [id]);
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><RefreshCw className="w-10 h-10 text-indigo-500 animate-spin" /></div>;

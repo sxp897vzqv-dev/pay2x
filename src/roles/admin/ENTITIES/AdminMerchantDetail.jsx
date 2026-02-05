@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../../../firebase';
-import { doc, getDoc, updateDoc, collection, query, where, getDocs, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { supabase } from '../../../supabase';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Store, ArrowLeft, RefreshCw, Edit, Save, CheckCircle, AlertCircle, Globe, Mail, Phone, Key, Eye, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Activity, Calendar, Shield, Copy } from 'lucide-react';
 import {
@@ -21,6 +20,25 @@ function TabButton({ active, icon: Icon, label, onClick }) {
       <Icon className="w-4 h-4" />{label}
     </button>
   );
+}
+
+// Map Supabase merchant row → camelCase for child components
+function mapMerchant(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    isActive: row.is_active ?? row.status === 'active',
+    businessName: row.business_name || row.name,
+    name: row.name || row.business_name,
+    apiKey: row.api_key || row.live_api_key,
+    secretKey: row.secret_key,
+    webhookUrl: row.webhook_url,
+    totalOrders: row.total_orders || 0,
+    totalVolume: row.total_volume || 0,
+    successRate: row.success_rate || 0,
+    disputeCount: row.dispute_count || 0,
+    createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+  };
 }
 
 function ProfileTab({ merchant, onUpdate, saving }) {
@@ -98,7 +116,7 @@ function generateSecretKey() {
   return key;
 }
 
-function APITab({ merchant, setToast }) {
+function APITab({ merchant, setToast, onRefresh }) {
   const [copied, setCopied] = useState('');
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -112,12 +130,11 @@ function APITab({ merchant, setToast }) {
       const newApiKey = generateApiKey();
       const newSecretKey = generateSecretKey();
       
-      await updateDoc(doc(db, 'merchants', merchant.id), {
-        apiKey: newApiKey,
-        secretKey: newSecretKey,
-      });
+      await supabase.from('merchants').update({
+        api_key: newApiKey,
+        secret_key: newSecretKey,
+      }).eq('id', merchant.id);
       
-      // 🔥 AUDIT LOG: API Key Regeneration (Week 4 - Security Logs)
       await logMerchantAPIKeyGenerated(
         merchant.id,
         merchant.name || merchant.businessName || 'Unknown Merchant',
@@ -126,6 +143,7 @@ function APITab({ merchant, setToast }) {
       
       setToast({ msg: '✅ API keys regenerated successfully!', success: true });
       setShowRegenerateModal(false);
+      if (onRefresh) onRefresh();
     } catch (e) {
       console.error(e);
       setToast({ msg: '❌ Failed to regenerate keys', success: false });
@@ -170,7 +188,6 @@ function APITab({ merchant, setToast }) {
         </div>
       </div>
 
-      {/* Regenerate Confirmation Modal */}
       {showRegenerateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
@@ -204,15 +221,9 @@ function APITab({ merchant, setToast }) {
                 className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
               >
                 {regenerating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Regenerating...
-                  </>
+                  <><RefreshCw className="w-4 h-4 animate-spin" />Regenerating...</>
                 ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    Yes, Regenerate
-                  </>
+                  <><RefreshCw className="w-4 h-4" />Yes, Regenerate</>
                 )}
               </button>
             </div>
@@ -230,16 +241,22 @@ function ActivityTab({ merchant }) {
   useEffect(() => {
     const fetchActivity = async () => {
       try {
-        const [payinsSnap, payoutsSnap, disputesSnap] = await Promise.all([
-          getDocs(query(collection(db, 'payin'), where('merchantId', '==', merchant.id), orderBy('requestedAt', 'desc'), limit(10))),
-          getDocs(query(collection(db, 'payouts'), where('merchantId', '==', merchant.id), orderBy('createdAt', 'desc'), limit(10))),
-          getDocs(query(collection(db, 'disputes'), where('merchantId', '==', merchant.id), orderBy('createdAt', 'desc'), limit(10))),
+        const [payinsRes, payoutsRes, disputesRes] = await Promise.all([
+          supabase.from('payins').select('*').eq('merchant_id', merchant.id).order('created_at', { ascending: false }).limit(10),
+          supabase.from('payouts').select('*').eq('merchant_id', merchant.id).order('created_at', { ascending: false }).limit(10),
+          supabase.from('disputes').select('*').eq('merchant_id', merchant.id).order('created_at', { ascending: false }).limit(10),
         ]);
-        const payins = [], payouts = [], disputes = [];
-        payinsSnap.forEach(d => payins.push({ id: d.id, ...d.data() }));
-        payoutsSnap.forEach(d => payouts.push({ id: d.id, ...d.data() }));
-        disputesSnap.forEach(d => disputes.push({ id: d.id, ...d.data() }));
-        setActivity({ payins, payouts, disputes });
+        // Map timestamps for display
+        const mapTs = (row) => ({
+          ...row,
+          requestedAt: row.requested_at ? { seconds: new Date(row.requested_at).getTime() / 1000 } : null,
+          createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+        });
+        setActivity({
+          payins: (payinsRes.data || []).map(mapTs),
+          payouts: (payoutsRes.data || []).map(mapTs),
+          disputes: (disputesRes.data || []).map(mapTs),
+        });
       } catch (e) { console.error(e); }
       setLoading(false);
     };
@@ -284,26 +301,36 @@ export default function AdminMerchantDetail() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
+  const fetchMerchant = async () => {
     if (!id) return;
-    const unsub = onSnapshot(doc(db, 'merchants', id), (snap) => {
-      if (snap.exists()) setMerchant({ id: snap.id, ...snap.data() });
-      else setMerchant(null);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [id]);
+    const { data, error } = await supabase
+      .from('merchants')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) { console.error(error); setMerchant(null); }
+    else setMerchant(mapMerchant(data));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchMerchant(); }, [id]);
 
   const handleUpdate = async (updates) => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'merchants', id), updates);
+      // Convert camelCase form fields to snake_case for DB
+      const dbUpdates = {};
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.email !== undefined) dbUpdates.email = updates.email;
+      if (updates.phone !== undefined) dbUpdates.phone = updates.phone;
+      if (updates.website !== undefined) dbUpdates.website = updates.website;
+      if (updates.isActive !== undefined) { dbUpdates.is_active = updates.isActive; dbUpdates.status = updates.isActive ? 'active' : 'inactive'; }
+      if (updates.status !== undefined) dbUpdates.status = updates.status;
+
+      await supabase.from('merchants').update(dbUpdates).eq('id', id);
       
-      // 🔥 AUDIT LOG: Merchant Profile Updates (Week 3)
       const changedFields = Object.keys(updates).filter(key => 
-        key !== 'isActive' && 
-        key !== 'status' && 
-        updates[key] !== merchant[key]
+        key !== 'isActive' && key !== 'status' && updates[key] !== merchant[key]
       );
       
       if (changedFields.length > 0) {
@@ -327,6 +354,7 @@ export default function AdminMerchantDetail() {
       }
       
       setToast({ msg: 'Merchant updated', success: true });
+      fetchMerchant();
     } catch (e) { console.error(e); setToast({ msg: 'Failed to update', success: false }); }
     setSaving(false);
   };
@@ -335,19 +363,10 @@ export default function AdminMerchantDetail() {
     const newStatus = !(merchant.isActive || merchant.status === 'active');
     await handleUpdate({ isActive: newStatus, status: newStatus ? 'active' : 'inactive' });
     
-    // 🔥 AUDIT LOG: Merchant Activation/Deactivation (Week 3)
     if (newStatus) {
-      await logMerchantActivated(
-        merchant.id,
-        merchant.name || merchant.businessName || 'Unknown Merchant',
-        'Admin toggled merchant to active status'
-      );
+      await logMerchantActivated(merchant.id, merchant.name || merchant.businessName || 'Unknown Merchant', 'Admin toggled merchant to active status');
     } else {
-      await logMerchantDeactivated(
-        merchant.id,
-        merchant.name || merchant.businessName || 'Unknown Merchant',
-        'Admin toggled merchant to inactive status'
-      );
+      await logMerchantDeactivated(merchant.id, merchant.name || merchant.businessName || 'Unknown Merchant', 'Admin toggled merchant to inactive status');
     }
   };
 
@@ -374,7 +393,7 @@ export default function AdminMerchantDetail() {
       </div>
 
       {activeTab === 'profile' && <ProfileTab merchant={merchant} onUpdate={handleUpdate} saving={saving} />}
-      {activeTab === 'api' && <APITab merchant={merchant} setToast={setToast} />}
+      {activeTab === 'api' && <APITab merchant={merchant} setToast={setToast} onRefresh={fetchMerchant} />}
       {activeTab === 'activity' && <ActivityTab merchant={merchant} />}
     </div>
   );

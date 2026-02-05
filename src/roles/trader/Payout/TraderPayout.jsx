@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, storage } from '../../../firebase';
-import {
-  collection, query, where, getDocs, onSnapshot,
-  runTransaction, doc, serverTimestamp, updateDoc, limit,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../../supabase';
 import {
   DollarSign, CreditCard, TrendingDown, FileText,
 } from 'lucide-react';
@@ -44,8 +38,11 @@ export default function TraderPayout() {
   const [uploadProgress,    setUploadProgress]    = useState(0);
   const [toast,             setToast]             = useState(null);
 
-  const auth     = getAuth();
-  const traderId = auth.currentUser?.uid;
+  const [traderId, setTraderId] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => { if (user) setTraderId(user.id); });
+  }, []);
 
   /* derived */
   const hasActiveRequest   = activeRequest !== null;
@@ -53,63 +50,50 @@ export default function TraderPayout() {
   const canCreateRequest   = !hasActiveRequest && !hasAssignedPayouts;
   const canCancelRequest   = hasActiveRequest && !hasAssignedPayouts;
 
+  // Map payout row for child components
+  const mapPayout = (r) => ({
+    ...r,
+    traderId: r.trader_id, merchantId: r.merchant_id,
+    utrId: r.utr, proofUrl: r.proof_url,
+    payoutRequestId: r.payout_request_id,
+    assignedAt: r.assigned_at ? { seconds: new Date(r.assigned_at).getTime() / 1000 } : null,
+    completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
+    createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null,
+  });
+
   useEffect(() => {
     if (!traderId) return;
 
-    /* fetch balance + commission */
-    const fetchTraderData = async () => {
+    const fetchAll = async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'trader'), where('uid', '==', traderId)));
-        if (!snap.empty) {
-          const d = snap.docs[0].data();
-          /* ✅ BUG FIX: derive workingBalance — field doesn't exist in Firestore */
-          setWorkingBalance((Number(d.balance) || 0) - (Number(d.securityHold) || 0));
-          setPayoutCommission(d.payoutCommission || 1);
+        // Trader data
+        const { data: td } = await supabase.from('traders').select('balance, security_hold, payout_commission').eq('id', traderId).single();
+        if (td) {
+          setWorkingBalance((Number(td.balance) || 0) - (Number(td.security_hold) || 0));
+          setPayoutCommission(td.payout_commission || 1);
         }
-      } catch (e) { console.error(e); }
-    };
-    fetchTraderData();
 
-    /* real-time: payout requests */
-    const unsubRequests = onSnapshot(
-      query(collection(db, 'payoutRequest'), where('traderId', '==', traderId)),
-      snap => {
+        // Payout requests
+        const { data: requests } = await supabase.from('payout_requests').select('*').eq('trader_id', traderId);
         let active = null;
-        snap.forEach(d => {
-          const data = { id: d.id, ...d.data() };
-          // Only show active requests (not completed/cancelled)
-          if (data.status !== 'completed' && data.status !== 'cancelled') {
-            active = data;
+        (requests || []).forEach(r => {
+          if (r.status !== 'completed' && r.status !== 'cancelled') {
+            active = { ...r, traderId: r.trader_id, createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null };
           }
         });
         setActiveRequest(active);
-        setLoading(false);
-      }
-    );
 
-    /* real-time: assigned payouts */
-    const unsubAssigned = onSnapshot(
-      query(collection(db, 'payouts'), where('traderId', '==', traderId), where('status', '==', 'assigned'), limit(100)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0));
-        setAssignedPayouts(list);
-      }
-    );
+        // Assigned payouts
+        const { data: assigned } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'assigned').limit(100);
+        setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
 
-    /* real-time: completed payouts */
-    const unsubCompleted = onSnapshot(
-      query(collection(db, 'payouts'), where('traderId', '==', traderId), where('status', '==', 'completed'), limit(200)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
-        setCompletedPayouts(list);
-      }
-    );
-
-    return () => { unsubRequests(); unsubAssigned(); unsubCompleted(); };
+        // Completed payouts
+        const { data: completed } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(200);
+        setCompletedPayouts((completed || []).map(mapPayout));
+      } catch (e) { console.error(e); }
+      setLoading(false);
+    };
+    fetchAll();
   }, [traderId]);
 
   /* ── handlers ── */
@@ -151,67 +135,48 @@ export default function TraderPayout() {
     setProcessingPayout(selectedPayout.id);
     setUploadProgress(0);
     try {
-      const filename  = `${selectedPayout.id}-${Date.now()}-${proofFile.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-      const storageRef = ref(storage, `payout-proofs/${filename}`);
+      const filename = `${selectedPayout.id}-${Date.now()}-${proofFile.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
 
+      // Upload to Supabase Storage
       const progressInterval = setInterval(() => setUploadProgress(p => p >= 90 ? 90 : p + 10), 200);
-      await uploadBytes(storageRef, proofFile);
+      const { error: upErr } = await supabase.storage.from('payout-proofs').upload(filename, proofFile);
       clearInterval(progressInterval);
+      if (upErr) throw upErr;
       setUploadProgress(95);
-      const proofUrl = await getDownloadURL(storageRef);
+      const { data: urlData } = supabase.storage.from('payout-proofs').getPublicUrl(filename);
+      const proofUrl = urlData.publicUrl;
       setUploadProgress(100);
 
-      // ✅ FIX: Get trader doc ID BEFORE transaction
-      const tSnap = await getDocs(query(collection(db, 'trader'), where('uid', '==', traderId)));
-      if (tSnap.empty) throw new Error('Trader not found');
-      const traderDocId = tSnap.docs[0].id;
+      const amount = Number(selectedPayout.amount);
+      const commission = Math.round((amount * payoutCommission) / 100);
+      const ts = new Date().toISOString();
 
-      await runTransaction(db, async (tx) => {
-        const payoutRef = doc(db, 'payouts', selectedPayout.id);
-        const tRef = doc(db, 'trader', traderDocId);
-        
-        // ✅ FIX: Use tx.get() inside transaction (participates in lock)
-        const tDoc = await tx.get(tRef);
-        if (!tDoc.exists()) throw new Error('Trader not found');
-        const td = tDoc.data();
+      // Update payout
+      await supabase.from('payouts').update({
+        status: 'completed', completed_at: ts, trader_id: traderId,
+        utr: utrId, proof_url: proofUrl, commission,
+      }).eq('id', selectedPayout.id);
 
-        const amount     = Number(selectedPayout.amount);
-        const commission = Math.round((amount * payoutCommission) / 100);
-        
-        tx.update(payoutRef, { 
-          status: 'completed', 
-          completedAt: serverTimestamp(), 
-          traderId, 
-          utrId, 
-          proofUrl, 
-          commission 
-        });
-        tx.update(tRef, {
+      // Update trader balance
+      const { data: td } = await supabase.from('traders').select('balance, overall_commission').eq('id', traderId).single();
+      if (td) {
+        await supabase.from('traders').update({
           balance: (Number(td.balance) || 0) + amount + commission,
-          overallCommission: (Number(td.overallCommission) || 0) + commission,
-        });
-      });
+          overall_commission: (Number(td.overall_commission) || 0) + commission,
+        }).eq('id', traderId);
+      }
 
-      // ✅ Check if all payouts for this request are completed
+      // Check if all payouts for this request are completed
       if (selectedPayout.payoutRequestId) {
-        const requestId = selectedPayout.payoutRequestId;
-        
-        // Check remaining assigned payouts
-        const remainingPayoutsSnap = await getDocs(
-          query(
-            collection(db, 'payouts'),
-            where('payoutRequestId', '==', requestId),
-            where('status', '==', 'assigned')
-          )
-        );
-
-        // If no more assigned payouts, mark request as completed
-        if (remainingPayoutsSnap.empty) {
-          await updateDoc(doc(db, 'payoutRequest', requestId), {
-            status: 'completed',
-            completedAt: serverTimestamp(),
-            fullyCompleted: true,
-          });
+        const { count } = await supabase
+          .from('payouts')
+          .select('*', { count: 'exact', head: true })
+          .eq('payout_request_id', selectedPayout.payoutRequestId)
+          .eq('status', 'assigned');
+        if (count === 0) {
+          await supabase.from('payout_requests').update({
+            status: 'completed', completed_at: ts, fully_completed: true,
+          }).eq('id', selectedPayout.payoutRequestId);
           setToast({ msg: '✅ All payouts completed! Request closed automatically', success: true });
         }
       }
@@ -220,12 +185,9 @@ export default function TraderPayout() {
       setToast({ msg: `✅ Completed! ₹${(selectedPayout.amount + comm).toLocaleString()} credited`, success: true });
       setSelectedPayout(null);
 
-      /* refresh balance */
-      const s = await getDocs(query(collection(db, 'trader'), where('uid', '==', traderId)));
-      if (!s.empty) {
-        const d = s.docs[0].data();
-        setWorkingBalance((Number(d.balance) || 0) - (Number(d.securityHold) || 0));
-      }
+      // Refresh balance
+      const { data: fresh } = await supabase.from('traders').select('balance, security_hold').eq('id', traderId).single();
+      if (fresh) setWorkingBalance((Number(fresh.balance) || 0) - (Number(fresh.security_hold) || 0));
     } catch (e) {
       console.error(e);
       setToast({ msg: '❌ ' + (e.message || 'Upload failed'), success: false });

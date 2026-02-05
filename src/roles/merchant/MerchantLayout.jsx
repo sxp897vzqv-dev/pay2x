@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { getAuth, signOut } from 'firebase/auth';
-import { query, collection, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
   AlertCircle, Settings, LogOut, Menu, X, Shield,
@@ -73,29 +71,27 @@ export default function MerchantLayout() {
   const location = useLocation();
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
-    const q = query(collection(db, 'merchant'), where('uid', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const d = snap.docs[0].data();
-        const isActive = d.isActive === true || d.status === 'active';
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+      if (data) {
+        const isActive = data.is_active === true || data.status === 'active';
         if (!isActive) {
           alert('Your account has been deactivated. Please contact admin.');
           handleLogout();
           return;
         }
-        setMerchantInfo(d);
+        setMerchantInfo(data);
       }
-    });
-    return () => unsubscribe();
+    };
+    init();
   }, []);
 
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
   const handleLogout = async () => {
-    try { await signOut(getAuth()); navigate('/signin'); }
+    try { await supabase.auth.signOut(); navigate('/signin'); }
     catch (e) { alert('Logout failed: ' + e.message); }
   };
 

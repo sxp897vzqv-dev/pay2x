@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../firebase';
-import {
-  collection, query, where, onSnapshot, addDoc, serverTimestamp, orderBy, getDocs, updateDoc, doc, limit,
-} from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   TrendingDown, Plus, Search, Download, Filter, X,
   RefreshCw, Calendar,
@@ -33,33 +29,25 @@ export default function MerchantPayout() {
   }, [search]);
 
   useEffect(() => {
-    const user = getAuth().currentUser;
-    if (!user) return;
-
-    // Fetch balance
-    const fetchBalance = async () => {
-      try {
-        const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-        if (!merchantSnap.empty) {
-          setAvailableBalance(merchantSnap.docs[0].data().availableBalance || 0);
-        }
-      } catch (e) {
-        console.error(e);
-      }
+    const fetchData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      // Balance
+      const { data: merchant } = await supabase.from('merchants').select('available_balance').eq('id', user.id).single();
+      if (merchant) setAvailableBalance(merchant.available_balance || 0);
+      // Payouts
+      const { data } = await supabase.from('payouts').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(200);
+      setPayouts((data || []).map(r => ({
+        ...r,
+        merchantId: r.merchant_id, payoutId: r.payout_id,
+        beneficiaryName: r.beneficiary_name, paymentMode: r.payment_mode,
+        upiId: r.upi_id, accountNumber: r.account_number, ifscCode: r.ifsc_code,
+        failureReason: r.failure_reason,
+        createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null,
+      })));
+      setLoading(false);
     };
-    fetchBalance();
-
-    // Listen to payouts
-    const unsub = onSnapshot(
-      query(collection(db, "merchantPayouts"), where("merchantId", "==", user.uid), orderBy("createdAt", "desc"), limit(200)),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setPayouts(list);
-        setLoading(false);
-      }
-    );
-    return () => unsub();
+    fetchData();
   }, []);
 
   const filtered = useMemo(() => {
@@ -87,21 +75,20 @@ export default function MerchantPayout() {
   }), [payouts]);
 
   const handleCreatePayout = async (formData) => {
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    await addDoc(collection(db, 'merchantPayouts'), {
-      merchantId: user.uid,
-      payoutId: 'PO' + Date.now(),
-      beneficiaryName: formData.beneficiaryName,
-      paymentMode: formData.paymentMode,
-      upiId: formData.paymentMode === 'upi' ? formData.upiId : null,
-      accountNumber: formData.paymentMode === 'bank' ? formData.accountNumber : null,
-      ifscCode: formData.paymentMode === 'bank' ? formData.ifscCode : null,
+    await supabase.from('payouts').insert({
+      merchant_id: user.id,
+      payout_id: 'PO' + Date.now(),
+      beneficiary_name: formData.beneficiaryName,
+      payment_mode: formData.paymentMode,
+      upi_id: formData.paymentMode === 'upi' ? formData.upiId : null,
+      account_number: formData.paymentMode === 'bank' ? formData.accountNumber : null,
+      ifsc_code: formData.paymentMode === 'bank' ? formData.ifscCode : null,
       amount: Number(formData.amount),
       purpose: formData.purpose,
       status: 'queued',
-      createdAt: serverTimestamp(),
     });
 
     setShowModal(false);
@@ -111,11 +98,10 @@ export default function MerchantPayout() {
     if (!confirm('Cancel this payout? This cannot be undone.')) return;
     
     try {
-      await updateDoc(doc(db, 'merchantPayouts', payoutId), {
+      await supabase.from('payouts').update({
         status: 'failed',
-        failureReason: 'Cancelled by merchant',
-        updatedAt: serverTimestamp(),
-      });
+        failure_reason: 'Cancelled by merchant',
+      }).eq('id', payoutId);
     } catch (e) {
       alert('Error: ' + e.message);
     }

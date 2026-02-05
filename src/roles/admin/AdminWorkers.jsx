@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { supabase } from '../../supabase';
 import {
   Users, Plus, X, Shield, Check, Edit2, Trash2,
   ToggleLeft, ToggleRight, CheckSquare, Square,
@@ -45,18 +44,17 @@ export default function AdminWorkers() {
   // Delete state
   const [deletingId, setDeletingId] = useState(null);
 
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'worker'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      setWorkers(list);
-      setLoading(false);
-    }, (err) => {
-      console.error('Error fetching workers:', err);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
+  const fetchWorkers = async () => {
+    const { data, error } = await supabase
+      .from('workers')
+      .select('*')
+      .order('name', { ascending: true });
+    if (error) { console.error('Error fetching workers:', error); }
+    setWorkers((data || []).map(w => ({ ...w, isActive: w.is_active })));
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchWorkers(); }, []);
 
   /* ─── Create Worker ─── */
   const handleCreate = async (e) => {
@@ -101,7 +99,8 @@ export default function AdminWorkers() {
   /* ─── Toggle Active ─── */
   const handleToggleActive = async (worker) => {
     try {
-      await updateDoc(doc(db, 'worker', worker.id), { isActive: !worker.isActive });
+      await supabase.from('workers').update({ is_active: !worker.isActive }).eq('id', worker.id);
+      fetchWorkers();
     } catch (err) {
       console.error('Toggle error:', err);
       alert('Failed to toggle worker status');
@@ -113,8 +112,9 @@ export default function AdminWorkers() {
     if (!editingWorker) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'worker', editingWorker.id), { permissions: editPermissions });
+      await supabase.from('workers').update({ permissions: editPermissions }).eq('id', editingWorker.id);
       setEditingWorker(null);
+      fetchWorkers();
     } catch (err) {
       console.error('Save error:', err);
       alert('Failed to update permissions');

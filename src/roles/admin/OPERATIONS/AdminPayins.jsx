@@ -1,6 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, onSnapshot, orderBy, where, limit, startAfter, getDocs } from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { supabase } from '../../../supabase';
 import { useSearchParams } from 'react-router-dom';
 import {
   TrendingUp, Filter, Download, RefreshCw, Calendar, X, AlertTriangle,
@@ -21,7 +20,7 @@ export default function AdminPayins() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [lastDoc, setLastDoc] = useState(null);
+  const [totalFetched, setTotalFetched] = useState(0);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -35,53 +34,63 @@ export default function AdminPayins() {
 
   const traderFilter = searchParams.get('trader');
 
-  // Fetch payins (real-time first batch)
-  useEffect(() => {
+  // Fetch payins
+  const fetchPayins = useCallback(async () => {
     setLoading(true);
     setError(null);
     setPayins([]);
     setHasMore(true);
-    setLastDoc(null);
-    
-    let q = query(collection(db, 'payin'), orderBy('requestedAt', 'desc'), limit(BATCH_SIZE));
-    if (traderFilter) {
-      q = query(collection(db, 'payin'), where('traderId', '==', traderFilter), orderBy('requestedAt', 'desc'), limit(BATCH_SIZE));
-    }
+    setTotalFetched(0);
 
-    const unsub = onSnapshot(q, 
-      (snap) => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setPayins(list);
-        if (snap.docs.length > 0) {
-          setLastDoc(snap.docs[snap.docs.length - 1]);
-        }
-        setHasMore(snap.docs.length >= BATCH_SIZE);
-        setLoading(false);
-      },
-      (err) => {
-        setError(err.message);
-        setLoading(false);
+    try {
+      let q = supabase
+        .from('payins')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, BATCH_SIZE - 1);
+
+      if (traderFilter) {
+        q = q.eq('trader_id', traderFilter);
       }
-    );
-    return () => unsub();
+
+      const { data, error: fetchError } = await q;
+      if (fetchError) throw fetchError;
+
+      setPayins(data || []);
+      setTotalFetched((data || []).length);
+      setHasMore((data || []).length >= BATCH_SIZE);
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
   }, [traderFilter]);
 
-  // Load more (cursor-based pagination)
+  useEffect(() => {
+    fetchPayins();
+  }, [fetchPayins]);
+
+  // Load more (offset-based pagination)
   const loadMorePayins = async () => {
-    if (!lastDoc || loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      let q = query(collection(db, 'payin'), orderBy('requestedAt', 'desc'), startAfter(lastDoc), limit(BATCH_SIZE));
+      let q = supabase
+        .from('payins')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(totalFetched, totalFetched + BATCH_SIZE - 1);
+
       if (traderFilter) {
-        q = query(collection(db, 'payin'), where('traderId', '==', traderFilter), orderBy('requestedAt', 'desc'), startAfter(lastDoc), limit(BATCH_SIZE));
+        q = q.eq('trader_id', traderFilter);
       }
-      const snap = await getDocs(q);
-      const newPayins = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      const { data, error: fetchError } = await q;
+      if (fetchError) throw fetchError;
+
+      const newPayins = data || [];
       setPayins(prev => [...prev, ...newPayins]);
-      if (snap.docs.length > 0) {
-        setLastDoc(snap.docs[snap.docs.length - 1]);
-      }
-      setHasMore(snap.docs.length >= BATCH_SIZE);
+      setTotalFetched(prev => prev + newPayins.length);
+      setHasMore(newPayins.length >= BATCH_SIZE);
     } catch (err) {
       setToast({ msg: 'Failed to load more: ' + err.message, success: false });
     }
@@ -99,28 +108,29 @@ export default function AdminPayins() {
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(p => 
-        p.transactionId?.toLowerCase().includes(s) || 
-        p.utrId?.toLowerCase().includes(s) || 
-        p.traderId?.toLowerCase().includes(s) ||
-        p.upiId?.toLowerCase().includes(s) ||
-        p.merchantId?.toLowerCase().includes(s) ||
-        p.traderName?.toLowerCase().includes(s)
+        p.txn_id?.toLowerCase().includes(s) || 
+        p.utr?.toLowerCase().includes(s) || 
+        p.trader_id?.toLowerCase().includes(s) ||
+        p.assigned_upi?.toLowerCase().includes(s) ||
+        p.merchant_id?.toLowerCase().includes(s)
       );
     }
     
     if (dateFrom) {
       const fromTs = new Date(dateFrom).getTime();
-      result = result.filter(p => (p.requestedAt?.seconds || 0) * 1000 >= fromTs);
+      result = result.filter(p => p.created_at ? new Date(p.created_at).getTime() >= fromTs : false);
     }
     if (dateTo) {
       const toTs = new Date(dateTo).getTime() + 86399999;
-      result = result.filter(p => (p.requestedAt?.seconds || 0) * 1000 <= toTs);
+      result = result.filter(p => p.created_at ? new Date(p.created_at).getTime() <= toTs : false);
     }
 
     result = [...result].sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
       switch (sortBy) {
-        case 'newest': return (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0);
-        case 'oldest': return (a.requestedAt?.seconds || 0) - (b.requestedAt?.seconds || 0);
+        case 'newest': return timeB - timeA;
+        case 'oldest': return timeA - timeB;
         case 'amount-high': return (Number(b.amount) || 0) - (Number(a.amount) || 0);
         case 'amount-low': return (Number(a.amount) || 0) - (Number(b.amount) || 0);
         default: return 0;
@@ -145,7 +155,7 @@ export default function AdminPayins() {
       totalAmount: payins.filter(p => p.status === 'completed').reduce((s, p) => s + (Number(p.amount) || 0), 0),
     };
 
-    const todayPayins = payins.filter(p => (p.requestedAt?.seconds || 0) * 1000 >= todayMs);
+    const todayPayins = payins.filter(p => p.created_at ? new Date(p.created_at).getTime() >= todayMs : false);
     const todayStats = {
       total: todayPayins.length,
       completed: todayPayins.filter(p => p.status === 'completed').length,
@@ -200,12 +210,12 @@ export default function AdminPayins() {
     };
 
     const csv = [
-      ['ID', 'Transaction ID', 'Amount', 'Status', 'Trader ID', 'Trader Name', 'UPI ID', 'UTR', 'Merchant', 'Requested At', 'Completed At'],
+      ['ID', 'Transaction ID', 'Amount', 'Status', 'Trader ID', 'Assigned UPI', 'UTR', 'Merchant', 'Created At', 'Completed At'],
       ...filtered.map(p => [
-        p.id, p.transactionId || '', Number(p.amount) || 0, p.status || '', p.traderId || '',
-        p.traderName || '', p.upiId || '', p.utrId || '', p.merchantId || p.merchantName || '',
-        p.requestedAt?.seconds ? new Date(p.requestedAt.seconds * 1000).toISOString() : '',
-        p.completedAt?.seconds ? new Date(p.completedAt.seconds * 1000).toISOString() : '',
+        p.id, p.txn_id || '', Number(p.amount) || 0, p.status || '', p.trader_id || '',
+        p.assigned_upi || '', p.utr || '', p.merchant_id || '',
+        p.created_at || '',
+        p.completed_at || '',
       ].map(escapeCSV))
     ].map(r => r.join(',')).join('\n');
 
@@ -219,8 +229,7 @@ export default function AdminPayins() {
   };
 
   const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => setLoading(false), 500);
+    fetchPayins();
   };
 
   const clearFilters = () => {

@@ -1,8 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import {
-  collection, query, doc, updateDoc, onSnapshot, orderBy, limit, setDoc, getDoc, serverTimestamp, deleteDoc,
-} from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { supabase } from '../../../supabase';
+import '../../../firebase'; // Keep Firebase app init for Cloud Functions
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -23,6 +21,26 @@ import TraderCard from './components/TraderCard';
 // Initialize Firebase Functions
 const functions = getFunctions();
 
+/* ─── Map Supabase row → camelCase for child components ─── */
+const mapTrader = (row) => ({
+  ...row,
+  isActive: row.is_active,
+  active: row.is_active,
+  status: row.is_active ? 'active' : 'inactive',
+  payinCommission: row.payin_commission,
+  payoutCommission: row.payout_commission,
+  commissionRate: row.payin_commission,
+  overallCommission: row.overall_commission,
+  securityHold: row.security_hold,
+  workingBalance: (Number(row.balance) || 0) - (Number(row.security_hold) || 0),
+  telegramId: row.telegram,
+  telegramGroupLink: row.telegram_group_link,
+  usdtDepositAddress: row.usdt_deposit_address,
+  lastOnlineAt: row.last_online_at,
+  createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
+  updatedAt: row.updated_at ? { seconds: new Date(row.updated_at).getTime() / 1000 } : null,
+});
+
 /* ─── Main Component ─── */
 export default function AdminTraderList() {
   const [traders, setTraders] = useState([]);
@@ -35,19 +53,18 @@ export default function AdminTraderList() {
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'trader'), orderBy('createdAt', 'desc'), limit(100)),
-      (snap) => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setTraders(list);
-        setLoading(false);
-      },
-      (err) => { console.error(err); setLoading(false); }
-    );
-    return () => unsub();
+  const fetchTraders = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('traders')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) { console.error(error); setLoading(false); return; }
+    setTraders((data || []).map(mapTrader));
+    setLoading(false);
   }, []);
+
+  useEffect(() => { fetchTraders(); }, [fetchTraders]);
 
   const filtered = useMemo(() => {
     let result = traders;
@@ -77,20 +94,28 @@ export default function AdminTraderList() {
   // Generate USDT address using Tatum
   const generateTatumAddress = async (traderId) => {
     try {
-      const configDoc = await getDoc(doc(db, 'system', 'tatumConfig'));
-      if (!configDoc.exists() || !configDoc.data().masterWallet) {
+      const { data: configRow } = await supabase
+        .from('system_config')
+        .select('value')
+        .eq('key', 'tatum_config')
+        .single();
+      if (!configRow?.value?.masterWallet) {
         throw new Error('Master wallet not configured. Please generate master wallet in Settings first.');
       }
 
-      const config = configDoc.data();
+      const config = configRow.value;
       const { tatumApiKey, masterWallet } = config;
 
       if (!tatumApiKey || !masterWallet.xpub) {
         throw new Error('Tatum API key or XPUB not found');
       }
 
-      const metaDoc = await getDoc(doc(db, 'system', 'addressMeta'));
-      const nextIndex = metaDoc.exists() ? (metaDoc.data().lastIndex || 0) + 1 : 1;
+      const { data: metaRow } = await supabase
+        .from('system_config')
+        .select('value')
+        .eq('key', 'address_meta')
+        .single();
+      const nextIndex = metaRow?.value?.lastIndex ? metaRow.value.lastIndex + 1 : 1;
 
       const response = await fetch(`https://api.tatum.io/v3/tron/address/${masterWallet.xpub}/${nextIndex}`, {
         method: 'GET',
@@ -104,22 +129,14 @@ export default function AdminTraderList() {
 
       const addressData = await response.json();
 
-      await updateDoc(doc(db, 'trader', traderId), {
-        usdtDepositAddress: addressData.address,
-        derivationIndex: nextIndex,
-        mnemonic: masterWallet.mnemonic,
-        addressGeneratedAt: serverTimestamp(),
-      });
+      await supabase.from('traders').update({
+        usdt_deposit_address: addressData.address,
+        derivation_index: nextIndex,
+      }).eq('id', traderId);
 
-      await setDoc(doc(db, 'system', 'addressMeta'), {
-        lastIndex: nextIndex,
-        lastUpdated: serverTimestamp(),
-      }, { merge: true });
-
-      await setDoc(doc(db, 'addressMapping', addressData.address), {
-        traderId: traderId,
-        derivationIndex: nextIndex,
-        createdAt: serverTimestamp(),
+      await supabase.from('system_config').upsert({
+        key: 'address_meta',
+        value: { lastIndex: nextIndex, lastUpdated: new Date().toISOString() },
       });
 
       return addressData.address;
@@ -136,24 +153,18 @@ export default function AdminTraderList() {
         const { password, ...updateData } = formData;
         const workingBalance = (Number(updateData.balance) || 0) - (Number(updateData.securityHold) || 0);
 
-        await updateDoc(doc(db, 'trader', selectedTrader.id), {
+        await supabase.from('traders').update({
           name: updateData.name,
           phone: updateData.phone || '',
           priority: updateData.priority || 'Normal',
-          payinCommission: Number(updateData.payinCommission) || 4,
-          payoutCommission: Number(updateData.payoutCommission) || 1,
-          commissionRate: Number(updateData.payinCommission) || 4,
+          payin_commission: Number(updateData.payinCommission) || 4,
+          payout_commission: Number(updateData.payoutCommission) || 1,
           balance: Number(updateData.balance) || 0,
-          securityHold: Number(updateData.securityHold) || 0,
-          workingBalance: workingBalance,
-          telegramId: updateData.telegramId || '',
-          telegramGroupLink: updateData.telegramGroupLink || '',
-          active: updateData.active,
-          isActive: updateData.active,
-          status: updateData.active ? 'active' : 'inactive',
-          updatedAt: serverTimestamp(),
-          lastModified: serverTimestamp(),
-        });
+          security_hold: Number(updateData.securityHold) || 0,
+          telegram: updateData.telegramId || '',
+          telegram_group_link: updateData.telegramGroupLink || '',
+          is_active: updateData.active,
+        }).eq('id', selectedTrader.id);
 
         setToast({ msg: '✅ Trader updated successfully!', success: true });
       } else {
@@ -192,6 +203,7 @@ export default function AdminTraderList() {
 
       setShowModal(false);
       setSelectedTrader(null);
+      fetchTraders();
     } catch (error) {
       console.error('Error saving trader:', error);
       throw error;
@@ -205,6 +217,7 @@ export default function AdminTraderList() {
     try {
       await generateTatumAddress(trader.id);
       setToast({ msg: '✅ USDT address ' + (trader.usdtDepositAddress ? 'regenerated' : 'generated') + '!', success: true });
+      fetchTraders();
     } catch (error) {
       setToast({ msg: '❌ Error: ' + error.message, success: false });
     }
@@ -215,10 +228,7 @@ export default function AdminTraderList() {
     if (!window.confirm(`Delete ${trader.name}?\n\nThis cannot be undone.`)) return;
 
     try {
-      await deleteDoc(doc(db, 'trader', trader.id));
-      if (trader.usdtDepositAddress) {
-        await deleteDoc(doc(db, 'addressMapping', trader.usdtDepositAddress)).catch(() => {});
-      }
+      await supabase.from('traders').delete().eq('id', trader.id);
       
       await logDataDeleted(
         'trader',
@@ -230,6 +240,7 @@ export default function AdminTraderList() {
       );
       
       setToast({ msg: '✅ Trader deleted', success: true });
+      fetchTraders();
     } catch (error) {
       setToast({ msg: '❌ Error: ' + error.message, success: false });
     }
@@ -239,12 +250,11 @@ export default function AdminTraderList() {
   const handleToggleStatus = async (trader) => {
     const isActive = trader.active || trader.isActive || trader.status === 'active';
     try {
-      await updateDoc(doc(db, 'trader', trader.id), {
-        active: !isActive,
-        isActive: !isActive,
-        status: !isActive ? 'active' : 'inactive',
-      });
+      await supabase.from('traders').update({
+        is_active: !isActive,
+      }).eq('id', trader.id);
       setToast({ msg: `Trader ${!isActive ? 'activated' : 'deactivated'}`, success: true });
+      fetchTraders();
     } catch (error) {
       setToast({ msg: 'Error: ' + error.message, success: false });
     }

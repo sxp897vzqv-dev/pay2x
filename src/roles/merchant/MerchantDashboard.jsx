@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { db } from '../../firebase';
-import {
-  collection, query, where, getDocs, onSnapshot, Timestamp, orderBy, limit,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { supabase } from '../../supabase';
 import {
   TrendingUp, TrendingDown, DollarSign, Activity, RefreshCw,
   AlertCircle, CheckCircle, Clock,
@@ -61,66 +57,51 @@ export default function MerchantDashboard() {
 
   const fetchStats = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); setRefreshing(false); return; }
 
     try {
-      // Get merchant data
-      const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      const merchant = !merchantSnap.empty ? merchantSnap.docs[0].data() : {};
+      const { data: merchant } = await supabase.from('merchants').select('*').eq('id', user.id).single();
 
       const today = new Date(); today.setHours(0, 0, 0, 0);
-      const todayStart = Timestamp.fromDate(today);
-      
+      const todayISO = today.toISOString();
       const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStart = Timestamp.fromDate(yesterday);
+      const yesterdayISO = yesterday.toISOString();
 
-      // Fetch today's transactions
-      const [payinSnap, payoutSnap, allPayinsSnap, allPayoutsSnap, yesterdayPayinsSnap] = await Promise.all([
-        getDocs(query(collection(db, "merchantPayins"), where("merchantId","==",user.uid), where("createdAt",">=",todayStart))),
-        getDocs(query(collection(db, "merchantPayouts"), where("merchantId","==",user.uid), where("createdAt",">=",todayStart))),
-        getDocs(query(collection(db, "merchantPayins"), where("merchantId","==",user.uid), orderBy("createdAt","desc"), limit(5))),
-        getDocs(query(collection(db, "merchantPayouts"), where("merchantId","==",user.uid), orderBy("createdAt","desc"), limit(5))),
-        getDocs(query(collection(db, "merchantPayins"), where("merchantId","==",user.uid), where("createdAt",">=",yesterdayStart), where("createdAt","<",todayStart))),
+      const [payinRes, payoutRes, allPayinsRes, allPayoutsRes, yesterdayPayinsRes] = await Promise.all([
+        supabase.from('payins').select('amount, status').eq('merchant_id', user.id).gte('created_at', todayISO),
+        supabase.from('payouts').select('amount').eq('merchant_id', user.id).gte('created_at', todayISO),
+        supabase.from('payins').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('payouts').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('payins').select('amount').eq('merchant_id', user.id).gte('created_at', yesterdayISO).lt('created_at', todayISO),
       ]);
 
       let todayPayins = 0, todayPayouts = 0, successCount = 0, totalCount = 0, yesterdayPayins = 0;
-      
-      payinSnap.forEach(d => {
-        const data = d.data();
-        todayPayins += Number(data.amount || 0);
+
+      (payinRes.data || []).forEach(d => {
+        todayPayins += Number(d.amount || 0);
         totalCount++;
-        if (data.status === 'success') successCount++;
+        if (d.status === 'success' || d.status === 'completed') successCount++;
       });
-
-      payoutSnap.forEach(d => {
-        todayPayouts += Number(d.data().amount || 0);
-      });
-
-      yesterdayPayinsSnap.forEach(d => {
-        yesterdayPayins += Number(d.data().amount || 0);
-      });
+      (payoutRes.data || []).forEach(d => { todayPayouts += Number(d.amount || 0); });
+      (yesterdayPayinsRes.data || []).forEach(d => { yesterdayPayins += Number(d.amount || 0); });
 
       const successRate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
 
-      // Recent transactions - combine payins and payouts
-      const recent = [];
-      allPayinsSnap.forEach(d => recent.push({ id: d.id, type: 'payin', ...d.data() }));
-      allPayoutsSnap.forEach(d => recent.push({ id: d.id, type: 'payout', ...d.data() }));
-      recent.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      const mapTs = r => ({ ...r, createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null });
+      const recent = [
+        ...(allPayinsRes.data || []).map(d => ({ ...mapTs(d), type: 'payin' })),
+        ...(allPayoutsRes.data || []).map(d => ({ ...mapTs(d), type: 'payout' })),
+      ].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
       setStats({
-        todayPayins,
-        todayPayouts,
-        yesterdayPayins,
-        successRate,
-        availableBalance: Number(merchant.availableBalance || 0),
-        pendingSettlement: Number(merchant.pendingSettlement || 0),
-        reservedAmount: Number(merchant.reservedAmount || 0),
+        todayPayins, todayPayouts, yesterdayPayins, successRate,
+        availableBalance: Number(merchant?.available_balance || 0),
+        pendingSettlement: Number(merchant?.pending_settlement || 0),
+        reservedAmount: Number(merchant?.reserved_amount || 0),
         totalTransactions: totalCount,
         failedTransactions: totalCount - successCount,
       });
-
       setRecentTx(recent.slice(0, 10));
     } catch (e) {
       console.error(e);

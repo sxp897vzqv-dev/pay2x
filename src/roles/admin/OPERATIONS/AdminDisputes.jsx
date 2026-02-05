@@ -1,6 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { db } from '../../../firebase';
-import { collection, query, onSnapshot, orderBy, where, doc, updateDoc, serverTimestamp, limit } from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { supabase } from '../../../supabase';
 import { useSearchParams } from 'react-router-dom';
 import { AlertCircle, Search, RefreshCw } from 'lucide-react';
 
@@ -19,27 +18,70 @@ export default function AdminDisputes() {
   const [toast, setToast] = useState(null);
   const traderFilter = searchParams.get('trader');
 
-  useEffect(() => {
-    let q = query(collection(db, 'disputes'), orderBy('createdAt', 'desc'), limit(100));
-    if (traderFilter) q = query(collection(db, 'disputes'), where('traderId', '==', traderFilter), orderBy('createdAt', 'desc'), limit(100));
-    const unsub = onSnapshot(q, (snap) => { const list = []; snap.forEach(d => list.push({ id: d.id, ...d.data() })); setDisputes(list); setLoading(false); });
-    return () => unsub();
+  const fetchDisputes = useCallback(async () => {
+    setLoading(true);
+    try {
+      let q = supabase
+        .from('disputes')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (traderFilter) {
+        q = q.eq('trader_id', traderFilter);
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      setDisputes(data || []);
+    } catch (err) {
+      console.error('Disputes fetch error:', err);
+    }
+    setLoading(false);
   }, [traderFilter]);
+
+  useEffect(() => {
+    fetchDisputes();
+  }, [fetchDisputes]);
 
   const filtered = useMemo(() => {
     let result = disputes;
     if (statusFilter !== 'all') result = result.filter(d => d.status === statusFilter);
-    if (search) { const s = search.toLowerCase(); result = result.filter(d => d.orderId?.toLowerCase().includes(s) || d.upiId?.toLowerCase().includes(s) || d.reason?.toLowerCase().includes(s)); }
+    if (search) {
+      const s = search.toLowerCase();
+      result = result.filter(d =>
+        d.id?.toLowerCase().includes(s) ||
+        d.reason?.toLowerCase().includes(s) ||
+        d.description?.toLowerCase().includes(s) ||
+        d.trader_id?.toLowerCase().includes(s) ||
+        d.merchant_id?.toLowerCase().includes(s)
+      );
+    }
     return result;
   }, [disputes, statusFilter, search]);
 
-  const stats = useMemo(() => ({ total: disputes.length, pending: disputes.filter(d => d.status === 'pending').length, approved: disputes.filter(d => d.status === 'approved').length, rejected: disputes.filter(d => d.status === 'rejected').length }), [disputes]);
+  const stats = useMemo(() => ({
+    total: disputes.length,
+    pending: disputes.filter(d => d.status === 'pending').length,
+    approved: disputes.filter(d => d.status === 'admin_approved').length,
+    rejected: disputes.filter(d => d.status === 'admin_rejected').length,
+  }), [disputes]);
 
   const handleResolve = async (dispute, decision) => {
     if (!window.confirm(`${decision === 'approved' ? 'Approve' : 'Reject'} this dispute for ₹${dispute.amount?.toLocaleString()}?`)) return;
     try {
-      await updateDoc(doc(db, 'disputes', dispute.id), { status: decision, adminDecision: decision, resolvedAt: serverTimestamp() });
+      const statusMap = { approved: 'admin_approved', rejected: 'admin_rejected' };
+      const newStatus = statusMap[decision] || decision;
+
+      const { error } = await supabase.from('disputes').update({
+        status: newStatus,
+        admin_decision: decision,
+        admin_resolved_at: new Date().toISOString(),
+      }).eq('id', dispute.id);
+
+      if (error) throw error;
       setToast({ msg: `Dispute ${decision}`, success: decision === 'approved' });
+      fetchDisputes(); // Refresh list
     } catch (e) {
       setToast({ msg: 'Failed to update dispute', success: false });
     }
@@ -69,8 +111,8 @@ export default function AdminDisputes() {
         {[
           { label: 'All', value: stats.total, key: 'all', activeBg: 'bg-slate-200', activeText: 'text-slate-800' },
           { label: 'Pending', value: stats.pending, key: 'pending', activeBg: 'bg-amber-100', activeText: 'text-amber-700' },
-          { label: 'Approved', value: stats.approved, key: 'approved', activeBg: 'bg-green-100', activeText: 'text-green-700' },
-          { label: 'Rejected', value: stats.rejected, key: 'rejected', activeBg: 'bg-red-100', activeText: 'text-red-700' },
+          { label: 'Approved', value: stats.approved, key: 'admin_approved', activeBg: 'bg-green-100', activeText: 'text-green-700' },
+          { label: 'Rejected', value: stats.rejected, key: 'admin_rejected', activeBg: 'bg-red-100', activeText: 'text-red-700' },
         ].map(pill => {
           const isActive = statusFilter === pill.key;
           return (
@@ -90,7 +132,7 @@ export default function AdminDisputes() {
       <div className="flex gap-2">
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input type="text" placeholder="Search order, UPI, reason..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
+          <input type="text" placeholder="Search reason, description, trader..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white" />
         </div>
       </div>
 

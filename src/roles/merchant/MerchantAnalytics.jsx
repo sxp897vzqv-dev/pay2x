@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { collection, query, where, getDocs, Timestamp, limit } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { supabase } from '../../supabase';
 import {
   TrendingUp, Download, Calendar, PieChart, BarChart3, Activity,
   RefreshCw, ArrowUpRight, ArrowDownRight, Filter, FileText,
@@ -98,81 +96,47 @@ export default function MerchantAnalytics() {
 
   const fetchAnalytics = async () => {
     setLoading(true);
-    const user = getAuth().currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     try {
-      // Calculate current period date range
       const now = new Date();
       const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 90;
       const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const startTimestamp = Timestamp.fromDate(startDate);
-
-      // Calculate previous period (same length)
       const previousStartDate = new Date(startDate.getTime() - days * 24 * 60 * 60 * 1000);
-      const previousStartTimestamp = Timestamp.fromDate(previousStartDate);
 
-      // Fetch current period payins
-      const payinsSnap = await getDocs(
-        query(
-          collection(db, 'merchantPayins'),
-          where('merchantId', '==', user.uid),
-          where('createdAt', '>=', startTimestamp),
-          limit(500)
-        )
-      );
+      const { data: payins } = await supabase.from('payins').select('amount, status, payment_method, created_at')
+        .eq('merchant_id', user.id).gte('created_at', startDate.toISOString()).limit(500);
 
-      // Fetch previous period payins
-      const previousPayinsSnap = await getDocs(
-        query(
-          collection(db, 'merchantPayins'),
-          where('merchantId', '==', user.uid),
-          where('createdAt', '>=', previousStartTimestamp),
-          where('createdAt', '<', startTimestamp),
-          limit(500)
-        )
-      );
+      const { data: prevPayins } = await supabase.from('payins').select('amount, status')
+        .eq('merchant_id', user.id).gte('created_at', previousStartDate.toISOString()).lt('created_at', startDate.toISOString()).limit(500);
 
-      let totalVolume = 0;
-      let successCount = 0;
-      const methodCounts = {};
-      const dailyVolumes = {};
-      const hourCounts = Array(24).fill(0);
+      let totalVolume = 0, successCount = 0;
+      const methodCounts = {}, dailyVolumes = {}, hourCounts = Array(24).fill(0);
 
-      payinsSnap.forEach(doc => {
-        const data = doc.data();
+      (payins || []).forEach(data => {
         const amount = Number(data.amount || 0);
-        
         totalVolume += amount;
-        if (data.status === 'success') successCount++;
-
-        // Method distribution
-        const method = data.paymentMethod || 'UPI';
+        if (data.status === 'success' || data.status === 'completed') successCount++;
+        const method = data.payment_method || 'UPI';
         methodCounts[method] = (methodCounts[method] || 0) + 1;
-
-        // Daily volume
-        const date = new Date((data.createdAt?.seconds || 0) * 1000);
+        const date = new Date(data.created_at);
         const dateKey = date.toLocaleDateString('en-IN');
         dailyVolumes[dateKey] = (dailyVolumes[dateKey] || 0) + amount;
-
-        // Hourly distribution
         hourCounts[date.getHours()]++;
       });
 
-      // Calculate previous period stats
-      let previousVolume = 0;
-      let previousSuccessCount = 0;
-      previousPayinsSnap.forEach(doc => {
-        const data = doc.data();
+      let previousVolume = 0, previousSuccessCount = 0;
+      (prevPayins || []).forEach(data => {
         previousVolume += Number(data.amount || 0);
-        if (data.status === 'success') previousSuccessCount++;
+        if (data.status === 'success' || data.status === 'completed') previousSuccessCount++;
       });
 
-      const totalCount = payinsSnap.size;
+      const totalCount = (payins || []).length;
       const successRate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
       const avgTicketSize = totalCount > 0 ? Math.round(totalVolume / totalCount) : 0;
 
-      const previousCount = previousPayinsSnap.size;
+      const previousCount = (prevPayins || []).length;
       const previousSuccessRate = previousCount > 0 ? Math.round((previousSuccessCount / previousCount) * 100) : 0;
       const previousAvgTicketSize = previousCount > 0 ? Math.round(previousVolume / previousCount) : 0;
 
