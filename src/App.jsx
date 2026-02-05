@@ -9,54 +9,55 @@ import { initIPCapture } from './utils/ipCapture';
 // Initialize IP capture on app load (for audit logging)
 initIPCapture();
 
-// Common Components
+// Common Components (static - needed immediately)
 import SignIn from './SignIn';
 
-// Trader Components
-import TraderLayout from './roles/trader/TraderLayout';
-import TraderDashboard from './roles/trader/Dashboard/TraderDashboard';
-import TraderBalance from './roles/trader/Balance/TraderBalance';
-import TraderBank from './roles/trader/Banks/TraderBank';
-import TraderPayin from './roles/trader/Payin/TraderPayin';
-import TraderPayout from './roles/trader/Payout/TraderPayout';
-import TraderDispute from './roles/trader/Disputes/TraderDispute';
+// ═══════════════════════════════════════════════════════════════════
+// LAZY-LOADED COMPONENTS (React.lazy code splitting)
+// ═══════════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════════
-// ADMIN COMPONENTS
-// ═══════════════════════════════════════════════════════════════════
-import AdminLayout from './roles/admin/AdminLayout';
-import AdminDashboard from './roles/admin/OVERVIEW/AdminDashboard';
-import AdminTraderList from './roles/admin/ENTITIES/AdminTraderList';
-import AdminTraderDetail from './roles/admin/ENTITIES/AdminTraderDetail';
-import AdminMerchantList from './roles/admin/ENTITIES/AdminMerchantList';
-import AdminMerchantDetail from './roles/admin/ENTITIES/AdminMerchantDetail';
-import AdminUserList from './roles/admin/ENTITIES/AdminUserList';
-import AdminUserDetail from './roles/admin/ENTITIES/AdminUserDetail';
-import AdminPayins from './roles/admin/OPERATIONS/AdminPayins';
-import AdminPayouts from './roles/admin/OPERATIONS/AdminPayouts';
-import AdminDisputes from './roles/admin/OPERATIONS/AdminDisputes';
-import AdminUPIPool from './roles/admin/OPERATIONS/AdminUPIPool';
-import AdminLogs from './roles/admin/AUDIT/AdminLogs';
-import AdminCommission from './roles/admin/AUDIT/AdminCommission';
-import AdminReviewQueue from './roles/admin/AUDIT/AdminReviewQueue';
-import AdminPayinEngine from './roles/admin/AdminPayinEngine';
-import AdminPayoutEngine from './roles/admin/AdminPayoutEngine';
-import AdminDisputeEngine from './roles/admin/AdminDisputeEngine';
-import AdminWorkers from './roles/admin/AdminWorkers';
+// Layouts
+const TraderLayout = React.lazy(() => import('./roles/trader/TraderLayout'));
+const AdminLayout = React.lazy(() => import('./roles/admin/AdminLayout'));
+const MerchantLayout = React.lazy(() => import('./roles/merchant/MerchantLayout'));
 
-// ═══════════════════════════════════════════════════════════════════
-// NEW MERCHANT COMPONENTS - 8 Pages
-// Place these files in: src/roles/merchant/
-// ═══════════════════════════════════════════════════════════════════
-import MerchantLayout from './roles/merchant/MerchantLayout';
-import MerchantDashboard from './roles/merchant/MerchantDashboard';
-import MerchantPayin from './roles/merchant/MerchantPayin';
-import MerchantPayout from './roles/merchant/MerchantPayout';
-import MerchantBalance from './roles/merchant/MerchantBalance';
-import MerchantAPI from './roles/merchant/MerchantAPI';
-import MerchantAnalytics from './roles/merchant/MerchantAnalytics';
-import MerchantDispute from './roles/merchant/MerchantDispute';
-import MerchantSettings from './roles/merchant/MerchantSettings';
+// Trader pages
+const TraderDashboard = React.lazy(() => import('./roles/trader/Dashboard/TraderDashboard'));
+const TraderBalance = React.lazy(() => import('./roles/trader/Balance/TraderBalance'));
+const TraderBank = React.lazy(() => import('./roles/trader/Banks/TraderBank'));
+const TraderPayin = React.lazy(() => import('./roles/trader/Payin/TraderPayin'));
+const TraderPayout = React.lazy(() => import('./roles/trader/Payout/TraderPayout'));
+const TraderDispute = React.lazy(() => import('./roles/trader/Disputes/TraderDispute'));
+
+// Admin pages
+const AdminDashboard = React.lazy(() => import('./roles/admin/OVERVIEW/AdminDashboard'));
+const AdminTraderList = React.lazy(() => import('./roles/admin/ENTITIES/AdminTraderList'));
+const AdminTraderDetail = React.lazy(() => import('./roles/admin/ENTITIES/AdminTraderDetail'));
+const AdminMerchantList = React.lazy(() => import('./roles/admin/ENTITIES/AdminMerchantList'));
+const AdminMerchantDetail = React.lazy(() => import('./roles/admin/ENTITIES/AdminMerchantDetail'));
+const AdminUserList = React.lazy(() => import('./roles/admin/ENTITIES/AdminUserList'));
+const AdminUserDetail = React.lazy(() => import('./roles/admin/ENTITIES/AdminUserDetail'));
+const AdminPayins = React.lazy(() => import('./roles/admin/OPERATIONS/AdminPayins'));
+const AdminPayouts = React.lazy(() => import('./roles/admin/OPERATIONS/AdminPayouts'));
+const AdminDisputes = React.lazy(() => import('./roles/admin/OPERATIONS/AdminDisputes'));
+const AdminUPIPool = React.lazy(() => import('./roles/admin/OPERATIONS/AdminUPIPool'));
+const AdminLogs = React.lazy(() => import('./roles/admin/AUDIT/AdminLogs'));
+const AdminCommission = React.lazy(() => import('./roles/admin/AUDIT/AdminCommission'));
+const AdminReviewQueue = React.lazy(() => import('./roles/admin/AUDIT/AdminReviewQueue'));
+const AdminPayinEngine = React.lazy(() => import('./roles/admin/AdminPayinEngine'));
+const AdminPayoutEngine = React.lazy(() => import('./roles/admin/AdminPayoutEngine'));
+const AdminDisputeEngine = React.lazy(() => import('./roles/admin/AdminDisputeEngine'));
+const AdminWorkers = React.lazy(() => import('./roles/admin/AdminWorkers'));
+
+// Merchant pages
+const MerchantDashboard = React.lazy(() => import('./roles/merchant/MerchantDashboard'));
+const MerchantPayin = React.lazy(() => import('./roles/merchant/MerchantPayin'));
+const MerchantPayout = React.lazy(() => import('./roles/merchant/MerchantPayout'));
+const MerchantBalance = React.lazy(() => import('./roles/merchant/MerchantBalance'));
+const MerchantAPI = React.lazy(() => import('./roles/merchant/MerchantAPI'));
+const MerchantAnalytics = React.lazy(() => import('./roles/merchant/MerchantAnalytics'));
+const MerchantDispute = React.lazy(() => import('./roles/merchant/MerchantDispute'));
+const MerchantSettings = React.lazy(() => import('./roles/merchant/MerchantSettings'));
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRole, userRole }) {
@@ -102,6 +103,18 @@ function NotFound() {
         >
           Back to Sign In
         </a>
+      </div>
+    </div>
+  );
+}
+
+// Suspense fallback for lazy-loaded pages
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="text-center">
+        <div className="w-8 h-8 border-3 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-slate-500">Loading...</p>
       </div>
     </div>
   );
@@ -159,6 +172,7 @@ function App() {
 
   return (
     <Router>
+      <React.Suspense fallback={<PageLoader />}>
       <Routes>
         {/* Public Route - Sign In */}
         <Route 
@@ -275,6 +289,7 @@ function App() {
         {/* Catch all - 404 */}
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </React.Suspense>
     </Router>
   );
 }
