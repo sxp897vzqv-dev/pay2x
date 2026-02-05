@@ -10,21 +10,7 @@ import {
   Lock, ExternalLink, AlertTriangle, Clock, ArrowDown, IndianRupee,
 } from "lucide-react";
 import QRCode from "react-qr-code";
-
-/* ─── Toast ─── */
-function Toast({ msg, success, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return (
-    <div
-      className={`fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 ${success ? 'bg-green-600' : 'bg-red-600'} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium`}
-      /* ✅ FIX: top bar is 56px, toast sits flush below it */
-      style={{ top: 60 }}
-    >
-      {success ? <CheckCircle size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
-      <span>{msg}</span>
-    </div>
-  );
-}
+import Toast from '../../../components/admin/Toast';
 
 /* ─── Transaction row ─── */
 function TransactionItem({ transaction }) {

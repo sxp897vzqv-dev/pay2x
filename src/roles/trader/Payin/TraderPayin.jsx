@@ -248,7 +248,7 @@ export default function TraderPayin() {
     };
     fetchComm();
     const unsub = onSnapshot(
-      query(collection(db,"payin"), where("traderId","==",user.uid), orderBy("requestedAt","desc")),
+      query(collection(db,"payin"), where("traderId","==",user.uid), orderBy("requestedAt","desc"), limit(200)),
       snap => { const d=[]; snap.forEach(doc => d.push({id:doc.id,...doc.data()})); setPayins(d); setLoading(false); }
     );
     return () => unsub();

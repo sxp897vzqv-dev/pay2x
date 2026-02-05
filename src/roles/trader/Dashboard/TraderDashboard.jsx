@@ -7,57 +7,7 @@ import { getAuth } from "firebase/auth";
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet, Activity, RefreshCw,
 } from 'lucide-react';
-
-/* ─── Static color maps (dynamic Tailwind classes don't work) ─── */
-const BG_MAP = {
-  blue:    '#eff6ff', green:   '#f0fdf4', purple:  '#faf5ff',
-  orange:  '#fff7ed', emerald: '#ecfdf5', yellow:  '#fefce8', red: '#fef2f2',
-};
-const ICON_BG_MAP = {
-  blue:    { bg: '#dbeafe', text: '#2563eb' },
-  green:   { bg: '#bbf7d0', text: '#16a34a' },
-  purple:  { bg: '#e9d5ff', text: '#9333ea' },
-  orange:  { bg: '#fed7aa', text: '#ea580c' },
-  emerald: { bg: '#a7f3d0', text: '#059669' },
-  yellow:  { bg: '#fde047', text: '#ca8a04' },
-  red:     { bg: '#fecaca', text: '#dc2626' },
-};
-const TEXT_MAP = {
-  blue:    '#1d4ed8', green:   '#15803d', purple:  '#7e22ce',
-  orange:  '#c2410c', emerald: '#047857', yellow:  '#a16207', red: '#b91c1c',
-};
-const BORDER_MAP = {
-  blue:    '#bfdbfe', green:   '#86efac', purple:  '#c4b5fd',
-  orange:  '#fdba74', emerald: '#6ee7b7', yellow:  '#fcd34d', red: '#fca5a5',
-};
-
-/* ─── StatCard ─── */
-const StatCard = ({ title, value, icon: Icon, color = 'blue', loading, subtitle, className = '', style: extraStyle = {} }) => (
-  <div
-    className={`rounded-xl p-3 sm:p-4 ${className}`}
-    style={{
-      backgroundColor: BG_MAP[color],
-      border: `1px solid ${BORDER_MAP[color]}`,
-      ...extraStyle,
-    }}
-  >
-    <div className="flex items-center justify-between mb-2">
-      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide truncate pr-2">{title}</p>
-      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ backgroundColor: ICON_BG_MAP[color].bg }}>
-        <Icon className="w-3.5 h-3.5" style={{ color: ICON_BG_MAP[color].text }} />
-      </div>
-    </div>
-    {loading ? (
-      <div className="h-6 w-20 bg-slate-200 animate-pulse rounded" />
-    ) : (
-      <>
-        <h3 className="text-xl sm:text-2xl font-bold leading-tight" style={{ color: TEXT_MAP[color] }}>{value}</h3>
-        {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
-      </>
-    )}
-  </div>
-);
+import StatCard from '../../../components/admin/StatCard';
 
 export default function TraderDashboard() {
   const [stats, setStats] = useState({
@@ -163,18 +113,17 @@ export default function TraderDashboard() {
 
       {/* ── Primary stats — 2 col mobile / 3 col desktop ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-        <StatCard title="Today's Payins"     value={`₹${stats.todaysPayins.toLocaleString()}`}     icon={TrendingUp}   color="green"   loading={loading} style={{ animationDelay: '0.05s' }} className="stat-card-anim" />
-        <StatCard title="Today's Payouts"    value={`₹${stats.todaysPayouts.toLocaleString()}`}    icon={TrendingDown} color="blue"    loading={loading} style={{ animationDelay: '0.10s' }} className="stat-card-anim" />
-        {/* ✅ BUG FIX: className prop is now accepted & applied by StatCard */}
-        <StatCard title="Today's Commission" value={`₹${stats.todaysCommission.toLocaleString()}`} icon={DollarSign}   color="emerald" loading={loading} style={{ animationDelay: '0.15s' }} className="col-span-2 sm:col-span-1 stat-card-anim" />
+        <StatCard title="Today's Payins"     value={`₹${stats.todaysPayins.toLocaleString()}`}     icon={TrendingUp}   color="green"   loading={loading} className="stat-card-anim" />
+        <StatCard title="Today's Payouts"    value={`₹${stats.todaysPayouts.toLocaleString()}`}    icon={TrendingDown} color="blue"    loading={loading} className="stat-card-anim" />
+        <StatCard title="Today's Commission" value={`₹${stats.todaysCommission.toLocaleString()}`} icon={DollarSign}   color="emerald" loading={loading} className="col-span-2 sm:col-span-1 stat-card-anim" />
       </div>
 
       {/* ── Secondary stats — 2 col mobile / 4 col lg ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard title="Overall Commission" value={`₹${stats.overallCommission.toLocaleString()}`} icon={DollarSign} color="purple" loading={loading} style={{ animationDelay: '0.20s' }} className="stat-card-anim" />
-        <StatCard title="Wallet Balance"     value={`₹${stats.balance.toLocaleString()}`}           icon={Wallet}     color="orange" loading={loading} style={{ animationDelay: '0.25s' }} className="stat-card-anim" />
-        <StatCard title="Pending Payins"     value={stats.pendingPayins.toString()}                  icon={Activity}   color="yellow" loading={loading} subtitle="Awaiting action" style={{ animationDelay: '0.30s' }} className="stat-card-anim" />
-        <StatCard title="Pending Payouts"    value={stats.pendingPayouts.toString()}                 icon={Activity}   color="red"    loading={loading} subtitle="Awaiting action" style={{ animationDelay: '0.35s' }} className="stat-card-anim" />
+        <StatCard title="Overall Commission" value={`₹${stats.overallCommission.toLocaleString()}`} icon={DollarSign} color="purple" loading={loading} className="stat-card-anim" />
+        <StatCard title="Wallet Balance"     value={`₹${stats.balance.toLocaleString()}`}           icon={Wallet}     color="orange" loading={loading} className="stat-card-anim" />
+        <StatCard title="Pending Payins"     value={stats.pendingPayins.toString()}                  icon={Activity}   color="yellow" loading={loading} subtitle="Awaiting action" className="stat-card-anim" />
+        <StatCard title="Pending Payouts"    value={stats.pendingPayouts.toString()}                 icon={Activity}   color="red"    loading={loading} subtitle="Awaiting action" className="stat-card-anim" />
       </div>
 
       {/* ── Quick Actions ── */}

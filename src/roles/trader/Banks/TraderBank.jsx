@@ -6,6 +6,7 @@ import {
   Edit, Trash2, Plus, Building2, Wallet, RefreshCw, X, Copy, Shield,
   Briefcase, DollarSign, CheckCircle, AlertCircle, Smartphone, Hash, User,
 } from 'lucide-react';
+import Toast from '../../../components/admin/Toast';
 
 const CARD_TYPES = [
   { key: 'currentMerchantUpis',   title: 'Current Merchant QR',  icon: Shield,    color: '#059669', bgColor: '#ecfdf5', borderColor: '#a7f3d0', ringClass: 'focus:ring-green-400',   fields: ['upiId','holderName'] },
@@ -14,17 +15,6 @@ const CARD_TYPES = [
   { key: 'bigUpis',               title: 'Big Deposit UPI',      icon: DollarSign,color: '#ea580c', bgColor: '#fff7ed', borderColor: '#fdba74', ringClass: 'focus:ring-orange-400',  fields: ['upiId','holderName'], requiresOtherUpi: true },
   { key: 'impsAccounts',          title: 'IMPS Bank Accounts',   icon: Building2, color: '#4f46e5', bgColor: '#eef2ff', borderColor: '#a5b4fc', ringClass: 'focus:ring-indigo-400',  fields: ['accountNumber','ifscCode','holderName'] },
 ];
-
-/* ─── Toast ─── */
-function Toast({ msg, success, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return (
-    <div className={`fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 ${success ? 'bg-green-600' : 'bg-red-600'} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium`} style={{ top: 60 }}>
-      {success ? <CheckCircle size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
-      <span>{msg}</span>
-    </div>
-  );
-}
 
 /* ─── Toggle ─── */
 function Switch({ checked, onChange, disabled }) {
