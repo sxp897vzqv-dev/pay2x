@@ -3,13 +3,12 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { ThemeProvider, useTheme } from '../../context/ThemeContext';
 import GlobalSearch from '../../components/admin/GlobalSearch';
 import NotificationCenter from '../../components/admin/NotificationCenter';
 import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
   AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
-  ChevronDown, ChevronRight, Settings, Bell, Cpu, Sun, Moon, Search,
+  ChevronDown, ChevronRight, Settings, Bell, Cpu, Search,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -45,46 +44,6 @@ import {
         50% { opacity: 0.5; }
       }
       .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-
-      /* ─── Dark mode overrides (scoped to admin-root) ─── */
-      .dark .admin-root { color-scheme: dark; }
-
-      .dark .admin-root .bg-white { background-color: rgb(30 41 59) !important; }
-      .dark .admin-root .border-slate-200 { border-color: rgb(51 65 85) !important; }
-      .dark .admin-root .border-slate-100 { border-color: rgb(51 65 85) !important; }
-      .dark .admin-root .bg-slate-50 { background-color: rgb(15 23 42) !important; }
-      .dark .admin-root .bg-slate-100 { background-color: rgb(30 41 59) !important; }
-      .dark .admin-root .text-slate-900 { color: rgb(241 245 249) !important; }
-      .dark .admin-root .text-slate-800 { color: rgb(226 232 240) !important; }
-      .dark .admin-root .text-slate-700 { color: rgb(203 213 225) !important; }
-      .dark .admin-root .text-slate-600 { color: rgb(148 163 184) !important; }
-      .dark .admin-root .text-slate-500 { color: rgb(148 163 184) !important; }
-      .dark .admin-root .bg-slate-200 { background-color: rgb(51 65 85) !important; }
-      .dark .admin-root .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(51 65 85) !important; }
-      .dark .admin-root .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: rgb(51 65 85) !important; }
-      .dark .admin-root .border-slate-300 { border-color: rgb(51 65 85) !important; }
-      .dark .admin-root .bg-gray-50 { background-color: rgb(15 23 42) !important; }
-      .dark .admin-root .bg-gray-100 { background-color: rgb(30 41 59) !important; }
-      .dark .admin-root .text-gray-900 { color: rgb(241 245 249) !important; }
-      .dark .admin-root .text-gray-800 { color: rgb(226 232 240) !important; }
-      .dark .admin-root .text-gray-700 { color: rgb(203 213 225) !important; }
-      .dark .admin-root .text-gray-600 { color: rgb(148 163 184) !important; }
-      .dark .admin-root .text-gray-500 { color: rgb(148 163 184) !important; }
-      .dark .admin-root .ring-slate-200 { --tw-ring-color: rgb(51 65 85) !important; }
-      .dark .admin-root .hover\\:bg-slate-50:hover { background-color: rgb(30 41 59) !important; }
-      .dark .admin-root .hover\\:bg-slate-100:hover { background-color: rgb(51 65 85) !important; }
-      .dark .admin-root .hover\\:bg-gray-50:hover { background-color: rgb(30 41 59) !important; }
-      .dark .admin-root input,
-      .dark .admin-root select,
-      .dark .admin-root textarea {
-        background-color: rgb(15 23 42) !important;
-        color: rgb(226 232 240) !important;
-        border-color: rgb(51 65 85) !important;
-      }
-      .dark .admin-root input::placeholder,
-      .dark .admin-root textarea::placeholder {
-        color: rgb(100 116 139) !important;
-      }
     `;
     document.head.appendChild(s);
   }
@@ -162,15 +121,14 @@ const bottomNavItems = [
 
 const allLinks = navGroups.flatMap(g => g.items);
 
-/* ─── Inner layout (needs ThemeContext) ─── */
-function AdminLayoutInner() {
+/* ─── Layout component ─── */
+export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminInfo, setAdminInfo]     = useState(null);
   const [expandedGroups, setExpandedGroups] = useState(['Overview', 'Entities', 'Operations', 'Audit', 'Settings']);
   const [searchOpen, setSearchOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, toggleTheme } = useTheme();
 
   /* ─── Role & Permission logic ─── */
   const userRole = localStorage.getItem('pay2x_user_role');
@@ -295,44 +253,33 @@ function AdminLayoutInner() {
   );
 
   return (
-    <div className="admin-root w-full min-h-screen flex flex-col md:flex-row bg-slate-50 dark:bg-slate-900">
+    <div className="admin-root w-full min-h-screen flex flex-col md:flex-row bg-slate-50">
 
       {/* ═══════ GLOBAL SEARCH MODAL ═══════ */}
       <GlobalSearch isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* ═══════ MOBILE TOP BAR ═══════ */}
       <header
-        className="md:hidden fixed top-0 left-0 right-0 z-40 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700"
+        className="md:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-slate-200"
         style={{ paddingTop: 'env(safe-area-inset-top)', boxShadow: '0 1px 4px rgba(0,0,0,.07)' }}
       >
         <div className="flex items-center justify-between px-4" style={{ height: 56 }}>
           <button
             onClick={() => setSidebarOpen(true)}
-            className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-slate-100 dark:active:bg-slate-700"
+            className="w-10 h-10 flex items-center justify-center rounded-xl active:bg-slate-100"
             aria-label="Menu"
           >
-            <Menu className="w-5 h-5 text-slate-700 dark:text-slate-200" />
+            <Menu className="w-5 h-5 text-slate-700" />
           </button>
-          <h1 className="text-sm font-bold text-slate-900 dark:text-slate-100 tracking-tight">{currentTitle}</h1>
+          <h1 className="text-sm font-bold text-slate-900 tracking-tight">{currentTitle}</h1>
           <div className="flex items-center gap-2">
             {/* Search button */}
             <button
               onClick={() => setSearchOpen(true)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600"
+              className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200"
               aria-label="Search"
             >
-              <Search className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-            </button>
-            {/* Theme toggle */}
-            <button
-              onClick={toggleTheme}
-              className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600"
-              aria-label="Toggle theme"
-            >
-              {theme === 'dark'
-                ? <Sun className="w-4 h-4 text-amber-500" />
-                : <Moon className="w-4 h-4 text-slate-600" />
-              }
+              <Search className="w-4 h-4 text-slate-600" />
             </button>
             {/* Notifications */}
             <NotificationCenter />
@@ -388,18 +335,8 @@ function AdminLayoutInner() {
           {renderGroupedNav()}
         </nav>
 
-        {/* Theme toggle + Logout */}
-        <div className="p-3 border-t border-white/10 space-y-2">
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/10 text-white hover:bg-white/15 transition-all group"
-          >
-            {theme === 'dark'
-              ? <Sun className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
-              : <Moon className="w-5 h-5 text-indigo-200 group-hover:scale-110 transition-transform" />
-            }
-            <span className="font-medium text-sm">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-          </button>
+        {/* Logout */}
+        <div className="p-3 border-t border-white/10">
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/15 text-white hover:bg-red-500/25 transition-all group"
@@ -470,14 +407,14 @@ function AdminLayoutInner() {
       {/* ═══════ MAIN CONTENT ═══════ */}
       <main className="flex-1 overflow-y-auto min-h-0 pb-24 md:pb-0" style={{ marginTop: 56 }}>
         {/* Desktop header bar with search + notifications */}
-        <div className="hidden md:flex items-center justify-end gap-3 px-6 py-3 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        <div className="hidden md:flex items-center justify-end gap-3 px-6 py-3 border-b border-slate-200 bg-white">
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 text-sm hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 text-sm hover:bg-slate-200 transition-colors"
           >
             <Search className="w-4 h-4" />
             <span>Search…</span>
-            <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded text-[10px] border border-slate-200 dark:border-slate-600 ml-4">Ctrl+K</kbd>
+            <kbd className="px-1.5 py-0.5 bg-white rounded text-[10px] border border-slate-200 ml-4">Ctrl+K</kbd>
           </button>
           <NotificationCenter />
         </div>
@@ -490,7 +427,7 @@ function AdminLayoutInner() {
 
       {/* ═══════ MOBILE BOTTOM NAV ═══════ */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)', boxShadow: '0 -2px 8px rgba(0,0,0,.06)' }}
       >
         <div className="flex items-center justify-around px-1 py-1.5">
@@ -503,9 +440,9 @@ function AdminLayoutInner() {
                   className="flex items-center justify-center rounded-full transition-colors duration-200"
                   style={{ width: 44, height: 26, backgroundColor: isActive ? '#e0e7ff' : 'transparent' }}
                 >
-                  <Icon style={{ width: 20, height: 20, color: isActive ? '#4f46e5' : theme === 'dark' ? '#94a3b8' : '#94a3b8' }} />
+                  <Icon style={{ width: 20, height: 20, color: isActive ? '#4f46e5' : '#94a3b8' }} />
                 </div>
-                <span style={{ fontSize: 10, color: isActive ? '#4f46e5' : theme === 'dark' ? '#94a3b8' : '#94a3b8', fontWeight: isActive ? 700 : 500 }}>
+                <span style={{ fontSize: 10, color: isActive ? '#4f46e5' : '#94a3b8', fontWeight: isActive ? 700 : 500 }}>
                   {link.shortLabel}
                 </span>
               </NavLink>
@@ -514,14 +451,5 @@ function AdminLayoutInner() {
         </div>
       </nav>
     </div>
-  );
-}
-
-/* ─── Exported wrapper with ThemeProvider ─── */
-export default function AdminLayout() {
-  return (
-    <ThemeProvider>
-      <AdminLayoutInner />
-    </ThemeProvider>
   );
 }
