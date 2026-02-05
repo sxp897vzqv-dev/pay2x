@@ -1,32 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp, limit } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import {
   TrendingUp, Download, Calendar, PieChart, BarChart3, Activity,
   RefreshCw, ArrowUpRight, ArrowDownRight, Filter, FileText,
 } from 'lucide-react';
-
-/* ─── Stat Card ─── */
-function StatCard({ title, value, change, isPositive, icon: Icon }) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{title}</p>
-        <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-          <Icon className="w-4 h-4 text-purple-600" />
-        </div>
-      </div>
-      <p className="text-2xl font-bold text-slate-900 mb-1">{value}</p>
-      {change && (
-        <div className={`flex items-center gap-1 text-xs font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-          {isPositive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-          {change}
-        </div>
-      )}
-    </div>
-  );
-}
+import StatCard from '../../components/admin/StatCard';
 
 /* ─── Simple Bar Chart Component ─── */
 function SimpleBarChart({ data, title }) {
@@ -137,7 +117,8 @@ export default function MerchantAnalytics() {
         query(
           collection(db, 'merchantPayins'),
           where('merchantId', '==', user.uid),
-          where('createdAt', '>=', startTimestamp)
+          where('createdAt', '>=', startTimestamp),
+          limit(500)
         )
       );
 
@@ -147,7 +128,8 @@ export default function MerchantAnalytics() {
           collection(db, 'merchantPayins'),
           where('merchantId', '==', user.uid),
           where('createdAt', '>=', previousStartTimestamp),
-          where('createdAt', '<', startTimestamp)
+          where('createdAt', '<', startTimestamp),
+          limit(500)
         )
       );
 
@@ -318,30 +300,30 @@ export default function MerchantAnalytics() {
         <StatCard
           title="Total Volume"
           value={`₹${(stats.totalVolume / 1000).toFixed(1)}k`}
-          change={`${Number(volumeGrowth) >= 0 ? '+' : ''}${volumeGrowth}%`}
-          isPositive={Number(volumeGrowth) >= 0}
           icon={TrendingUp}
+          color="green"
+          trend={Number(volumeGrowth)}
         />
         <StatCard
           title="Transactions"
           value={stats.transactionCount}
-          change={`${Number(txnGrowth) >= 0 ? '+' : ''}${txnGrowth}%`}
-          isPositive={Number(txnGrowth) >= 0}
           icon={Activity}
+          color="blue"
+          trend={Number(txnGrowth)}
         />
         <StatCard
           title="Success Rate"
           value={`${stats.successRate}%`}
-          change={`${Number(successRateGrowth) >= 0 ? '+' : ''}${successRateGrowth}%`}
-          isPositive={Number(successRateGrowth) >= 0}
           icon={PieChart}
+          color="purple"
+          trend={Number(successRateGrowth)}
         />
         <StatCard
           title="Avg Ticket"
           value={`₹${stats.avgTicketSize}`}
-          change={`${Number(avgTicketGrowth) >= 0 ? '+' : ''}${avgTicketGrowth}%`}
-          isPositive={Number(avgTicketGrowth) >= 0}
           icon={FileText}
+          color="orange"
+          trend={Number(avgTicketGrowth)}
         />
       </div>
 

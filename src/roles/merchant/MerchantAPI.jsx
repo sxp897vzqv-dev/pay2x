@@ -7,22 +7,12 @@ import {
   Globe, Shield, Eye, EyeOff, Terminal, FileText, Zap, X, ExternalLink,
 } from 'lucide-react';
 
-// Enable debug mode
-console.log('🚀 MerchantAPI.jsx loaded');
-
 /* ─── API Key Card ─── */
 function APIKeyCard({ apiKey, mode, onCopy, onRegenerate, regenerating }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Debug logging
-  useEffect(() => {
-    console.log(`🎴 APIKeyCard (${mode}): Rendered with apiKey:`, apiKey ? `${apiKey.substring(0, 15)}...` : 'EMPTY/NULL');
-    console.log(`🎴 APIKeyCard (${mode}): Regenerating:`, regenerating);
-  }, [apiKey, mode, regenerating]);
-
   const handleCopy = () => {
-    console.log(`📋 APIKeyCard (${mode}): Copy clicked, hasKey:`, !!apiKey);
     if (!apiKey) {
       alert('No API key to copy. Generate one first!');
       return;
@@ -33,7 +23,6 @@ function APIKeyCard({ apiKey, mode, onCopy, onRegenerate, regenerating }) {
   };
 
   const hasKey = apiKey && apiKey.length > 0;
-  console.log(`🎴 APIKeyCard (${mode}): hasKey =`, hasKey);
 
   return (
     <div className={`rounded-xl p-4 border-2 ${
@@ -76,10 +65,7 @@ function APIKeyCard({ apiKey, mode, onCopy, onRegenerate, regenerating }) {
           {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
           {copied ? 'Copied!' : 'Copy Key'}
         </button>
-        <button onClick={() => {
-            console.log(`🖱️ APIKeyCard (${mode}): Regenerate button clicked`);
-            onRegenerate(mode);
-          }}
+        <button onClick={() => onRegenerate(mode)}
           disabled={regenerating}
           className="flex-1 flex items-center justify-center gap-2 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
@@ -143,34 +129,18 @@ export default function MerchantAPI() {
 
   useEffect(() => {
     const user = getAuth().currentUser;
-    console.log('🔑 MerchantAPI: Component mounted, user:', user?.uid);
-    
-    if (!user) {
-      console.error('❌ MerchantAPI: No authenticated user found');
-      return;
-    }
+    if (!user) return;
 
     const fetchData = async () => {
       try {
-        console.log('🔍 MerchantAPI: Fetching merchant data for uid:', user.uid);
         const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-        
-        console.log('📦 MerchantAPI: Query result - found docs:', merchantSnap.size);
         
         if (!merchantSnap.empty) {
           const data = merchantSnap.docs[0].data();
-          console.log('📄 MerchantAPI: Merchant document ID:', merchantSnap.docs[0].id);
-          console.log('📄 MerchantAPI: Full merchant data:', data);
           
           // Support both old structure (apiKey) and new structure (liveApiKey/testApiKey)
           const liveKey = data.liveApiKey || data.apiKey || '';
           const testKey = data.testApiKey || '';
-          
-          console.log('🔑 MerchantAPI: Current API keys:', {
-            live: liveKey ? `${liveKey.substring(0, 15)}...` : 'EMPTY',
-            test: testKey ? `${testKey.substring(0, 15)}...` : 'EMPTY',
-            usingLegacyApiKey: !!data.apiKey && !data.liveApiKey
-          });
           
           setApiKeys({
             live: liveKey,
@@ -179,14 +149,9 @@ export default function MerchantAPI() {
           setWebhookUrl(data.webhookUrl || '');
           setWebhookSecret(data.webhookSecret || '');
           setWebhookEvents(data.webhookEvents || ['payin.success', 'payin.failed', 'payout.completed']);
-          
-          console.log('✅ MerchantAPI: State updated successfully');
-        } else {
-          console.error('❌ MerchantAPI: No merchant document found for uid:', user.uid);
-          console.error('❌ MerchantAPI: Make sure your Firebase Auth UID matches the merchant document uid field');
         }
       } catch (e) {
-        console.error('❌ MerchantAPI: Error fetching data:', e);
+        console.error('Error fetching API data:', e);
       }
       setLoading(false);
     };
@@ -207,39 +172,25 @@ export default function MerchantAPI() {
   }, []);
 
   const handleCopyKey = (key) => {
-    console.log('📋 handleCopyKey: Copying key:', key ? `${key.substring(0, 15)}...` : 'EMPTY');
     navigator.clipboard.writeText(key);
   };
 
   const handleRegenerateKey = async (mode) => {
-    console.log('🔄 handleRegenerateKey: Called with mode:', mode);
-    console.log('🔄 handleRegenerateKey: Current keys state:', apiKeys);
-    
     const hasExistingKey = apiKeys[mode] && apiKeys[mode].length > 0;
-    console.log('🔄 handleRegenerateKey: Has existing key?', hasExistingKey);
     
     if (hasExistingKey) {
       const confirmed = window.confirm(`Regenerate ${mode} API key? This will invalidate the current key.`);
-      console.log('🔄 handleRegenerateKey: User confirmed?', confirmed);
       if (!confirmed) return;
     }
 
     const user = getAuth().currentUser;
-    console.log('🔄 handleRegenerateKey: Current user:', user?.uid);
-    
-    if (!user) {
-      console.error('❌ handleRegenerateKey: No authenticated user');
-      return;
-    }
+    if (!user) return;
 
     setRegenerating(true);
     const newKey = `${mode === 'live' ? 'live' : 'test'}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    console.log('🔑 handleRegenerateKey: Generated new key:', newKey);
     
     try {
-      console.log('📡 handleRegenerateKey: Querying merchant document...');
       const merchantSnap = await getDocs(query(collection(db, 'merchant'), where('uid', '==', user.uid)));
-      console.log('📦 handleRegenerateKey: Found merchants:', merchantSnap.size);
       
       if (!merchantSnap.empty) {
         const docId = merchantSnap.docs[0].id;
@@ -248,11 +199,6 @@ export default function MerchantAPI() {
         // Use liveApiKey/testApiKey structure (ignore legacy apiKey field)
         const fieldName = mode === 'live' ? 'liveApiKey' : 'testApiKey';
         
-        console.log('💾 handleRegenerateKey: Updating document:', docId);
-        console.log('💾 handleRegenerateKey: Field:', fieldName);
-        console.log('💾 handleRegenerateKey: New value:', newKey);
-        
-        // Update both the specific field and set apiKeyUpdatedAt
         const updateData = {
           [fieldName]: newKey,
           apiKeyUpdatedAt: serverTimestamp()
@@ -260,36 +206,23 @@ export default function MerchantAPI() {
         
         // If this is the first time setting liveApiKey and there's a legacy apiKey, clear it
         if (mode === 'live' && merchantData.apiKey && !merchantData.liveApiKey) {
-          console.log('🔄 handleRegenerateKey: Migrating from legacy apiKey to liveApiKey');
-          updateData.apiKey = null; // Clear legacy field
+          updateData.apiKey = null;
         }
         
         await updateDoc(doc(db, 'merchant', docId), updateData);
         
-        console.log('✅ handleRegenerateKey: Firestore update successful');
+        setApiKeys(prev => ({ ...prev, [mode]: newKey }));
         
-        // Update state with new key
-        setApiKeys(prev => {
-          const updated = { ...prev, [mode]: newKey };
-          console.log('🔄 handleRegenerateKey: Updating state to:', updated);
-          return updated;
-        });
-        
-        // Show success message
         const successMsg = `✅ ${mode === 'live' ? 'Live' : 'Test'} API key ${hasExistingKey ? 'regenerated' : 'generated'} successfully!`;
-        console.log('🎉 handleRegenerateKey:', successMsg);
         setSuccessMessage(successMsg);
         setTimeout(() => setSuccessMessage(''), 3000);
       } else {
-        console.error('❌ handleRegenerateKey: No merchant document found');
         alert('Error: Merchant profile not found');
       }
     } catch (e) {
-      console.error('❌ handleRegenerateKey: Error:', e);
-      console.error('❌ handleRegenerateKey: Error details:', e.message, e.code);
+      console.error('Error regenerating key:', e);
       alert('Error: ' + e.message);
     } finally {
-      console.log('🏁 handleRegenerateKey: Setting regenerating to false');
       setRegenerating(false);
     }
   };

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { db } from "../../firebase";
 import {
-  collection, query, where, onSnapshot, orderBy, getDocs,
+  collection, query, where, onSnapshot, orderBy, getDocs, limit,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import {
@@ -270,7 +270,6 @@ export default function MerchantPayin() {
         const merchantSnap = await getDocs(merchantQuery);
         
         if (merchantSnap.empty) {
-          console.log("No merchant found for user");
           setLoading(false);
           return () => {};
         }
@@ -282,7 +281,8 @@ export default function MerchantPayin() {
           query(
             collection(db, "payin"),
             where("merchantId", "==", merchantId),
-            orderBy("requestedAt", "desc")
+            orderBy("requestedAt", "desc"),
+            limit(200)
           ),
           snap => {
             const list = [];

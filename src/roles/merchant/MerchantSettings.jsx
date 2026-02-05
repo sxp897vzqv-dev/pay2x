@@ -7,88 +7,9 @@ import {
   CheckCircle, AlertCircle, Mail, Phone, Globe, FileText, Plus,
   Trash2, Edit, RefreshCw, X,
 } from 'lucide-react';
-
-/* ─── Toast ─── */
-function Toast({ msg, success, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return (
-    <div className={`fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 ${success ? 'bg-green-600' : 'bg-red-600'} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium`} style={{ top: 60 }}>
-      {success ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
-      <span>{msg}</span>
-    </div>
-  );
-}
-
-/* ─── Bank Account Card ─── */
-function BankAccountCard({ account, onEdit, onDelete, isPrimary, onSetPrimary }) {
-  return (
-    <div className={`rounded-xl border-2 p-4 ${isPrimary ? 'border-green-300 bg-green-50' : 'border-slate-200 bg-white'}`}>
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <Building className="w-4 h-4 text-slate-600" />
-            <p className="font-bold text-slate-900">{account.bankName}</p>
-          </div>
-          <p className="text-sm text-slate-600 font-mono" style={{ fontFamily: 'var(--font-mono)' }}>
-            ***{account.accountNumber.slice(-4)}
-          </p>
-          <p className="text-xs text-slate-500 mt-0.5">{account.holderName}</p>
-        </div>
-        {isPrimary && (
-          <span className="px-2 py-0.5 bg-green-600 text-white text-xs font-bold rounded-full">PRIMARY</span>
-        )}
-      </div>
-      <div className="flex gap-2">
-        {!isPrimary && (
-          <button onClick={onSetPrimary}
-            className="flex-1 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-semibold hover:bg-blue-100">
-            Set Primary
-          </button>
-        )}
-        <button onClick={onEdit}
-          className="flex-1 py-2 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-100 flex items-center justify-center gap-1">
-          <Edit className="w-3 h-3" /> Edit
-        </button>
-        <button onClick={onDelete}
-          className="flex-1 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-100 flex items-center justify-center gap-1">
-          <Trash2 className="w-3 h-3" /> Delete
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Team Member Card ─── */
-function TeamMemberCard({ member, onRemove }) {
-  const roleColors = {
-    admin: 'bg-purple-100 text-purple-700',
-    finance: 'bg-blue-100 text-blue-700',
-    viewer: 'bg-slate-100 text-slate-700',
-  };
-
-  return (
-    <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-blue-400 rounded-full flex items-center justify-center text-white font-bold">
-          {member.name.charAt(0).toUpperCase()}
-        </div>
-        <div>
-          <p className="font-semibold text-slate-900 text-sm">{member.name}</p>
-          <p className="text-xs text-slate-500">{member.email}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${roleColors[member.role] || roleColors.viewer}`}>
-          {member.role?.toUpperCase()}
-        </span>
-        <button onClick={() => onRemove(member.id)}
-          className="w-8 h-8 flex items-center justify-center hover:bg-red-50 rounded-lg">
-          <Trash2 className="w-4 h-4 text-red-500" />
-        </button>
-      </div>
-    </div>
-  );
-}
+import Toast from '../../components/admin/Toast';
+import BankAccountCard from './components/BankAccountCard';
+import TeamMemberCard from './components/TeamMemberCard';
 
 export default function MerchantSettings() {
   const [activeTab, setActiveTab] = useState('profile');
