@@ -88,7 +88,7 @@ function TransactionsTab({ userId, type }) {
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex-1 min-w-0">
               <p className="font-mono text-xs text-slate-400" style={{ fontFamily: 'var(--font-mono)' }}>{tx.id?.slice(0, 12)}</p>
-              <p className={`text-lg font-bold ${isPayin ? 'text-green-600' : 'text-blue-600'}`}>₹{(tx.amount || 0).toLocaleString()}</p>
+              <p className={`text-lg font-bold ${isPayin ? 'text-green-600' : 'text-blue-600'}`}>₹{(Number(tx.amount) || 0).toLocaleString()}</p>
             </div>
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${tx.status === 'completed' ? 'bg-green-100 text-green-700' : tx.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{tx.status?.toUpperCase()}</span>
           </div>

@@ -3,6 +3,12 @@ import { db } from '../../../firebase';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Store, ArrowLeft, RefreshCw, Edit, Save, CheckCircle, AlertCircle, Globe, Mail, Phone, Key, Eye, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Activity, Calendar, Shield, Copy } from 'lucide-react';
+import {
+  logMerchantActivated,
+  logMerchantDeactivated,
+  logAuditEvent,
+  logMerchantAPIKeyGenerated,
+} from '../../../utils/auditLogger';
 
 function Toast({ msg, success, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -77,9 +83,55 @@ function ProfileTab({ merchant, onUpdate, saving }) {
   );
 }
 
+/* ─── Key Generation Helpers ─── */
+function generateApiKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let key = 'pk_live_';
+  for (let i = 0; i < 32; i++) key += chars.charAt(Math.floor(Math.random() * chars.length));
+  return key;
+}
+
+function generateSecretKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let key = 'sk_live_';
+  for (let i = 0; i < 64; i++) key += chars.charAt(Math.floor(Math.random() * chars.length));
+  return key;
+}
+
 function APITab({ merchant, setToast }) {
   const [copied, setCopied] = useState('');
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  
   const copyKey = (key, label) => { navigator.clipboard.writeText(key); setCopied(label); setToast({ msg: `${label} copied!`, success: true }); setTimeout(() => setCopied(''), 2000); };
+  
+  const handleRegenerateKeys = async () => {
+    setRegenerating(true);
+    try {
+      const oldApiKeyPrefix = merchant.apiKey ? merchant.apiKey.substring(0, 16) : 'none';
+      const newApiKey = generateApiKey();
+      const newSecretKey = generateSecretKey();
+      
+      await updateDoc(doc(db, 'merchants', merchant.id), {
+        apiKey: newApiKey,
+        secretKey: newSecretKey,
+      });
+      
+      // 🔥 AUDIT LOG: API Key Regeneration (Week 4 - Security Logs)
+      await logMerchantAPIKeyGenerated(
+        merchant.id,
+        merchant.name || merchant.businessName || 'Unknown Merchant',
+        oldApiKeyPrefix
+      );
+      
+      setToast({ msg: '✅ API keys regenerated successfully!', success: true });
+      setShowRegenerateModal(false);
+    } catch (e) {
+      console.error(e);
+      setToast({ msg: '❌ Failed to regenerate keys', success: false });
+    }
+    setRegenerating(false);
+  };
 
   return (
     <div className="space-y-4">
@@ -89,7 +141,16 @@ function APITab({ merchant, setToast }) {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100"><h3 className="text-sm font-bold text-slate-900">API Credentials</h3></div>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900">API Credentials</h3>
+          <button 
+            onClick={() => setShowRegenerateModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-semibold hover:bg-red-100 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Regenerate Keys
+          </button>
+        </div>
         <div className="p-4 space-y-4">
           {[{ key: 'apiKey', label: 'API Key' }, { key: 'secretKey', label: 'Secret Key' }, { key: 'webhookUrl', label: 'Webhook URL' }].map(field => (
             <div key={field.key}>
@@ -108,6 +169,56 @@ function APITab({ merchant, setToast }) {
           ))}
         </div>
       </div>
+
+      {/* Regenerate Confirmation Modal */}
+      {showRegenerateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-900 mb-1">Regenerate API Keys?</h3>
+                <p className="text-sm text-slate-600">This action will:</p>
+                <ul className="text-sm text-slate-600 mt-2 space-y-1 list-disc list-inside">
+                  <li>Generate new API Key and Secret Key</li>
+                  <li><strong className="text-red-600">Invalidate old keys immediately</strong></li>
+                  <li>Log this action in audit logs</li>
+                  <li>Require merchant to update their integration</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div className="flex gap-2 pt-2">
+              <button 
+                onClick={() => setShowRegenerateModal(false)}
+                disabled={regenerating}
+                className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleRegenerateKeys}
+                disabled={regenerating}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                {regenerating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Regenerating...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Yes, Regenerate
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -149,7 +260,7 @@ function ActivityTab({ merchant }) {
               {items.length > 0 ? items.map(p => (
                 <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
                   <div>
-                    <p className={`text-sm font-bold ${sec.key === 'payins' ? 'text-green-600' : sec.key === 'payouts' ? 'text-blue-600' : 'text-slate-900'}`}>₹{(p.amount || 0).toLocaleString()}</p>
+                    <p className={`text-sm font-bold ${sec.key === 'payins' ? 'text-green-600' : sec.key === 'payouts' ? 'text-blue-600' : 'text-slate-900'}`}>₹{(Number(p.amount) || 0).toLocaleString()}</p>
                     <p className="text-xs text-slate-400">{(p.requestedAt || p.createdAt)?.seconds ? new Date((p.requestedAt || p.createdAt).seconds * 1000).toLocaleDateString('en-IN') : '—'}</p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${p.status === 'completed' || p.status === 'approved' ? 'bg-green-100 text-green-700' : p.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{p.status?.toUpperCase()}</span>
@@ -185,14 +296,59 @@ export default function AdminMerchantDetail() {
 
   const handleUpdate = async (updates) => {
     setSaving(true);
-    try { await updateDoc(doc(db, 'merchants', id), updates); setToast({ msg: 'Merchant updated', success: true }); }
-    catch (e) { console.error(e); setToast({ msg: 'Failed to update', success: false }); }
+    try {
+      await updateDoc(doc(db, 'merchants', id), updates);
+      
+      // 🔥 AUDIT LOG: Merchant Profile Updates (Week 3)
+      const changedFields = Object.keys(updates).filter(key => 
+        key !== 'isActive' && 
+        key !== 'status' && 
+        updates[key] !== merchant[key]
+      );
+      
+      if (changedFields.length > 0) {
+        const changes = {};
+        changedFields.forEach(field => {
+          changes[field] = { before: merchant[field], after: updates[field] };
+        });
+        
+        await logAuditEvent({
+          action: 'merchant_profile_updated',
+          category: 'entity',
+          entityType: 'merchant',
+          entityId: merchant.id,
+          entityName: merchant.name || merchant.businessName || 'Unknown Merchant',
+          details: {
+            note: `Updated fields: ${changedFields.join(', ')}`,
+            metadata: changes,
+          },
+          severity: 'info',
+        });
+      }
+      
+      setToast({ msg: 'Merchant updated', success: true });
+    } catch (e) { console.error(e); setToast({ msg: 'Failed to update', success: false }); }
     setSaving(false);
   };
 
   const handleToggleStatus = async () => {
     const newStatus = !(merchant.isActive || merchant.status === 'active');
     await handleUpdate({ isActive: newStatus, status: newStatus ? 'active' : 'inactive' });
+    
+    // 🔥 AUDIT LOG: Merchant Activation/Deactivation (Week 3)
+    if (newStatus) {
+      await logMerchantActivated(
+        merchant.id,
+        merchant.name || merchant.businessName || 'Unknown Merchant',
+        'Admin toggled merchant to active status'
+      );
+    } else {
+      await logMerchantDeactivated(
+        merchant.id,
+        merchant.name || merchant.businessName || 'Unknown Merchant',
+        'Admin toggled merchant to inactive status'
+      );
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><RefreshCw className="w-10 h-10 text-indigo-500 animate-spin" /></div>;

@@ -27,7 +27,7 @@ function exportToCSV(rows, columns, filename) {
 
 const TABS = [
   { key: "pending",   label: "Pending" },
-  { key: "completed", label: "Done" },
+  { key: "completed", label: "Completed" },
   { key: "rejected",  label: "Rejected" },
 ];
 
@@ -360,19 +360,6 @@ export default function TraderPayin() {
             Payin Management
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Process incoming payments</p>
-        </div>
-      </div>
-
-      {/* Quick stats pills */}
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth:'none' }}>
-        <div className="flex-shrink-0 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
-          <p className="text-xs font-bold text-blue-600">Pending: <span className="text-blue-800">{stats.pending}</span></p>
-        </div>
-        <div className="flex-shrink-0 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
-          <p className="text-xs font-bold text-green-600">Done: <span className="text-green-800">{stats.completedCount}</span></p>
-        </div>
-        <div className="flex-shrink-0 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5">
-          <p className="text-xs font-bold text-purple-600">Earned: <span className="text-purple-800">₹{(stats.totalCommission/1000).toFixed(1)}k</span></p>
         </div>
       </div>
 

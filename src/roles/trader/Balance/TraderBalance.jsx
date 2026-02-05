@@ -7,7 +7,7 @@ import { getAuth } from "firebase/auth";
 import {
   Wallet, TrendingUp, TrendingDown, RefreshCw, DollarSign,
   Copy, CheckCircle, AlertCircle, Download, History,
-  Shield, Lock, ExternalLink, AlertTriangle, Clock, ArrowDown, IndianRupee,
+  Lock, ExternalLink, AlertTriangle, Clock, ArrowDown, IndianRupee,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 
@@ -68,15 +68,21 @@ export default function TraderBalance() {
   const [securityHold,     setSecurityHold]     = useState(0);
   const [workingBalance,   setWorkingBalance]   = useState(0);
   const [usdtDepositAddress, setUsdtDepositAddress] = useState('');
+  const [derivationIndex,  setDerivationIndex]  = useState(null);
   const [transactions,     setTransactions]     = useState([]);
+  const [pendingDeposits,  setPendingDeposits]  = useState([]);
   const [loading,          setLoading]          = useState(true);
+  const [generating,       setGenerating]       = useState(false);
   const [copied,           setCopied]           = useState(false);
   const [toast,            setToast]            = useState(null);
   const [balanceFlash,     setBalanceFlash]     = useState(false);
   const [refreshing,       setRefreshing]       = useState(false);
   const [activeTab,        setActiveTab]        = useState("deposit");
   const [usdtBuyRate,      setUsdtBuyRate]      = useState(92);
+  const [convertAmount,    setConvertAmount]    = useState('');
+  const [depositStats,     setDepositStats]     = useState({ count: 0, totalUSDT: 0, totalINR: 0 });
   const balanceRef = useRef(null);
+  const qrRef = useRef(null);
 
   /* USDT rate polling */
   useEffect(() => {
@@ -112,6 +118,7 @@ export default function TraderBalance() {
       setSecurityHold(security);
       setWorkingBalance(total - security);
       setUsdtDepositAddress(d.usdtDepositAddress || '');
+      setDerivationIndex(d.derivationIndex || null);
       balanceRef.current = total;
     });
 
@@ -119,11 +126,31 @@ export default function TraderBalance() {
       query(collection(db, 'transactions'), where('traderId','==',user.uid), orderBy('createdAt','desc'), limit(50)),
       snap => {
         const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        let totalUSDT = 0, totalINR = 0, count = 0;
+        snap.forEach(d => {
+          const data = d.data();
+          list.push({ id: d.id, ...data });
+          if (data.type === 'deposit' && data.status === 'completed') {
+            totalUSDT += data.usdtAmount || 0;
+            totalINR += data.amount || 0;
+            count++;
+          }
+        });
         setTransactions(list);
+        setDepositStats({ count, totalUSDT: Math.round(totalUSDT * 100) / 100, totalINR: Math.round(totalINR) });
       }
     );
-    return () => { unsubTrader(); unsubTx(); };
+
+    const unsubPending = onSnapshot(
+      query(collection(db, 'sweepQueue'), where('traderId','==',user.uid), where('status','==','pending')),
+      snap => {
+        const pending = [];
+        snap.forEach(d => pending.push({ id: d.id, ...d.data() }));
+        setPendingDeposits(pending);
+      }
+    );
+
+    return () => { unsubTrader(); unsubTx(); unsubPending(); };
   }, []);
 
   const copyAddress = () => {
@@ -134,10 +161,79 @@ export default function TraderBalance() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const generateAddress = async () => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+    
+    setGenerating(true);
+    try {
+      const response = await fetch(
+        'https://us-central1-pay2x-4748c.cloudfunctions.net/generateTraderUSDTAddress',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ traderId: user.uid })
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setUsdtDepositAddress(data.address);
+        setDerivationIndex(data.derivationIndex);
+        setToast({ msg: '✅ Deposit address generated!', success: true });
+      } else {
+        setToast({ msg: '❌ Failed: ' + data.error, success: false });
+      }
+    } catch (error) {
+      console.error('Error generating address:', error);
+      setToast({ msg: '❌ Error generating address', success: false });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const downloadQR = () => {
+    if (!usdtDepositAddress || !qrRef.current) return;
+    
+    const svg = qrRef.current.querySelector('svg');
+    if (!svg) return;
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const img = new Image();
+    
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `pay2x-deposit-${Date.now()}.png`;
+        link.href = url;
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+    };
+    
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  };
+
   const refreshBalance = () => {
     setRefreshing(true);
     setToast({ msg: 'Checking for new deposits…', success: true });
     setTimeout(() => setRefreshing(false), 2000);
+  };
+
+  const convertCurrency = () => {
+    if (!convertAmount || isNaN(convertAmount)) return 0;
+    const amount = parseFloat(convertAmount);
+    return Math.round(amount * usdtBuyRate);
   };
 
   const handleExport = () => {
@@ -239,35 +335,123 @@ export default function TraderBalance() {
       {/* ── ADD FUNDS TAB ── */}
       {activeTab === "deposit" && (
         <div className="space-y-4">
-          {usdtDepositAddress ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="bg-slate-50 p-5 flex justify-center border-b border-slate-100">
-                <QRCode value={usdtDepositAddress} size={180} />
-              </div>
-              <div className="p-4 space-y-3">
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Your USDT Address (TRC20)</p>
-                  <p className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 break-all leading-relaxed" style={{ fontFamily: 'var(--font-mono)' }}>
-                    {usdtDepositAddress}
-                  </p>
-                </div>
-                {/* ✅ micro-interaction: scale on active press */}
-                <button
-                  onClick={copyAddress}
-                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all duration-200 active:scale-[0.96] ${
-                    copied ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-purple-600 text-white hover:bg-purple-700'
-                  }`}
-                >
-                  {copied ? <CheckCircle size={18} /> : <Copy size={18} />}
-                  {copied ? 'Copied!' : 'Copy Address'}
-                </button>
+          {/* Pending Deposits Alert */}
+          {pendingDeposits.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-start gap-3">
+              <Clock className="w-4.5 h-4.5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-yellow-800 text-sm">Pending Auto-Sweep</p>
+                <p className="text-xs text-yellow-700 mt-0.5">{pendingDeposits.length} deposit{pendingDeposits.length > 1 ? 's are' : ' is'} being swept to admin wallet (happens every 5 min)</p>
               </div>
             </div>
+          )}
+
+          {/* Deposit Stats */}
+          {depositStats.count > 0 && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Total Deposits</p>
+                <p className="text-2xl font-bold text-purple-600">{depositStats.count}</p>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Total USDT</p>
+                <p className="text-2xl font-bold text-green-600">{depositStats.totalUSDT}</p>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-3 text-center">
+                <p className="text-xs text-slate-500 mb-1">Total INR</p>
+                <p className="text-lg font-bold text-blue-600">₹{depositStats.totalINR.toLocaleString()}</p>
+              </div>
+            </div>
+          )}
+
+          {usdtDepositAddress ? (
+            <>
+              {/* QR Code Card */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-slate-50 p-5 flex justify-center border-b border-slate-100 relative group" ref={qrRef}>
+                  <QRCode value={usdtDepositAddress} size={200} />
+                  <button
+                    onClick={downloadQR}
+                    className="absolute top-2 right-2 bg-white p-2 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Download QR"
+                  >
+                    <Download className="w-4 h-4 text-slate-700" />
+                  </button>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Your USDT Address (TRC20)</p>
+                      {derivationIndex !== null && (
+                        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">Index #{derivationIndex}</span>
+                      )}
+                    </div>
+                    <p className="font-mono text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 break-all leading-relaxed" style={{ fontFamily: 'var(--font-mono)' }}>
+                      {usdtDepositAddress}
+                    </p>
+                  </div>
+                  <button
+                    onClick={copyAddress}
+                    className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all duration-200 active:scale-[0.96] ${
+                      copied ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-purple-600 text-white hover:bg-purple-700'
+                    }`}
+                  >
+                    {copied ? <CheckCircle size={18} /> : <Copy size={18} />}
+                    {copied ? 'Copied!' : 'Copy Address'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Currency Converter */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
+                <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <IndianRupee className="w-4 h-4 text-purple-600" />
+                  USDT to INR Converter
+                </h4>
+
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={convertAmount}
+                    onChange={(e) => setConvertAmount(e.target.value)}
+                    placeholder="Enter USDT amount"
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                  <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-center">
+                    <p className="text-sm font-bold text-purple-900">
+                      {convertAmount ? `₹${convertCurrency().toLocaleString()}` : '—'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => setConvertAmount('10')} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors">10 USDT</button>
+                  <button onClick={() => setConvertAmount('50')} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors">50 USDT</button>
+                  <button onClick={() => setConvertAmount('100')} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors">100 USDT</button>
+                </div>
+              </div>
+            </>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
               <Wallet className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-600 font-medium text-sm">No deposit address yet</p>
-              <p className="text-xs text-slate-400 mt-1">Contact admin to activate deposits</p>
+              <p className="text-slate-600 font-medium mb-4">No deposit address yet</p>
+              <button
+                onClick={generateAddress}
+                disabled={generating}
+                className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors font-medium text-sm inline-flex items-center gap-2"
+              >
+                {generating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Wallet className="w-4 h-4" />
+                    Generate Deposit Address
+                  </>
+                )}
+              </button>
             </div>
           )}
 
@@ -275,44 +459,14 @@ export default function TraderBalance() {
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
             <AlertTriangle className="w-4.5 h-4.5 text-orange-500 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-orange-800 text-sm">TRC20 Network Only</p>
-              <p className="text-xs text-orange-600 mt-0.5">Sending on any other network will result in loss of funds. Balance updates in 1–2 minutes.</p>
-            </div>
-          </div>
-
-          {/* ── Conversion examples — ✅ hover highlight ── */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-              <IndianRupee className="w-4 h-4 text-purple-600" />
-              <h4 className="font-bold text-slate-900 text-sm">Conversion Examples</h4>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {[10, 100, 500].map(amt => (
-                <div key={amt} className="flex items-center justify-between px-4 py-2.5 hover:bg-purple-50 transition-colors">
-                  <span className="text-sm text-slate-600">{amt} USDT →</span>
-                  <span className="font-bold text-sm text-green-600">₹{(amt * usdtBuyRate).toLocaleString()}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* FAQ */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-green-600" />
-              <h4 className="font-bold text-slate-900 text-sm">FAQ</h4>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {[
-                { q: 'How long does it take?',   a: '1–2 minutes after sending USDT' },
-                { q: 'Can I reuse this address?', a: 'Yes, this is your permanent address' },
-                { q: 'Balance not updated?',      a: 'Wait 3–5 minutes, then contact support' },
-              ].map((item, i) => (
-                <div key={i} className="px-4 py-3">
-                  <p className="font-semibold text-slate-800 text-sm">{item.q}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{item.a}</p>
-                </div>
-              ))}
+              <p className="font-semibold text-orange-800 text-sm">⚠️ Important Instructions</p>
+              <ul className="text-xs text-orange-600 mt-1.5 space-y-1">
+                <li>• Network: <span className="font-semibold">Tron (TRC20) only</span></li>
+                <li>• Minimum deposit: <span className="font-semibold">10 USDT</span></li>
+                <li>• Balance updates in <span className="font-semibold">1-5 minutes</span></li>
+                <li>• This is your <span className="font-semibold">permanent address</span> - reuse anytime</li>
+                <li>• Wrong network = <span className="font-semibold text-red-700">loss of funds</span></li>
+              </ul>
             </div>
           </div>
         </div>

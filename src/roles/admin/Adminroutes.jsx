@@ -1,48 +1,6 @@
 /**
  * Admin Panel Route Configuration
  * 
- * Add this to your main router (e.g., App.jsx or routes.jsx)
- * 
- * Example usage:
- * 
- * import { adminRoutes } from './admin/adminRoutes';
- * 
- * <Routes>
- *   {adminRoutes}
- *   ... other routes
- * </Routes>
- */
-
-import React from 'react';
-import { Route } from 'react-router-dom';
-
-// Layout
-import AdminLayout from './AdminLayout';
-
-// Overview
-import AdminDashboard from './AdminDashboard';
-
-// Entity Management
-import AdminTraderList from './AdminTraderList';
-import AdminTraderDetail from './AdminTraderDetail';
-import AdminMerchantList from './AdminMerchantList';
-import AdminMerchantDetail from './AdminMerchantDetail';
-import AdminUserList from './AdminUserList';
-import AdminUserDetail from './AdminUserDetail';
-
-// Operations
-import AdminPayins from './AdminPayins';
-import AdminPayouts from './AdminPayouts';
-import AdminDisputes from './AdminDisputes';
-import AdminUPIPool from './AdminUPIPool';
-
-// Audit
-import AdminLogs from './AdminLogs';
-import AdminCommission from './AdminCommission';
-
-/**
- * Admin routes nested under /admin
- * 
  * Structure:
  * /admin
  *   /dashboard      - Overview dashboard
@@ -58,7 +16,40 @@ import AdminCommission from './AdminCommission';
  *   /upi-pool       - UPI pool management
  *   /logs           - Audit logs
  *   /commission     - Commission audit
+ *   /review-queue   - Review queue
  */
+
+import React from 'react';
+import { Route } from 'react-router-dom';
+
+// Layout
+import AdminLayout from './AdminLayout';
+
+// Overview
+import AdminDashboard from './OVERVIEW/AdminDashboard';
+
+// Entity Management
+import AdminTraderList from './ENTITIES/AdminTraderList';
+import AdminTraderDetail from './ENTITIES/AdminTraderDetail';
+import AdminMerchantList from './ENTITIES/AdminMerchantList';
+import AdminMerchantDetail from './ENTITIES/AdminMerchantDetail';
+import AdminUserList from './ENTITIES/AdminUserList';
+import AdminUserDetail from './ENTITIES/AdminUserDetail';
+
+// Operations
+import AdminPayins from './OPERATIONS/AdminPayins';
+import AdminPayouts from './OPERATIONS/AdminPayouts';
+import AdminDisputes from './OPERATIONS/AdminDisputes';
+import AdminUPIPool from './OPERATIONS/AdminUPIPool';
+
+// Audit
+import AdminLogs from './AUDIT/AdminLogs';
+import AdminCommission from './AUDIT/AdminCommission';
+import AdminReviewQueue from './AUDIT/AdminReviewQueue';
+
+// Engine
+import AdminPayinEngine from './AdminPayinEngine';
+
 export const adminRoutes = (
   <Route path="/admin" element={<AdminLayout />}>
     {/* Default redirect to dashboard */}
@@ -83,7 +74,11 @@ export const adminRoutes = (
     
     {/* Audit */}
     <Route path="logs" element={<AdminLogs />} />
+    <Route path="review-queue" element={<AdminReviewQueue />} />
     <Route path="commission" element={<AdminCommission />} />
+    
+    {/* Engine */}
+    <Route path="payin-engine" element={<AdminPayinEngine />} />
   </Route>
 );
 
@@ -113,12 +108,14 @@ export const adminNavigation = {
         { to: '/admin/payouts', label: 'Payouts', icon: 'TrendingDown' },
         { to: '/admin/disputes', label: 'Disputes', icon: 'AlertCircle' },
         { to: '/admin/upi-pool', label: 'UPI Pool', icon: 'Database' },
+        { to: '/admin/payin-engine', label: 'Payin Engine', icon: 'Cpu' },
       ],
     },
     {
       label: 'Audit',
       items: [
         { to: '/admin/logs', label: 'Logs', icon: 'FileText' },
+        { to: '/admin/review-queue', label: 'Review Queue', icon: 'ClipboardCheck' },
         { to: '/admin/commission', label: 'Commission', icon: 'DollarSign' },
       ],
     },

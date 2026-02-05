@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { db } from "../../firebase";
 import {
-  collection, query, where, onSnapshot, orderBy,
+  collection, query, where, onSnapshot, orderBy, getDocs,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import {
@@ -15,8 +15,9 @@ function PayinCard({ payin, onViewWebhook }) {
   const [copied, setCopied] = useState(false);
 
   const statusColors = {
-    success: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: CheckCircle },
+    completed: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: CheckCircle },
     pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: Clock },
+    rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
     failed: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
   };
 
@@ -31,7 +32,7 @@ function PayinCard({ payin, onViewWebhook }) {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className={`h-1 ${payin.status === 'success' ? 'bg-green-500' : payin.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'}`} />
+      <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : payin.status === 'rejected' || payin.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'}`} />
       <div className="p-3 space-y-3">
 
         {/* Header */}
@@ -66,7 +67,7 @@ function PayinCard({ payin, onViewWebhook }) {
               <p className="text-xs font-bold text-slate-400 uppercase">Customer</p>
             </div>
             <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.customerId || 'N/A'}
+              {payin.userId || 'N/A'}
             </p>
           </div>
 
@@ -89,10 +90,10 @@ function PayinCard({ payin, onViewWebhook }) {
           <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
             <div className="flex items-center gap-1 mb-1">
               <Hash className="w-3 h-3 text-indigo-600" />
-              <p className="text-xs font-bold text-slate-400 uppercase">Txn ID</p>
+              <p className="text-xs font-bold text-slate-400 uppercase">UTR</p>
             </div>
             <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.transactionId || 'Pending'}
+              {payin.utrId || 'Pending'}
             </p>
           </div>
         </div>
@@ -116,10 +117,10 @@ function PayinCard({ payin, onViewWebhook }) {
         <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100">
           <div className="flex items-center gap-1">
             <Clock size={11} />
-            {new Date((payin.createdAt?.seconds || 0) * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+            {new Date((payin.requestedAt?.seconds || 0) * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
           </div>
-          {payin.utrId && (
-            <span className="font-mono text-slate-600">UTR: {payin.utrId}</span>
+          {payin.upiId && (
+            <span className="font-mono text-slate-600">UPI: {payin.upiId}</span>
           )}
         </div>
       </div>
@@ -167,14 +168,14 @@ function WebhookModal({ payin, onClose }) {
                 <p className="font-bold text-slate-900 capitalize">{payin.status}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500 mb-0.5">Customer ID</p>
+                <p className="text-xs text-slate-500 mb-0.5">User ID</p>
                 <p className="font-mono text-xs text-slate-800" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {payin.customerId || 'N/A'}
+                  {payin.userId || 'N/A'}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-500 mb-0.5">Payment Method</p>
-                <p className="text-xs font-semibold text-slate-800 capitalize">{payin.paymentMethod || 'UPI'}</p>
+                <p className="text-xs text-slate-500 mb-0.5">UPI ID</p>
+                <p className="text-xs font-semibold text-slate-800">{payin.upiId || 'N/A'}</p>
               </div>
             </div>
           </div>
@@ -210,13 +211,14 @@ function WebhookModal({ payin, onClose }) {
             <h4 className="text-sm font-bold text-slate-900 mb-2">Webhook Payload</h4>
             <pre className="bg-slate-900 text-green-400 p-3 rounded-xl text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
 {JSON.stringify({
-  event: 'payin.success',
+  event: payin.status === 'completed' ? 'payment.completed' : 'payment.pending',
   orderId: payin.orderId,
-  transactionId: payin.transactionId,
+  utrId: payin.utrId,
   amount: payin.amount,
   status: payin.status,
-  customerId: payin.customerId,
-  timestamp: payin.createdAt?.seconds * 1000,
+  userId: payin.userId,
+  upiId: payin.upiId,
+  timestamp: payin.requestedAt?.seconds * 1000,
 }, null, 2)}
             </pre>
           </div>
@@ -258,16 +260,51 @@ export default function MerchantPayin() {
     const user = getAuth().currentUser;
     if (!user) return;
 
-    const unsub = onSnapshot(
-      query(collection(db, "merchantPayins"), where("merchantId", "==", user.uid), orderBy("createdAt", "desc")),
-      snap => {
-        const list = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-        setPayins(list);
+    // First get merchant doc ID from user's UID
+    const getMerchantAndPayins = async () => {
+      try {
+        const merchantQuery = query(
+          collection(db, "merchant"),
+          where("uid", "==", user.uid)
+        );
+        const merchantSnap = await getDocs(merchantQuery);
+        
+        if (merchantSnap.empty) {
+          console.log("No merchant found for user");
+          setLoading(false);
+          return () => {};
+        }
+
+        const merchantId = merchantSnap.docs[0].id;
+
+        // Now subscribe to payins for this merchant
+        const unsub = onSnapshot(
+          query(
+            collection(db, "payin"),
+            where("merchantId", "==", merchantId),
+            orderBy("requestedAt", "desc")
+          ),
+          snap => {
+            const list = [];
+            snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+            setPayins(list);
+            setLoading(false);
+          }
+        );
+        return unsub;
+      } catch (error) {
+        console.error("Error fetching payins:", error);
         setLoading(false);
+        return () => {};
       }
-    );
-    return () => unsub();
+    };
+
+    let unsubscribe = () => {};
+    getMerchantAndPayins().then(unsub => {
+      unsubscribe = unsub;
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const filtered = useMemo(() => {
@@ -277,33 +314,34 @@ export default function MerchantPayin() {
       const s = debouncedSearch.toLowerCase();
       r = r.filter(p => 
         p.orderId?.toLowerCase().includes(s) || 
-        p.customerId?.toLowerCase().includes(s) || 
-        p.transactionId?.toLowerCase().includes(s)
+        p.userId?.toLowerCase().includes(s) || 
+        p.utrId?.toLowerCase().includes(s) ||
+        p.upiId?.toLowerCase().includes(s)
       );
     }
-    if (dateFrom) r = r.filter(p => (p.createdAt?.seconds || 0) * 1000 >= new Date(dateFrom).getTime());
-    if (dateTo) r = r.filter(p => (p.createdAt?.seconds || 0) * 1000 <= new Date(dateTo).getTime() + 86399999);
+    if (dateFrom) r = r.filter(p => (p.requestedAt?.seconds || 0) * 1000 >= new Date(dateFrom).getTime());
+    if (dateTo) r = r.filter(p => (p.requestedAt?.seconds || 0) * 1000 <= new Date(dateTo).getTime() + 86399999);
     return r;
   }, [payins, statusFilter, debouncedSearch, dateFrom, dateTo]);
 
   const stats = useMemo(() => ({
     total: payins.length,
-    success: payins.filter(p => p.status === 'success').length,
+    success: payins.filter(p => p.status === 'completed').length,
     pending: payins.filter(p => p.status === 'pending').length,
-    failed: payins.filter(p => p.status === 'failed').length,
+    failed: payins.filter(p => p.status === 'rejected' || p.status === 'failed').length,
   }), [payins]);
 
   const handleExport = () => {
     const csv = [
-      ['Order ID', 'Customer ID', 'Amount', 'Status', 'Payment Method', 'Transaction ID', 'Timestamp'],
+      ['Order ID', 'User ID', 'Amount', 'Status', 'UPI ID', 'UTR', 'Timestamp'],
       ...filtered.map(p => [
         p.orderId || '',
-        p.customerId || '',
+        p.userId || '',
         p.amount || 0,
         p.status || '',
-        p.paymentMethod || '',
-        p.transactionId || '',
-        new Date((p.createdAt?.seconds || 0) * 1000).toLocaleString(),
+        p.upiId || '',
+        p.utrId || '',
+        new Date((p.requestedAt?.seconds || 0) * 1000).toLocaleString(),
       ])
     ].map(r => r.join(',')).join('\n');
 
@@ -346,9 +384,9 @@ export default function MerchantPayin() {
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
         {[
           { label: 'All', value: stats.total, color: 'bg-slate-100 text-slate-700', key: 'all' },
-          { label: 'Success', value: stats.success, color: 'bg-green-100 text-green-700', key: 'success' },
+          { label: 'Completed', value: stats.success, color: 'bg-green-100 text-green-700', key: 'completed' },
           { label: 'Pending', value: stats.pending, color: 'bg-yellow-100 text-yellow-700', key: 'pending' },
-          { label: 'Failed', value: stats.failed, color: 'bg-red-100 text-red-700', key: 'failed' },
+          { label: 'Rejected', value: stats.failed, color: 'bg-red-100 text-red-700', key: 'rejected' },
         ].map(pill => (
           <button
             key={pill.key}

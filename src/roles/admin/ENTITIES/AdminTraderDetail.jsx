@@ -11,17 +11,18 @@ import {
   Minus, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Clock,
   DollarSign, Send,
 } from 'lucide-react';
+import { 
+  logBalanceTopup, 
+  logBalanceDeduct, 
+  logSecurityHoldAdded, 
+  logSecurityHoldReleased,
+  logTraderActivated,
+  logTraderDeactivated,
+  logAuditEvent,
+} from '../../../utils/auditLogger';
 
-/* ─── Toast ─── */
-function Toast({ msg, success, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
-  return (
-    <div className={`fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-50 ${success ? 'bg-green-600' : 'bg-red-600'} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium`} style={{ top: 60 }}>
-      {success ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
-      <span>{msg}</span>
-    </div>
-  );
-}
+// Shared components
+import { Toast } from '../../../components/admin';
 
 /* ─── Tab Button ─── */
 function TabButton({ active, icon: Icon, label, onClick, badge }) {
@@ -204,31 +205,86 @@ function BalanceTab({ trader, setToast }) {
     try {
       const updates = {};
       let txType = '';
+      const balanceBefore = Number(trader.balance) || 0;
+      const securityBefore = Number(trader.securityHold) || 0;
 
       switch (action) {
         case 'topup':
-          updates.balance = (Number(trader.balance) || 0) + amt;
+          updates.balance = balanceBefore + amt;
           txType = 'admin_topup';
           break;
         case 'deduct':
           if (amt > workingBalance) { setToast({ msg: 'Cannot deduct more than working balance', success: false }); setSaving(false); return; }
-          updates.balance = (Number(trader.balance) || 0) - amt;
+          updates.balance = balanceBefore - amt;
           txType = 'admin_deduct';
           break;
         case 'security_add':
-          updates.securityHold = (Number(trader.securityHold) || 0) + amt;
+          updates.securityHold = securityBefore + amt;
           txType = 'security_hold_add';
           break;
         case 'security_release':
-          if (amt > (trader.securityHold || 0)) { setToast({ msg: 'Cannot release more than current hold', success: false }); setSaving(false); return; }
-          updates.securityHold = (Number(trader.securityHold) || 0) - amt;
+          if (amt > securityBefore) { setToast({ msg: 'Cannot release more than current hold', success: false }); setSaving(false); return; }
+          updates.securityHold = securityBefore - amt;
           txType = 'security_hold_release';
           break;
       }
 
+      // Update Firestore
       await updateDoc(doc(db, 'trader', trader.id), updates);
-      await addDoc(collection(db, 'transactions'), { traderId: trader.id, type: txType, amount: amt, note, createdAt: serverTimestamp(), adminAction: true });
-      await addDoc(collection(db, 'adminLog'), { action: txType, traderId: trader.id, traderName: trader.name, amount: amt, note, createdAt: serverTimestamp() });
+      
+      // Create transaction record
+      await addDoc(collection(db, 'transactions'), { 
+        traderId: trader.id, 
+        type: txType, 
+        amount: amt, 
+        note, 
+        createdAt: serverTimestamp(), 
+        adminAction: true 
+      });
+
+      // 🔥 AUDIT LOG: Balance/Hold Changes (Priority #2)
+      switch (action) {
+        case 'topup':
+          await logBalanceTopup(
+            trader.id,
+            trader.name || 'Unknown Trader',
+            amt,
+            balanceBefore,
+            updates.balance,
+            note
+          );
+          break;
+        case 'deduct':
+          await logBalanceDeduct(
+            trader.id,
+            trader.name || 'Unknown Trader',
+            amt,
+            balanceBefore,
+            updates.balance,
+            note
+          );
+          break;
+        case 'security_add':
+          await logSecurityHoldAdded(
+            trader.id,
+            trader.name || 'Unknown Trader',
+            amt,
+            securityBefore,
+            updates.securityHold,
+            note
+          );
+          break;
+        case 'security_release':
+          await logSecurityHoldReleased(
+            trader.id,
+            trader.name || 'Unknown Trader',
+            amt,
+            securityBefore,
+            updates.securityHold,
+            note
+          );
+          break;
+      }
 
       setToast({ msg: 'Balance updated successfully', success: true });
       setAmount(''); setNote('');
@@ -314,7 +370,7 @@ function BalanceTab({ trader, setToast }) {
                 <p className="text-xs text-slate-400">{tx.createdAt?.seconds ? new Date(tx.createdAt.seconds * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</p>
               </div>
               <p className={`text-sm font-bold ${tx.type?.includes('topup') || tx.type?.includes('release') ? 'text-green-600' : 'text-red-600'}`}>
-                {tx.type?.includes('topup') || tx.type?.includes('release') ? '+' : '−'}₹{(tx.amount || 0).toLocaleString()}
+                {tx.type?.includes('topup') || tx.type?.includes('release') ? '+' : '−'}₹{(Number(tx.amount) || 0).toLocaleString()}
               </p>
             </div>
           )) : (
@@ -425,7 +481,7 @@ function ActivityTab({ trader }) {
                 <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
                   <div>
                     <p className={`text-sm font-bold ${sec.key === 'payins' ? 'text-green-600' : sec.key === 'payouts' ? 'text-blue-600' : 'text-slate-900'}`}>
-                      ₹{(p.amount || 0).toLocaleString()}
+                      ₹{(Number(p.amount) || 0).toLocaleString()}
                     </p>
                     <p className="text-xs text-slate-400">
                       {(p.requestedAt || p.createdAt)?.seconds ? new Date((p.requestedAt || p.createdAt).seconds * 1000).toLocaleDateString('en-IN') : '—'}
@@ -470,6 +526,35 @@ export default function AdminTraderDetail() {
     setSaving(true);
     try {
       await updateDoc(doc(db, 'trader', id), updates);
+      
+      // 🔥 AUDIT LOG: Trader Profile Updates (Week 3)
+      // Check which fields were updated (excluding status changes, those are logged separately)
+      const changedFields = Object.keys(updates).filter(key => 
+        key !== 'isActive' && 
+        key !== 'status' && 
+        updates[key] !== trader[key]
+      );
+      
+      if (changedFields.length > 0) {
+        const changes = {};
+        changedFields.forEach(field => {
+          changes[field] = { before: trader[field], after: updates[field] };
+        });
+        
+        await logAuditEvent({
+          action: 'trader_profile_updated',
+          category: 'entity',
+          entityType: 'trader',
+          entityId: trader.id,
+          entityName: trader.name || 'Unknown Trader',
+          details: {
+            note: `Updated fields: ${changedFields.join(', ')}`,
+            metadata: changes,
+          },
+          severity: 'info',
+        });
+      }
+      
       setToast({ msg: 'Trader updated successfully', success: true });
     } catch (e) { console.error(e); setToast({ msg: 'Failed to update trader', success: false }); }
     setSaving(false);
@@ -478,6 +563,21 @@ export default function AdminTraderDetail() {
   const handleToggleStatus = async () => {
     const newStatus = !(trader.isActive || trader.status === 'active');
     await handleUpdate({ isActive: newStatus, status: newStatus ? 'active' : 'inactive' });
+    
+    // 🔥 AUDIT LOG: Trader Activation/Deactivation (Week 3)
+    if (newStatus) {
+      await logTraderActivated(
+        trader.id,
+        trader.name || 'Unknown Trader',
+        'Admin toggled trader to active status'
+      );
+    } else {
+      await logTraderDeactivated(
+        trader.id,
+        trader.name || 'Unknown Trader',
+        'Admin toggled trader to inactive status'
+      );
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh]"><RefreshCw className="w-10 h-10 text-indigo-500 animate-spin" /></div>;

@@ -409,18 +409,18 @@ export default function MerchantDisputeManagement() {
         receiptUrl = await getDownloadURL(storageRef);
       }
 
-      // Find traderId based on UPI ID from address mapping
+      // Find traderId based on UPI ID from savedBanks (permanent record)
       if (disputeType === 'payin') {
-        // Search in upi_pool collection for the UPI ID
-        const addressQuery = query(
-          collection(db, 'upi_pool'),
+        // Search in savedBanks collection for the UPI ID (never removed)
+        const savedBanksQuery = query(
+          collection(db, 'savedBanks'),
           where('upiId', '==', payinForm.receiverUpiId.trim())
         );
-        const addressSnapshot = await getDocs(addressQuery);
+        const savedBanksSnapshot = await getDocs(savedBanksQuery);
         
-        if (!addressSnapshot.empty) {
-          const addressDoc = addressSnapshot.docs[0];
-          traderId = addressDoc.data().traderId;
+        if (!savedBanksSnapshot.empty) {
+          const bankDoc = savedBanksSnapshot.docs[0];
+          traderId = bankDoc.data().traderId;
         }
 
         if (!traderId) {

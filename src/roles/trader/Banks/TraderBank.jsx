@@ -86,6 +86,7 @@ export default function TraderBank() {
   const [saving,        setSaving]        = useState(false);
   const [workingBalance,setWorkingBalance]= useState(0);   // ← derived
   const [toast,         setToast]         = useState(null);
+  const [filterType,    setFilterType]    = useState('all'); // 'all' or card.key
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -256,9 +257,52 @@ export default function TraderBank() {
 
   if (loading) {
     return (
-      <div className="flex flex-col justify-center items-center min-h-[50vh]">
-        <RefreshCw className="animate-spin text-purple-600 w-10 h-10 mb-3" />
-        <p className="text-slate-500 text-sm font-medium">Loading…</p>
+      <div className="max-w-3xl mx-auto space-y-4">
+        {/* Header skeleton */}
+        <div className="space-y-2">
+          <div className="h-8 bg-slate-200 rounded w-1/3 animate-pulse"></div>
+          <div className="h-4 bg-slate-200 rounded w-1/2 animate-pulse"></div>
+        </div>
+
+        {/* Balance card skeleton */}
+        <div className="bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl p-4">
+          <div className="h-4 bg-white/20 rounded w-1/4 mb-3 animate-pulse"></div>
+          <div className="h-10 bg-white/20 rounded w-1/2 animate-pulse"></div>
+        </div>
+
+        {/* Cards skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="h-4 bg-slate-200 rounded w-1/2 animate-pulse"></div>
+                <div className="h-6 bg-slate-200 rounded-full w-12 animate-pulse"></div>
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 bg-slate-200 rounded w-full animate-pulse"></div>
+                <div className="h-3 bg-slate-200 rounded w-3/4 animate-pulse"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* UPI list skeleton */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100">
+            <div className="h-4 bg-slate-200 rounded w-1/4 animate-pulse"></div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="px-4 py-3 flex items-center justify-between">
+                <div className="space-y-2 flex-1">
+                  <div className="h-3 bg-slate-200 rounded w-2/3 animate-pulse"></div>
+                  <div className="h-2 bg-slate-200 rounded w-1/2 animate-pulse"></div>
+                </div>
+                <div className="h-8 w-16 bg-slate-200 rounded-lg animate-pulse"></div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -299,9 +343,48 @@ export default function TraderBank() {
         </div>
       )}
 
+      {/* Filter Pills */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setFilterType('all')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            filterType === 'all' ? 'bg-slate-700 text-white ring-2 ring-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          All Types
+          <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${filterType === 'all' ? 'bg-white/20' : 'bg-slate-200 text-slate-600'}`}>
+            {CARD_TYPES.reduce((sum, card) => sum + (traderData[card.key] || []).length, 0)}
+          </span>
+        </button>
+        {CARD_TYPES.map(card => {
+          const Icon = card.icon;
+          const count = (traderData[card.key] || []).length;
+          const activeCount = (traderData[card.key] || []).filter(e => e.active).length;
+          return (
+            <button
+              key={card.key}
+              onClick={() => setFilterType(card.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                filterType === card.key ? `ring-2` : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+              style={filterType === card.key ? { backgroundColor: card.bgColor, color: card.color, borderColor: card.borderColor, ringColor: card.color } : {}}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {card.title.replace(' UPI IDs', '').replace(' Bank Accounts', '').replace(' Deposit UPI', '')}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${
+                filterType === card.key ? 'bg-white/60' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {count > 0 && `${activeCount}/${count}`}
+                {count === 0 && '0'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Card sections */}
       <div className="space-y-3">
-        {CARD_TYPES.map(card => {
+        {CARD_TYPES.filter(card => filterType === 'all' || filterType === card.key).map(card => {
           const Icon        = card.icon;
           const entries     = traderData[card.key] || [];
           const activeCount = entries.filter(e => e.active).length;

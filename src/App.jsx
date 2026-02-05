@@ -4,6 +4,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import { initIPCapture } from './utils/ipCapture';
+
+// Initialize IP capture on app load (for audit logging)
+initIPCapture();
 
 // Common Components
 import SignIn from './SignIn';
@@ -34,6 +38,11 @@ import AdminDisputes from './roles/admin/OPERATIONS/AdminDisputes';
 import AdminUPIPool from './roles/admin/OPERATIONS/AdminUPIPool';
 import AdminLogs from './roles/admin/AUDIT/AdminLogs';
 import AdminCommission from './roles/admin/AUDIT/AdminCommission';
+import AdminReviewQueue from './roles/admin/AUDIT/AdminReviewQueue';
+import AdminPayinEngine from './roles/admin/AdminPayinEngine';
+import AdminPayoutEngine from './roles/admin/AdminPayoutEngine';
+import AdminDisputeEngine from './roles/admin/AdminDisputeEngine';
+import AdminWorkers from './roles/admin/AdminWorkers';
 
 // ═══════════════════════════════════════════════════════════════════
 // NEW MERCHANT COMPONENTS - 8 Pages
@@ -54,8 +63,12 @@ function ProtectedRoute({ children, allowedRole, userRole }) {
   if (!userRole) {
     return <Navigate to="/signin" replace />;
   }
+  // Workers access admin routes
+  if (allowedRole === 'admin' && userRole === 'worker') {
+    return children;
+  }
   if (userRole !== allowedRole) {
-    return <Navigate to={`/${userRole}/dashboard`} replace />;
+    return <Navigate to={`/${userRole === 'worker' ? 'admin' : userRole}/dashboard`} replace />;
   }
   return children;
 }
@@ -103,7 +116,7 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          const roleCollections = ['admin', 'merchant', 'trader'];
+          const roleCollections = ['worker', 'admin', 'merchant', 'trader'];
           
           for (let role of roleCollections) {
             const q = query(
@@ -114,7 +127,8 @@ function App() {
             
             if (!querySnap.empty) {
               console.log(`✅ User role found: ${role}`);
-              setUserRole(role);
+              // Workers use admin routes
+              setUserRole(role === 'worker' ? 'worker' : role);
               setLoading(false);
               setInitializing(false);
               return;
@@ -151,7 +165,7 @@ function App() {
           path="/signin" 
           element={
             userRole ? (
-              <Navigate to={`/${userRole}/dashboard`} replace />
+              <Navigate to={`/${userRole === 'worker' ? 'admin' : userRole}/dashboard`} replace />
             ) : (
               <SignIn />
             )
@@ -191,7 +205,14 @@ function App() {
           
           {/* Audit */}
           <Route path="logs" element={<AdminLogs />} />
+          <Route path="review-queue" element={<AdminReviewQueue />} />
           <Route path="commission" element={<AdminCommission />} />
+          
+          {/* Engine */}
+          <Route path="payin-engine" element={<AdminPayinEngine />} />
+          <Route path="payout-engine" element={<AdminPayoutEngine />} />
+          <Route path="dispute-engine" element={<AdminDisputeEngine />} />
+          <Route path="workers" element={<AdminWorkers />} />
         </Route>
 
         {/* ═══════════════════════════════════════════════════════════════
@@ -244,7 +265,7 @@ function App() {
           path="/"
           element={
             userRole ? (
-              <Navigate to={`/${userRole}/dashboard`} replace />
+              <Navigate to={`/${userRole === 'worker' ? 'admin' : userRole}/dashboard`} replace />
             ) : (
               <Navigate to="/signin" replace />
             )

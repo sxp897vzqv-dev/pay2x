@@ -258,10 +258,44 @@ export default function TraderPayout() {
   /* ── loading ── */
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ border: '3px solid #7c3aed', borderTopColor: 'transparent' }} />
-          <p className="text-slate-500 text-sm font-medium">Loading…</p>
+      <div className="space-y-4 max-w-3xl mx-auto">
+        {/* Tabs skeleton */}
+        <div className="flex gap-2">
+          <div className="flex-1 h-10 bg-slate-200 rounded-xl animate-pulse"></div>
+          <div className="flex-1 h-10 bg-slate-200 rounded-xl animate-pulse"></div>
+          <div className="flex-1 h-10 bg-slate-200 rounded-xl animate-pulse"></div>
+        </div>
+        
+        {/* Stats cards skeleton */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="h-4 bg-slate-200 rounded w-2/3 mb-3 animate-pulse"></div>
+            <div className="h-8 bg-slate-200 rounded w-1/2 animate-pulse"></div>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="h-4 bg-slate-200 rounded w-2/3 mb-3 animate-pulse"></div>
+            <div className="h-8 bg-slate-200 rounded w-1/2 animate-pulse"></div>
+          </div>
+        </div>
+
+        {/* Request form skeleton */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="h-4 bg-slate-200 rounded w-1/4 animate-pulse"></div>
+          <div className="h-12 bg-slate-200 rounded-xl animate-pulse"></div>
+          <div className="h-10 bg-slate-200 rounded-xl animate-pulse"></div>
+        </div>
+
+        {/* List items skeleton */}
+        <div className="space-y-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="h-4 bg-slate-200 rounded w-1/3 animate-pulse"></div>
+                <div className="h-6 bg-slate-200 rounded-full w-16 animate-pulse"></div>
+              </div>
+              <div className="h-3 bg-slate-200 rounded w-2/3 animate-pulse"></div>
+            </div>
+          ))}
         </div>
       </div>
     );

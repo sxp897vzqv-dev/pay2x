@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
+import { query, collection, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase';
 import {
   LayoutDashboard,
   TrendingUp,
@@ -17,7 +19,37 @@ import {
 
 const MerchantLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [merchantInfo, setMerchantInfo] = useState(null);
   const navigate = useNavigate();
+
+  // 🔒 Real-time listener - auto logout if account becomes inactive
+  useEffect(() => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+    
+    const q = query(collection(db, 'merchant'), where('uid', '==', user.uid));
+    
+    const unsubscribe = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const d = snap.docs[0].data();
+        
+        // 🔒 CHECK IF ACCOUNT IS STILL ACTIVE
+        const isActive = d.isActive === true || d.status === 'active';
+        if (!isActive) {
+          // Account deactivated - force logout
+          alert('Your account has been deactivated. Please contact admin.');
+          handleLogout();
+          return;
+        }
+        
+        setMerchantInfo(d);
+      }
+    }, (error) => {
+      console.error('Merchant listener error:', error);
+    });
+    
+    return () => unsubscribe();
+  }, []);
 
   const navigationLinks = [
     { to: '/merchant/dashboard', icon: LayoutDashboard, label: 'Dashboard' },

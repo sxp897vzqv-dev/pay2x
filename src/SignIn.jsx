@@ -15,6 +15,23 @@ import {
   Shield,
   Zap,
 } from 'lucide-react';
+import { logAuditEvent } from './utils/auditLogger';
+
+/* ─── IP & User Agent Helpers ─── */
+const getUserAgent = () => {
+  return navigator.userAgent || 'Unknown';
+};
+
+const getClientIP = async () => {
+  try {
+    // Use a free IP lookup service (fallback to "unknown" if fails)
+    const response = await fetch('https://api.ipify.org?format=json', { timeout: 3000 });
+    const data = await response.json();
+    return data.ip || 'unknown';
+  } catch (e) {
+    return 'unknown';
+  }
+};
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
@@ -63,6 +80,10 @@ const SignIn = () => {
 
     setLoading(true);
 
+    // 🔥 Capture IP and user agent for audit logging
+    const userAgent = getUserAgent();
+    const clientIP = await getClientIP();
+
     try {
       // Sign in with Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -77,10 +98,14 @@ const SignIn = () => {
 
       // Check role in collections using query (more reliable than doc lookup)
       const roleCollections = [
+        { name: 'worker', route: '/admin/dashboard' },
         { name: 'admin', route: '/admin/dashboard' },
         { name: 'merchant', route: '/merchant/dashboard' },
         { name: 'trader', route: '/trader/dashboard' }
       ];
+
+      let roleFound = null;
+      let entityData = null;
 
       for (let roleData of roleCollections) {
         const q = query(
@@ -90,6 +115,74 @@ const SignIn = () => {
         const querySnapshot = await getDocs(q);
 
         if (!querySnapshot.empty) {
+          roleFound = roleData.name;
+          entityData = querySnapshot.docs[0].data();
+          
+          // 🔒 CHECK IF ACCOUNT IS ACTIVE (Skip for admin)
+          if (roleFound !== 'admin') {
+            const isActive = entityData.isActive === true || entityData.status === 'active';
+            
+            if (!isActive) {
+              // Account is inactive - block login
+              setError('Your account is currently inactive. Please contact admin for assistance.');
+              
+              // 🔥 AUDIT LOG: Login Blocked - Inactive Account
+              await logAuditEvent({
+                action: 'login_blocked_inactive',
+                category: 'security',
+                entityType: roleFound,
+                entityId: uid,
+                entityName: entityData.name || entityData.businessName || email,
+                details: {
+                  note: `${roleFound.charAt(0).toUpperCase() + roleFound.slice(1)} login blocked: Account inactive`,
+                  metadata: {
+                    email,
+                    userAgent,
+                    accountStatus: entityData.status || (entityData.isActive ? 'active' : 'inactive'),
+                  },
+                },
+                performedByIp: clientIP,
+                severity: 'warning',
+                requiresReview: true,
+              });
+              
+              await auth.signOut();
+              setLoading(false);
+              return;
+            }
+          }
+
+          // 🔑 STORE ROLE & PERMISSIONS in localStorage
+          if (roleFound === 'worker') {
+            localStorage.setItem('pay2x_worker_permissions', JSON.stringify(entityData.permissions || []));
+            localStorage.setItem('pay2x_user_role', 'worker');
+          } else if (roleFound === 'admin') {
+            localStorage.setItem('pay2x_user_role', 'admin');
+            localStorage.removeItem('pay2x_worker_permissions');
+          } else {
+            localStorage.removeItem('pay2x_user_role');
+            localStorage.removeItem('pay2x_worker_permissions');
+          }
+          
+          // 🔥 AUDIT LOG: Successful Login (Week 4 - Security Logs)
+          await logAuditEvent({
+            action: 'login_success',
+            category: 'security',
+            entityType: roleFound,
+            entityId: uid,
+            entityName: entityData.name || entityData.businessName || email,
+            details: {
+              note: `${roleFound.charAt(0).toUpperCase() + roleFound.slice(1)} logged in successfully`,
+              metadata: {
+                email,
+                userAgent,
+                rememberMe,
+              },
+            },
+            performedByIp: clientIP,
+            severity: 'info',
+          });
+          
           // Role found, navigate to appropriate dashboard
           navigate(roleData.route);
           return;
@@ -98,9 +191,53 @@ const SignIn = () => {
 
       // No role found
       setError('No role assigned to this account. Please contact support.');
+      
+      // 🔥 AUDIT LOG: Login Failed - No Role (Week 4 - Security Logs)
+      await logAuditEvent({
+        action: 'login_failed',
+        category: 'security',
+        entityType: 'user',
+        entityId: uid,
+        entityName: email,
+        details: {
+          note: 'Login failed: No role assigned to account',
+          metadata: {
+            email,
+            userAgent,
+            reason: 'no_role_assigned',
+          },
+        },
+        performedByIp: clientIP,
+        severity: 'warning',
+      });
+      
       await auth.signOut(); // Sign out if no role found
     } catch (err) {
       console.error('Login error:', err);
+      
+      // 🔥 AUDIT LOG: Login Failed - Auth Error (Week 4 - Security Logs)
+      const failureReason = err.code || 'unknown_error';
+      const isSuspicious = err.code === 'auth/too-many-requests' || err.code === 'auth/user-disabled';
+      
+      await logAuditEvent({
+        action: 'login_failed',
+        category: 'security',
+        entityType: 'user',
+        entityId: 'unknown',
+        entityName: email,
+        details: {
+          note: `Login attempt failed: ${failureReason}`,
+          metadata: {
+            email,
+            userAgent,
+            errorCode: err.code,
+            errorMessage: err.message,
+          },
+        },
+        performedByIp: clientIP,
+        severity: isSuspicious ? 'critical' : 'warning',
+        requiresReview: isSuspicious,
+      });
       
       // User-friendly error messages
       switch (err.code) {

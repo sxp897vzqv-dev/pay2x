@@ -6,7 +6,7 @@ import { db } from '../../firebase';
 import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
   AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
-  ChevronDown, ChevronRight, Settings, Bell,
+  ChevronDown, ChevronRight, Settings, Bell, Cpu,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -47,6 +47,24 @@ import {
   }
 })();
 
+/* ─── Route → Permission mapping ─── */
+const ROUTE_PERMISSIONS = {
+  '/admin/dashboard': null,
+  '/admin/traders': 'traders',
+  '/admin/merchants': 'merchants',
+  '/admin/users': 'users',
+  '/admin/payins': 'payins',
+  '/admin/payouts': 'payouts',
+  '/admin/disputes': 'disputes',
+  '/admin/upi-pool': 'upi_pool',
+  '/admin/payin-engine': 'payin_engine',
+  '/admin/payout-engine': 'payout_engine',
+  '/admin/dispute-engine': 'dispute_engine',
+  '/admin/logs': 'logs',
+  '/admin/commission': 'commission',
+  '/admin/workers': 'admin_only',
+};
+
 /* ─── Nav config with groups ─── */
 const navGroups = [
   {
@@ -66,10 +84,13 @@ const navGroups = [
   {
     label: 'Operations',
     items: [
-      { to: '/admin/payins',   icon: TrendingUp,   label: 'Payins',   shortLabel: 'Payins' },
-      { to: '/admin/payouts',  icon: TrendingDown, label: 'Payouts',  shortLabel: 'Payouts' },
-      { to: '/admin/disputes', icon: AlertCircle,  label: 'Disputes', shortLabel: 'Disputes' },
-      { to: '/admin/upi-pool', icon: Database,     label: 'UPI Pool', shortLabel: 'Pool' },
+      { to: '/admin/payins',       icon: TrendingUp,   label: 'Payins',       shortLabel: 'Payins' },
+      { to: '/admin/payouts',      icon: TrendingDown, label: 'Payouts',      shortLabel: 'Payouts' },
+      { to: '/admin/disputes',     icon: AlertCircle,  label: 'Disputes',     shortLabel: 'Disputes' },
+      { to: '/admin/upi-pool',     icon: Database,     label: 'UPI Pool',     shortLabel: 'Pool' },
+      { to: '/admin/payin-engine', icon: Cpu,          label: 'Payin Engine', shortLabel: 'Payin E.' },
+      { to: '/admin/payout-engine', icon: Cpu,        label: 'Payout Engine', shortLabel: 'Payout E.' },
+      { to: '/admin/dispute-engine', icon: Cpu,       label: 'Dispute Engine', shortLabel: 'Dispute E.' },
     ],
   },
   {
@@ -77,6 +98,12 @@ const navGroups = [
     items: [
       { to: '/admin/logs',       icon: FileText,   label: 'Logs',       shortLabel: 'Logs' },
       { to: '/admin/commission', icon: DollarSign, label: 'Commission', shortLabel: 'Comm.' },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { to: '/admin/workers', icon: Users, label: 'Workers', shortLabel: 'Workers' },
     ],
   },
 ];
@@ -95,9 +122,33 @@ const allLinks = navGroups.flatMap(g => g.items);
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminInfo, setAdminInfo]     = useState(null);
-  const [expandedGroups, setExpandedGroups] = useState(['Overview', 'Entities', 'Operations', 'Audit']);
+  const [expandedGroups, setExpandedGroups] = useState(['Overview', 'Entities', 'Operations', 'Audit', 'Settings']);
   const navigate = useNavigate();
   const location = useLocation();
+
+  /* ─── Role & Permission logic ─── */
+  const userRole = localStorage.getItem('pay2x_user_role');
+  const workerPermissions = JSON.parse(localStorage.getItem('pay2x_worker_permissions') || '[]');
+  const isAdmin = userRole === 'admin';
+
+  const getPermissionForRoute = (route) => {
+    return ROUTE_PERMISSIONS[route] ?? null;
+  };
+
+  const canAccess = (route) => {
+    if (isAdmin) return true;
+    const perm = getPermissionForRoute(route);
+    if (perm === null) return true; // dashboard - everyone
+    if (perm === 'admin_only') return false;
+    return workerPermissions.includes(perm);
+  };
+
+  const filteredNavGroups = navGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => canAccess(item.to))
+  })).filter(group => group.items.length > 0);
+
+  const filteredBottomNav = bottomNavItems.filter(item => canAccess(item.to));
 
   useEffect(() => { fetchAdminInfo(); }, []);
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
@@ -106,7 +157,10 @@ export default function AdminLayout() {
     try {
       const user = getAuth().currentUser;
       if (!user) return;
-      const snap = await getDoc(doc(db, 'admins', user.uid));
+      // If worker role, fetch from 'worker' collection; otherwise from 'admins'
+      const role = localStorage.getItem('pay2x_user_role');
+      const collectionName = role === 'worker' ? 'worker' : 'admins';
+      const snap = await getDoc(doc(db, collectionName, user.uid));
       if (snap.exists()) {
         setAdminInfo(snap.data());
       } else {
@@ -118,6 +172,8 @@ export default function AdminLayout() {
 
   const handleLogout = async () => {
     try {
+      localStorage.removeItem('pay2x_user_role');
+      localStorage.removeItem('pay2x_worker_permissions');
       await signOut(getAuth());
       navigate('/signin');
     } catch (e) {
@@ -136,7 +192,7 @@ export default function AdminLayout() {
   /* ── Sidebar nav renderer with groups ── */
   const renderGroupedNav = (extraPy = 'py-2.5') => (
     <div className="space-y-1">
-      {navGroups.map(group => {
+      {filteredNavGroups.map(group => {
         const isExpanded = expandedGroups.includes(group.label);
         return (
           <div key={group.label}>
@@ -216,7 +272,7 @@ export default function AdminLayout() {
               <Shield className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white leading-tight">Admin Panel</h2>
+              <h2 className="text-lg font-bold text-white leading-tight">{isAdmin ? 'Admin Panel' : 'Worker Panel'}</h2>
               <p className="text-xs text-indigo-200">Payment Gateway</p>
             </div>
           </div>
@@ -269,7 +325,7 @@ export default function AdminLayout() {
                 <div className="w-9 h-9 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl flex items-center justify-center">
                   <Shield className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-lg font-bold text-white">Admin Panel</span>
+                <span className="text-lg font-bold text-white">{isAdmin ? 'Admin Panel' : 'Worker Panel'}</span>
               </div>
               <button
                 onClick={() => setSidebarOpen(false)}
@@ -279,7 +335,7 @@ export default function AdminLayout() {
               </button>
             </div>
 
-            {/* Admin info */}
+            {/* Admin/Worker info */}
             {adminInfo && (
               <div className="mx-4 mb-2 bg-white/10 rounded-xl p-3">
                 <div className="flex items-center gap-2 text-white mb-1">
@@ -327,7 +383,7 @@ export default function AdminLayout() {
         style={{ paddingBottom: 'env(safe-area-inset-bottom)', boxShadow: '0 -2px 8px rgba(0,0,0,.06)' }}
       >
         <div className="flex items-center justify-around px-1 py-1.5">
-          {bottomNavItems.map(link => {
+          {filteredBottomNav.map(link => {
             const Icon = link.icon;
             const isActive = location.pathname.startsWith(link.to);
             return (

@@ -7,10 +7,61 @@ const functions = require("firebase-functions");
 const cors = require("cors")({origin: true});
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const PayinEngine = require("./engine/PayinEngine");
+const PayoutEngine = require("./engine/PayoutEngine");
+const DisputeEngine = require("./engine/DisputeEngine");
 
 // Initialize Firebase Admin (only once)
 admin.initializeApp();
 const db = admin.firestore();
+
+// ============================================
+// AUDIT LOGGING HELPER (Week 2 - Priority #3)
+// ============================================
+async function logAuditEvent({
+  action,
+  category,
+  entityType,
+  entityId,
+  entityName,
+  details = {},
+  balanceBefore = null,
+  balanceAfter = null,
+  severity = 'info',
+  source = 'webhook',
+}) {
+  try {
+    await db.collection('adminLog').add({
+      action,
+      category,
+      entityType: entityType || null,
+      entityId: entityId || null,
+      entityName: entityName || null,
+      performedBy: 'system',
+      performedByName: 'Cloud Function',
+      performedByRole: 'system',
+      performedByIp: null,
+      details: {
+        before: details.before !== undefined ? details.before : null,
+        after: details.after !== undefined ? details.after : null,
+        amount: details.amount || null,
+        note: details.note || null,
+        metadata: details.metadata || null,
+      },
+      balanceBefore,
+      balanceAfter,
+      severity,
+      requiresReview: false,
+      source,
+      version: '1.0.0',
+      userAgent: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`✅ Audit log created: ${action}`);
+  } catch (error) {
+    console.error('❌ Failed to create audit log:', error);
+  }
+}
 
 // ============================================
 // USDT RATE FETCHING FUNCTIONS
@@ -361,13 +412,13 @@ exports.createPayin = functions.https.onRequest(async (req, res) => {
     console.log('✅ Validation passed');
     
     const merchantSnapshot = await db.collection('merchant')
-      .where('apiKey', '==', apiKey)
+      .where('liveApiKey', '==', apiKey)
       .where('active', '==', true)
       .limit(1)
       .get();
     
     if (merchantSnapshot.empty) {
-      console.log('❌ Invalid API key');
+      console.log('❌ Invalid API key:', apiKey);
       return res.status(401).json({ 
         error: 'Invalid or inactive API key' 
       });
@@ -379,49 +430,19 @@ exports.createPayin = functions.https.onRequest(async (req, res) => {
     
     console.log('✅ Merchant verified:', merchantData.businessName);
     
-    const tradersSnapshot = await db.collection('trader')
-      .where('active', '==', true)
-      .limit(1)
-      .get();
+    // 🚀 USE PAYIN ENGINE v2.0 FOR SMART UPI SELECTION
+    const engine = new PayinEngine(db);
+    const selectionResult = await engine.selectUpi(amountNum, merchantId);
     
-    if (tradersSnapshot.empty) {
-      console.log('❌ No traders available');
+    if (!selectionResult.success) {
+      console.log('❌ Engine failed to select UPI:', selectionResult.error);
       return res.status(503).json({ 
-        error: 'No traders available at the moment. Please try again later.' 
+        error: selectionResult.error || 'No payment method available. Please try again later.' 
       });
     }
     
-    const traderDoc = tradersSnapshot.docs[0];
-    const traderId = traderDoc.id;
-    const traderData = traderDoc.data();
-    
-    console.log('✅ Trader assigned:', traderId);
-    
-    let upiDetails = null;
-    
-    if (amountNum >= 10000 && traderData.bigUpis && traderData.bigUpis.length > 0) {
-      upiDetails = traderData.bigUpis.find(upi => upi.active === true);
-      console.log('💰 Using Big UPI for large amount');
-    }
-    
-    if (!upiDetails && traderData.currentMerchantUpis && traderData.currentMerchantUpis.length > 0) {
-      upiDetails = traderData.currentMerchantUpis.find(upi => upi.active === true);
-      console.log('🏪 Using Merchant UPI');
-    }
-    
-    if (!upiDetails && traderData.normalUpis && traderData.normalUpis.length > 0) {
-      upiDetails = traderData.normalUpis.find(upi => upi.active === true);
-      console.log('👤 Using Normal UPI');
-    }
-    
-    if (!upiDetails) {
-      console.log('❌ No UPI available from trader');
-      return res.status(503).json({ 
-        error: 'No payment method available. Please try again later.' 
-      });
-    }
-    
-    console.log('✅ UPI selected:', upiDetails.upiId);
+    const { upiId, holderName, traderId, score, attempts } = selectionResult;
+    console.log(`✅ Engine selected: ${upiId} (Score: ${score}, Attempts: ${attempts})`);
     
     const payinData = {
       merchantId: merchantId,
@@ -430,14 +451,18 @@ exports.createPayin = functions.https.onRequest(async (req, res) => {
       orderId: orderId || null,
       amount: amountNum,
       status: 'pending',
-      upiId: upiDetails.upiId,
-      holderName: upiDetails.holderName || 'Merchant',
+      upiId: upiId,
+      holderName: holderName || 'Account Holder',
       utrId: null,
       timer: 600,
       requestedAt: admin.firestore.FieldValue.serverTimestamp(),
       completedAt: null,
       metadata: metadata || null,
-      testMode: merchantData.testMode || false
+      testMode: merchantData.testMode || false,
+      // Engine metadata
+      engineVersion: '2.0',
+      selectionScore: score,
+      selectionAttempts: attempts,
     };
     
     const payinRef = await db.collection('payin').add(payinData);
@@ -446,8 +471,8 @@ exports.createPayin = functions.https.onRequest(async (req, res) => {
     return res.status(200).json({
       success: true,
       payinId: payinRef.id,
-      upiId: upiDetails.upiId,
-      holderName: upiDetails.holderName,
+      upiId: upiId,
+      holderName: holderName,
       amount: amountNum,
       timer: 600,
       expiresAt: new Date(Date.now() + 600000).toISOString()
@@ -497,7 +522,7 @@ exports.updatePayin = functions.https.onRequest(async (req, res) => {
     }
     
     const merchantSnapshot = await db.collection('merchant')
-      .where('apiKey', '==', apiKey)
+      .where('liveApiKey', '==', apiKey)
       .limit(1)
       .get();
     
@@ -567,6 +592,21 @@ exports.sendPaymentWebhook = functions.firestore
     if (after.status !== 'completed' && after.status !== 'rejected') {
       console.log('⏭️  Status not final, skipping webhook');
       return null;
+    }
+    
+    // 🚀 UPDATE UPI STATS via Payin Engine
+    try {
+      const engine = new PayinEngine(db);
+      await engine.updateUpiStats(
+        after.upiId,
+        after.traderId,
+        after.status,
+        after.amount
+      );
+      console.log('✅ UPI stats updated');
+    } catch (statsError) {
+      console.error('⚠️ Failed to update UPI stats:', statsError.message);
+      // Continue with webhook - stats update is non-critical
     }
     
     try {
@@ -800,7 +840,7 @@ exports.getPayinStatus = functions.https.onRequest(async (req, res) => {
     }
     
     const merchantSnapshot = await db.collection('merchant')
-      .where('apiKey', '==', apiKey)
+      .where('liveApiKey', '==', apiKey)
       .limit(1)
       .get();
     
@@ -1072,6 +1112,26 @@ exports.tatumUSDTWebhook = functions.https.onRequest(async (req, res) => {
     const usdtRate = 92; // You can make this dynamic
     const inrAmount = Math.round(amount * usdtRate);
 
+    // 🔥 AUDIT LOG: USDT Deposit Detected (Priority #3)
+    await logAuditEvent({
+      action: 'usdt_deposit_detected',
+      category: 'financial',
+      entityType: 'trader',
+      entityId: traderId,
+      entityName: traderId,
+      details: {
+        amount: inrAmount,
+        metadata: {
+          usdtAmount: amount,
+          txHash: txId,
+          address,
+          rate: usdtRate,
+        },
+      },
+      severity: 'info',
+      source: 'webhook',
+    });
+
     // Credit trader balance
     const traderRef = db.collection('trader').doc(traderId);
     const traderDoc = await traderRef.get();
@@ -1084,6 +1144,7 @@ exports.tatumUSDTWebhook = functions.https.onRequest(async (req, res) => {
 
     const currentBalance = traderDoc.data().balance || 0;
     const newBalance = currentBalance + inrAmount;
+    const traderName = traderDoc.data().name || 'Unknown Trader';
 
     await traderRef.update({
       balance: newBalance,
@@ -1091,6 +1152,26 @@ exports.tatumUSDTWebhook = functions.https.onRequest(async (req, res) => {
     });
 
     console.log(`✅ Balance updated: ₹${currentBalance} → ₹${newBalance}`);
+
+    // 🔥 AUDIT LOG: USDT Deposit Credited (Priority #3)
+    await logAuditEvent({
+      action: 'usdt_deposit_credited',
+      category: 'financial',
+      entityType: 'trader',
+      entityId: traderId,
+      entityName: traderName,
+      details: {
+        amount: inrAmount,
+        metadata: {
+          usdtAmount: amount,
+          txHash: txId,
+        },
+      },
+      balanceBefore: currentBalance,
+      balanceAfter: newBalance,
+      severity: 'info',
+      source: 'webhook',
+    });
 
     // Create transaction record
     await db.collection('transactions').add({
@@ -1851,6 +1932,1182 @@ exports.deleteTrader = functions.https.onCall(async (data, context) => {
   } catch (error) {
     console.error('❌ Error deleting trader:', error);
     throw new functions.https.HttpsError('internal', error.message);
+  }
+});
+
+// ============================================
+// PAYIN ENGINE - SETUP & MAINTENANCE
+// ============================================
+
+/**
+ * INITIALIZE ENGINE CONFIG (Call once to setup)
+ * GET /initPayinEngine
+ */
+exports.initPayinEngine = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  
+  try {
+    console.log('🚀 Initializing Payin Engine v2.0...');
+    
+    // 1. Create engine config
+    const engineConfig = {
+      weights: {
+        successRate: 25,
+        dailyLimitLeft: 20,
+        cooldown: 15,
+        amountMatch: 15,
+        traderBalance: 10,
+        bankHealth: 5,
+        timeWindow: 5,
+        recentFailures: 5,
+      },
+      minScoreThreshold: 30,
+      maxCandidates: 5,
+      maxFallbackAttempts: 3,
+      cooldownMinutes: 2,
+      maxDailyTxnsPerUpi: 50,
+      failureThreshold: 3,
+      amountTiers: {
+        low: { min: 500, max: 2000 },
+        medium: { min: 2001, max: 10000 },
+        high: { min: 10001, max: 50000 },
+      },
+      enableRandomness: true,
+      enableFallback: true,
+      enableLogging: true,
+      randomnessFactor: 0.1,
+      scoreExponent: 2,
+      version: '2.0',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    
+    await db.collection('system').doc('engineConfig').set(engineConfig, { merge: true });
+    console.log('✅ Engine config created');
+    
+    // 2. Create bank health documents
+    const banks = {
+      sbi: { status: 'healthy', successRate24h: 95, maintenanceWindows: [{ day: 'sunday', start: '00:00', end: '06:00' }] },
+      hdfc: { status: 'healthy', successRate24h: 96, maintenanceWindows: [] },
+      axis: { status: 'healthy', successRate24h: 94, maintenanceWindows: [] },
+      icici: { status: 'healthy', successRate24h: 95, maintenanceWindows: [] },
+      paytm: { status: 'healthy', successRate24h: 92, maintenanceWindows: [] },
+      iob: { status: 'healthy', successRate24h: 90, maintenanceWindows: [] },
+      kotak: { status: 'healthy', successRate24h: 93, maintenanceWindows: [] },
+      yes: { status: 'healthy', successRate24h: 91, maintenanceWindows: [] },
+    };
+    
+    for (const [bank, health] of Object.entries(banks)) {
+      await db.collection('bankHealth').doc(bank).set({
+        ...health,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    console.log('✅ Bank health data created');
+    
+    // 3. Initialize upiPool placeholder
+    await db.collection('upiPool').doc('_placeholder').set({
+      _note: 'UPIs are extracted from trader documents. Migrate here for advanced tracking.',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    console.log('✅ upiPool initialized');
+    
+    res.status(200).json({
+      success: true,
+      message: 'Payin Engine v2.0 initialized successfully!',
+      config: {
+        weights: engineConfig.weights,
+        features: {
+          randomness: engineConfig.enableRandomness,
+          fallback: engineConfig.enableFallback,
+          logging: engineConfig.enableLogging,
+        },
+      },
+      banksConfigured: Object.keys(banks),
+    });
+    
+  } catch (error) {
+    console.error('❌ Init error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * MIGRATE UPIs FROM TRADERS TO upiPool
+ * GET /migrateUpisToPool
+ */
+exports.migrateUpisToPool = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  
+  try {
+    console.log('🔄 Migrating UPIs to upiPool...');
+    
+    const tradersSnapshot = await db.collection('trader').get();
+    let migratedCount = 0;
+    const migrated = [];
+    
+    for (const traderDoc of tradersSnapshot.docs) {
+      const trader = traderDoc.data();
+      const traderId = traderDoc.id;
+      
+      if (!trader.active) continue;
+      
+      // Process all UPI arrays
+      const upiSources = [
+        { upis: trader.bigUpis || [], tier: 'high', type: 'big' },
+        { upis: trader.currentMerchantUpis || [], tier: 'medium', type: 'merchant' },
+        { upis: trader.normalUpis || [], tier: 'low', type: 'normal' },
+      ];
+      
+      for (const source of upiSources) {
+        for (const upi of source.upis) {
+          if (!upi.upiId) continue;
+          
+          // Create unique doc ID from UPI
+          const docId = upi.upiId.replace(/[@.]/g, '_').toLowerCase();
+          
+          // Extract bank from UPI handle
+          const handle = upi.upiId.split('@')[1]?.toLowerCase() || '';
+          let bank = 'other';
+          const bankMap = {
+            'oksbi': 'sbi', 'sbi': 'sbi',
+            'okaxis': 'axis', 'axisbank': 'axis', 'axis': 'axis',
+            'okicici': 'icici', 'icici': 'icici', 'ibl': 'icici',
+            'okhdfcbank': 'hdfc', 'hdfcbank': 'hdfc',
+            'ybl': 'paytm', 'paytm': 'paytm',
+            'iob': 'iob',
+            'kotak': 'kotak',
+            'yesbank': 'yes',
+          };
+          for (const [key, value] of Object.entries(bankMap)) {
+            if (handle.includes(key)) { bank = value; break; }
+          }
+          
+          const upiDoc = {
+            upiId: upi.upiId,
+            holderName: upi.holderName || trader.name || 'Account Holder',
+            bank: bank,
+            type: source.type,
+            amountTier: source.tier,
+            traderId: traderId,
+            traderName: trader.name || '',
+            
+            // Limits
+            dailyLimit: upi.dailyLimit || (source.type === 'big' ? 200000 : 100000),
+            perTxnMin: upi.perTxnMin || 500,
+            perTxnMax: upi.perTxnMax || (source.type === 'big' ? 50000 : 25000),
+            
+            // Stats (initialize fresh)
+            stats: {
+              todayVolume: 0,
+              todayCount: 0,
+              todaySuccess: 0,
+              todayFailed: 0,
+              lastHourFailures: 0,
+              lastUsedAt: null,
+              lastSuccessAt: null,
+              lastFailedAt: null,
+              lastResetAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            
+            // Performance (will be calculated over time)
+            performance: {
+              successRate: 85, // Default assumption
+              totalTxns: 0,
+              totalSuccess: 0,
+              totalFailed: 0,
+              avgCompletionTime: 0,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            
+            active: upi.active !== false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            migratedFrom: 'trader',
+          };
+          
+          await db.collection('upiPool').doc(docId).set(upiDoc, { merge: true });
+          migratedCount++;
+          migrated.push({ upiId: upi.upiId, bank, type: source.type, trader: trader.name });
+        }
+      }
+    }
+    
+    // Remove placeholder if it exists
+    await db.collection('upiPool').doc('_placeholder').delete().catch(() => {});
+    
+    console.log(`✅ Migrated ${migratedCount} UPIs`);
+    
+    res.status(200).json({
+      success: true,
+      message: `Migrated ${migratedCount} UPIs to upiPool`,
+      count: migratedCount,
+      upis: migrated,
+    });
+    
+  } catch (error) {
+    console.error('❌ Migration error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET ENGINE STATS & SELECTION LOGS
+ * GET /getEngineStats
+ */
+exports.getEngineStats = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  
+  try {
+    // Get recent selection logs
+    const logsSnapshot = await db.collection('selectionLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .get();
+    
+    const logs = [];
+    logsSnapshot.forEach(doc => {
+      const data = doc.data();
+      logs.push({
+        id: doc.id,
+        merchantId: data.merchantId,
+        amount: data.amount,
+        selectedUpi: data.selected?.upiId || null,
+        score: data.selected?.score || null,
+        attempts: data.totalAttempts,
+        success: data.success,
+        timestamp: data.timestamp,
+      });
+    });
+    
+    // Get UPI pool stats
+    const upiPoolSnapshot = await db.collection('upiPool').get();
+    const upiStats = [];
+    let totalVolume = 0;
+    let totalTxns = 0;
+    
+    upiPoolSnapshot.forEach(doc => {
+      if (doc.id === '_placeholder') return;
+      const data = doc.data();
+      const stats = data.stats || {};
+      
+      upiStats.push({
+        upiId: data.upiId,
+        bank: data.bank,
+        type: data.type,
+        trader: data.traderName,
+        todayVolume: stats.todayVolume || 0,
+        todayCount: stats.todayCount || 0,
+        todaySuccess: stats.todaySuccess || 0,
+        todayFailed: stats.todayFailed || 0,
+        successRate: data.performance?.successRate || 0,
+        active: data.active,
+      });
+      
+      totalVolume += stats.todayVolume || 0;
+      totalTxns += stats.todayCount || 0;
+    });
+    
+    // Sort by today's volume
+    upiStats.sort((a, b) => b.todayVolume - a.todayVolume);
+    
+    // Get engine config
+    const configDoc = await db.collection('system').doc('engineConfig').get();
+    const config = configDoc.exists ? configDoc.data() : {};
+    
+    res.status(200).json({
+      success: true,
+      summary: {
+        totalUpisInPool: upiStats.length,
+        activeUpis: upiStats.filter(u => u.active).length,
+        todayTotalVolume: totalVolume,
+        todayTotalTxns: totalTxns,
+      },
+      recentSelections: logs,
+      upiPerformance: upiStats.slice(0, 20), // Top 20
+      config: {
+        weights: config.weights,
+        minScoreThreshold: config.minScoreThreshold,
+        enableRandomness: config.enableRandomness,
+      },
+    });
+    
+  } catch (error) {
+    console.error('❌ Stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * RESET DAILY UPI STATS (Runs at midnight IST)
+ */
+exports.resetDailyUpiStats = functions.pubsub
+  .schedule('0 0 * * *')
+  .timeZone('Asia/Kolkata')
+  .onRun(async (context) => {
+    console.log('🔄 Starting daily UPI stats reset...');
+    
+    try {
+      // Reset upiPool stats
+      const upiPoolSnapshot = await db.collection('upiPool').get();
+      
+      let resetCount = 0;
+      const batch = db.batch();
+      
+      upiPoolSnapshot.forEach(doc => {
+        if (doc.id !== '_placeholder') {
+          batch.update(doc.ref, {
+            'stats.todayVolume': 0,
+            'stats.todayCount': 0,
+            'stats.todaySuccess': 0,
+            'stats.todayFailed': 0,
+            'stats.lastHourFailures': 0,
+            'stats.lastResetAt': admin.firestore.FieldValue.serverTimestamp(),
+          });
+          resetCount++;
+        }
+      });
+      
+      if (resetCount > 0) {
+        await batch.commit();
+        console.log(`✅ Reset stats for ${resetCount} UPIs in upiPool`);
+      }
+      
+      // Also reset selection logs older than 7 days
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const oldLogsSnapshot = await db.collection('selectionLogs')
+        .where('timestamp', '<', sevenDaysAgo)
+        .limit(500)
+        .get();
+      
+      if (!oldLogsSnapshot.empty) {
+        const logBatch = db.batch();
+        oldLogsSnapshot.forEach(doc => {
+          logBatch.delete(doc.ref);
+        });
+        await logBatch.commit();
+        console.log(`🗑️ Deleted ${oldLogsSnapshot.size} old selection logs`);
+      }
+      
+      console.log('✅ Daily reset complete');
+      return null;
+      
+    } catch (error) {
+      console.error('❌ Error in daily reset:', error);
+      return null;
+    }
+  });
+
+/**
+ * RESET HOURLY FAILURE COUNTS (Runs every hour)
+ */
+exports.resetHourlyFailures = functions.pubsub
+  .schedule('0 * * * *')
+  .timeZone('Asia/Kolkata')
+  .onRun(async (context) => {
+    console.log('🔄 Resetting hourly failure counts...');
+    
+    try {
+      const upiPoolSnapshot = await db.collection('upiPool')
+        .where('stats.lastHourFailures', '>', 0)
+        .get();
+      
+      if (upiPoolSnapshot.empty) {
+        console.log('✅ No UPIs with failures to reset');
+        return null;
+      }
+      
+      const batch = db.batch();
+      upiPoolSnapshot.forEach(doc => {
+        batch.update(doc.ref, {
+          'stats.lastHourFailures': 0,
+        });
+      });
+      
+      await batch.commit();
+      console.log(`✅ Reset failure counts for ${upiPoolSnapshot.size} UPIs`);
+      return null;
+      
+    } catch (error) {
+      console.error('❌ Error resetting hourly failures:', error);
+      return null;
+    }
+  });
+
+// ============================================
+// PAYOUT ENGINE FUNCTIONS
+// ============================================
+
+/**
+ * ASSIGN PAYOUT - Smart trader selection using Payout Engine
+ * POST /assignPayout { payoutId }
+ * Automatically picks the best trader for a pending payout
+ */
+exports.assignPayout = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  try {
+    const { payoutId } = req.body;
+
+    if (!payoutId) {
+      return res.status(400).json({ error: 'payoutId is required' });
+    }
+
+    // Get payout document
+    const payoutRef = db.collection('payouts').doc(payoutId);
+    const payoutDoc = await payoutRef.get();
+
+    if (!payoutDoc.exists) {
+      return res.status(404).json({ error: 'Payout not found' });
+    }
+
+    const payoutData = payoutDoc.data();
+
+    if (payoutData.status !== 'pending') {
+      return res.status(400).json({
+        error: `Payout is not pending (current status: ${payoutData.status})`,
+      });
+    }
+
+    const amount = Number(payoutData.amount);
+    const merchantId = payoutData.merchantId || null;
+
+    // Use Payout Engine for smart trader selection
+    const engine = new PayoutEngine(db);
+    const result = await engine.selectTrader(amount, merchantId, payoutId);
+
+    if (!result.success) {
+      console.log('❌ Payout Engine failed:', result.error);
+      return res.status(503).json({
+        error: result.error || 'No trader available. Try again later.',
+      });
+    }
+
+    // Assign payout to selected trader
+    await payoutRef.update({
+      traderId: result.traderId,
+      status: 'assigned',
+      assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+      engineVersion: 'payout-1.0',
+      selectionScore: result.score,
+      selectionSummary: result.summary,
+    });
+
+    // Update trader's active payout count
+    await engine.updateTraderStats(result.traderId, 'assigned', amount, null);
+
+    console.log(`✅ Payout ${payoutId} assigned to ${result.traderName}`);
+
+    return res.status(200).json({
+      success: true,
+      payoutId,
+      traderId: result.traderId,
+      traderName: result.traderName,
+      score: result.score,
+      summary: result.summary,
+      reasons: result.reasons,
+    });
+
+  } catch (error) {
+    console.error('❌ Error in assignPayout:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * AUTO-ASSIGN ALL PENDING PAYOUTS
+ * POST /autoAssignPayouts
+ * Runs the engine on all pending unassigned payouts
+ */
+exports.autoAssignPayouts = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  try {
+    // Get all pending unassigned payouts
+    const pendingSnapshot = await db.collection('payouts')
+      .where('status', '==', 'pending')
+      .get();
+
+    const unassigned = [];
+    pendingSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data.traderId) {
+        unassigned.push({ id: doc.id, ...data });
+      }
+    });
+
+    if (unassigned.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No pending payouts to assign',
+        assigned: 0,
+        failed: 0,
+      });
+    }
+
+    console.log(`📋 Found ${unassigned.length} unassigned payouts`);
+
+    const engine = new PayoutEngine(db);
+    const results = { assigned: 0, failed: 0, details: [] };
+
+    // Sort by oldest first (FIFO)
+    unassigned.sort((a, b) => {
+      const timeA = a.requestTime?.seconds || a.createdAt?.seconds || 0;
+      const timeB = b.requestTime?.seconds || b.createdAt?.seconds || 0;
+      return timeA - timeB;
+    });
+
+    for (const payout of unassigned) {
+      const amount = Number(payout.amount);
+      const result = await engine.selectTrader(amount, payout.merchantId, payout.id);
+
+      if (result.success) {
+        await db.collection('payouts').doc(payout.id).update({
+          traderId: result.traderId,
+          status: 'assigned',
+          assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+          engineVersion: 'payout-1.0',
+          selectionScore: result.score,
+          selectionSummary: result.summary,
+        });
+
+        await engine.updateTraderStats(result.traderId, 'assigned', amount, null);
+
+        results.assigned++;
+        results.details.push({
+          payoutId: payout.id,
+          amount,
+          traderId: result.traderId,
+          traderName: result.traderName,
+          score: result.score,
+          summary: result.summary,
+        });
+      } else {
+        results.failed++;
+        results.details.push({
+          payoutId: payout.id,
+          amount,
+          error: result.error,
+        });
+      }
+    }
+
+    console.log(`✅ Assigned: ${results.assigned}, Failed: ${results.failed}`);
+
+    return res.status(200).json({
+      success: true,
+      total: unassigned.length,
+      assigned: results.assigned,
+      failed: results.failed,
+      details: results.details,
+    });
+
+  } catch (error) {
+    console.error('❌ Error in autoAssignPayouts:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET PAYOUT ENGINE STATS & SELECTION LOGS
+ * GET /getPayoutEngineStats
+ */
+exports.getPayoutEngineStats = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  try {
+    // Get recent payout selection logs
+    const logsSnapshot = await db.collection('payoutSelectionLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .get();
+
+    const logs = [];
+    logsSnapshot.forEach(doc => {
+      const data = doc.data();
+      logs.push({
+        id: doc.id,
+        payoutId: data.payoutId,
+        merchantId: data.merchantId,
+        amount: data.amount,
+        amountTier: data.amountTier,
+        selectedTrader: data.selected ? {
+          traderId: data.selected.traderId,
+          traderName: data.selected.traderName,
+          score: data.selected.score,
+          summary: data.selected.summary,
+          whySelected: data.selected.whySelected,
+        } : null,
+        candidates: (data.candidates || []).map(c => ({
+          traderId: c.traderId,
+          traderName: c.traderName,
+          score: c.score,
+          summary: c.summary,
+          reasons: c.reasons,
+        })),
+        success: data.success,
+        error: data.error,
+        attempts: data.totalAttempts,
+        timestamp: data.timestamp,
+      });
+    });
+
+    // Get trader stats
+    const tradersSnapshot = await db.collection('trader').get();
+    const traderStats = [];
+    let totalActive = 0;
+
+    tradersSnapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isActive === false && data.active === false) return;
+
+      const stats = data.payoutStats || {};
+      traderStats.push({
+        traderId: doc.id,
+        traderName: data.name || 'Unknown',
+        isOnline: data.isOnline || false,
+        priority: data.priority || 'normal',
+        activePayouts: stats.activePayouts || 0,
+        todayCount: stats.todayCount || 0,
+        todayCompleted: stats.todayCompleted || 0,
+        todayCancelled: stats.todayCancelled || 0,
+        todayVolume: stats.todayVolume || 0,
+        totalCompleted: stats.totalCompleted || 0,
+        totalCancelled: stats.totalCancelled || 0,
+        avgCompletionMinutes: stats.avgCompletionMinutes || null,
+        successRate: stats.totalAttempted > 0
+          ? Math.round((stats.totalCompleted / stats.totalAttempted) * 100)
+          : null,
+      });
+      totalActive++;
+    });
+
+    // Sort by today's completed
+    traderStats.sort((a, b) => b.todayCompleted - a.todayCompleted);
+
+    // Get payout engine config
+    const configDoc = await db.collection('system').doc('payoutEngineConfig').get();
+    const config = configDoc.exists ? configDoc.data() : {};
+
+    // Summary stats
+    const totalTodayPayouts = traderStats.reduce((sum, t) => sum + t.todayCount, 0);
+    const totalTodayCompleted = traderStats.reduce((sum, t) => sum + t.todayCompleted, 0);
+    const totalTodayVolume = traderStats.reduce((sum, t) => sum + t.todayVolume, 0);
+    const totalActivePayouts = traderStats.reduce((sum, t) => sum + t.activePayouts, 0);
+
+    res.status(200).json({
+      success: true,
+      summary: {
+        totalTraders: totalActive,
+        totalActivePayouts,
+        todayTotalPayouts: totalTodayPayouts,
+        todayCompleted: totalTodayCompleted,
+        todayVolume: totalTodayVolume,
+      },
+      recentSelections: logs,
+      traderPerformance: traderStats,
+      config: {
+        weights: config.weights,
+        minScoreThreshold: config.minScoreThreshold,
+        maxActivePayouts: config.maxActivePayouts,
+        enableRandomness: config.enableRandomness,
+      },
+    });
+
+  } catch (error) {
+    console.error('❌ Payout stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * INIT PAYOUT ENGINE CONFIG
+ * POST /initPayoutEngine
+ */
+exports.initPayoutEngine = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  try {
+    const { DEFAULT_PAYOUT_CONFIG } = require('./engine/payoutConfig');
+
+    await db.collection('system').doc('payoutEngineConfig').set(DEFAULT_PAYOUT_CONFIG, { merge: true });
+
+    console.log('✅ Payout Engine config initialized');
+
+    res.status(200).json({
+      success: true,
+      message: 'Payout Engine config initialized in Firestore',
+      config: DEFAULT_PAYOUT_CONFIG,
+    });
+
+  } catch (error) {
+    console.error('❌ Init error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * RESET DAILY PAYOUT STATS (Runs at midnight IST)
+ */
+exports.resetDailyPayoutStats = functions.pubsub
+  .schedule('0 0 * * *')
+  .timeZone('Asia/Kolkata')
+  .onRun(async (context) => {
+    console.log('🔄 Resetting daily payout stats...');
+    try {
+      const engine = new PayoutEngine(db);
+      const result = await engine.resetDailyStats();
+      console.log(`✅ Daily payout stats reset: ${result.reset} traders`);
+
+      // Also clean up old payout selection logs (older than 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const oldLogs = await db.collection('payoutSelectionLogs')
+        .where('timestamp', '<', sevenDaysAgo)
+        .limit(500)
+        .get();
+
+      if (!oldLogs.empty) {
+        const batch = db.batch();
+        oldLogs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        console.log(`🗑️ Deleted ${oldLogs.size} old payout selection logs`);
+      }
+
+      return null;
+    } catch (error) {
+      console.error('❌ Error in daily payout reset:', error);
+      return null;
+    }
+  });
+
+// ============================================
+// DISPUTE ENGINE FUNCTIONS
+// ============================================
+
+/**
+ * ROUTE DISPUTE - Smart routing to the correct trader
+ * POST /routeDispute { disputeId }
+ */
+exports.routeDispute = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  try {
+    const { disputeId } = req.body;
+    if (!disputeId) {
+      return res.status(400).json({ error: 'disputeId is required' });
+    }
+
+    const engine = new DisputeEngine(db);
+    const result = await engine.routeDispute(disputeId);
+
+    if (result.success) {
+      return res.status(200).json({
+        success: true,
+        traderId: result.traderId,
+        traderName: result.traderName,
+        routeReason: result.routeReason,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error in routeDispute:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PROCESS TRADER RESPONSE
+ * POST /processTraderDisputeResponse { disputeId, action, note, proofUrl }
+ * action: 'accept' or 'reject'
+ */
+exports.processTraderDisputeResponse = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  try {
+    const { disputeId, action, note, proofUrl } = req.body;
+
+    if (!disputeId || !action) {
+      return res.status(400).json({ error: 'disputeId and action are required' });
+    }
+
+    if (!['accept', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'action must be accept or reject' });
+    }
+
+    const engine = new DisputeEngine(db);
+    const result = await engine.processTraderResponse(disputeId, action, note, proofUrl);
+
+    return res.status(200).json(result);
+
+  } catch (error) {
+    console.error('❌ Error in processTraderDisputeResponse:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * ADMIN RESOLVE DISPUTE
+ * POST /adminResolveDispute { disputeId, decision, adminNote, adminId }
+ * decision: 'approve' or 'reject'
+ * This is where balances get adjusted
+ */
+exports.adminResolveDispute = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  try {
+    const { disputeId, decision, adminNote, adminId } = req.body;
+
+    if (!disputeId || !decision) {
+      return res.status(400).json({ error: 'disputeId and decision are required' });
+    }
+
+    if (!['approve', 'reject'].includes(decision)) {
+      return res.status(400).json({ error: 'decision must be approve or reject' });
+    }
+
+    const engine = new DisputeEngine(db);
+    const result = await engine.adminResolve(disputeId, decision, adminNote, adminId);
+
+    return res.status(200).json(result);
+
+  } catch (error) {
+    console.error('❌ Error in adminResolveDispute:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET DISPUTE ENGINE STATS
+ * GET /getDisputeEngineStats
+ */
+exports.getDisputeEngineStats = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  try {
+    const engine = new DisputeEngine(db);
+    const { stats, logs } = await engine.getStats();
+
+    res.status(200).json({
+      success: true,
+      stats,
+      logs,
+    });
+
+  } catch (error) {
+    console.error('❌ Dispute stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * INIT DISPUTE ENGINE CONFIG
+ * POST /initDisputeEngine
+ */
+exports.initDisputeEngine = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  try {
+    const { DEFAULT_DISPUTE_CONFIG } = require('./engine/disputeConfig');
+    await db.collection('system').doc('disputeEngineConfig').set(DEFAULT_DISPUTE_CONFIG, { merge: true });
+
+    console.log('✅ Dispute Engine config initialized');
+
+    res.status(200).json({
+      success: true,
+      message: 'Dispute Engine config initialized',
+      config: DEFAULT_DISPUTE_CONFIG,
+    });
+
+  } catch (error) {
+    console.error('❌ Init error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// WORKER MANAGEMENT FUNCTIONS
+// ============================================
+
+/**
+ * CREATE WORKER
+ * POST /createWorker { name, email, password, permissions }
+ */
+exports.createWorker = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { name, email, password, permissions } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'name, email, and password are required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    console.log('🚀 Creating worker:', email);
+
+    // Create Firebase Auth user
+    const newUser = await admin.auth().createUser({
+      email: email,
+      password: password,
+      displayName: name,
+    });
+
+    console.log('✅ Auth user created:', newUser.uid);
+
+    // Create Firestore doc in 'worker' collection
+    const workerRef = db.collection('worker').doc(newUser.uid);
+    await workerRef.set({
+      uid: newUser.uid,
+      name: name,
+      email: email,
+      permissions: permissions || [],
+      isActive: true,
+      role: 'worker',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: 'admin',
+    });
+
+    console.log('✅ Worker document created:', newUser.uid);
+
+    return res.status(200).json({
+      success: true,
+      workerId: newUser.uid,
+      message: 'Worker created successfully',
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating worker:', error);
+
+    // If auth user was created but Firestore failed, try cleanup
+    if (error.code !== 'auth/email-already-exists') {
+      try {
+        const { email } = req.body || {};
+        if (email) {
+          const userRecord = await admin.auth().getUserByEmail(email);
+          await admin.auth().deleteUser(userRecord.uid);
+          console.log('🧹 Cleaned up auth user after error');
+        }
+      } catch (cleanupErr) {
+        // Ignore cleanup errors
+      }
+    }
+
+    return res.status(500).json({
+      error: error.message || 'Failed to create worker',
+    });
+  }
+});
+
+/**
+ * DELETE WORKER
+ * POST /deleteWorker { workerId, uid }
+ */
+exports.deleteWorker = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { workerId, uid } = req.body;
+
+    if (!workerId) {
+      return res.status(400).json({ error: 'workerId is required' });
+    }
+
+    const authUid = uid || workerId;
+
+    console.log('🗑️ Deleting worker:', workerId);
+
+    // Delete Firestore document
+    await db.collection('worker').doc(workerId).delete();
+    console.log('✅ Firestore document deleted');
+
+    // Delete Firebase Auth user
+    try {
+      await admin.auth().deleteUser(authUid);
+      console.log('✅ Auth user deleted');
+    } catch (authErr) {
+      console.log('ℹ️ Auth user not found or already deleted:', authErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Worker deleted successfully',
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting worker:', error);
+    return res.status(500).json({
+      error: error.message || 'Failed to delete worker',
+    });
+  }
+});
+
+// ============================================
+// ENGINE CONFIG UPDATE FUNCTIONS
+// ============================================
+
+/**
+ * UPDATE PAYIN ENGINE CONFIG
+ * POST /updateEngineConfig { weights, enableRandomness, randomExponent }
+ */
+exports.updateEngineConfig = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { weights, enableRandomness, randomExponent } = req.body;
+    const updateData = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+    if (weights && typeof weights === 'object') {
+      updateData.weights = weights;
+    }
+    if (enableRandomness !== undefined) {
+      updateData.enableRandomness = Boolean(enableRandomness);
+    }
+    if (randomExponent !== undefined) {
+      updateData.scoreExponent = Number(randomExponent);
+    }
+
+    await db.collection('system').doc('engineConfig').set(updateData, { merge: true });
+    console.log('✅ Payin engine config updated');
+
+    return res.status(200).json({ success: true, message: 'Payin engine config updated' });
+  } catch (error) {
+    console.error('❌ Error updating engine config:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * UPDATE PAYOUT ENGINE CONFIG
+ * POST /updatePayoutEngineConfig { weights, minScoreThreshold, maxActivePayouts, enableRandomness }
+ */
+exports.updatePayoutEngineConfig = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { weights, minScoreThreshold, maxActivePayouts, enableRandomness } = req.body;
+    const updateData = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+    if (weights && typeof weights === 'object') {
+      updateData.weights = weights;
+    }
+    if (minScoreThreshold !== undefined) {
+      updateData.minScoreThreshold = Number(minScoreThreshold);
+    }
+    if (maxActivePayouts !== undefined) {
+      updateData.maxActivePayouts = Number(maxActivePayouts);
+    }
+    if (enableRandomness !== undefined) {
+      updateData.enableRandomness = Boolean(enableRandomness);
+    }
+
+    await db.collection('system').doc('payoutEngineConfig').set(updateData, { merge: true });
+    console.log('✅ Payout engine config updated');
+
+    return res.status(200).json({ success: true, message: 'Payout engine config updated' });
+  } catch (error) {
+    console.error('❌ Error updating payout engine config:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * UPDATE DISPUTE ENGINE CONFIG
+ * POST /updateDisputeEngineConfig { slaHours, autoEscalateAfterHours, maxDisputeAmount }
+ */
+exports.updateDisputeEngineConfig = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).send('');
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { slaHours, autoEscalateAfterHours, maxDisputeAmount } = req.body;
+    const updateData = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+    if (slaHours !== undefined) {
+      updateData.slaHours = Number(slaHours);
+    }
+    if (autoEscalateAfterHours !== undefined) {
+      updateData.autoEscalateAfterHours = Number(autoEscalateAfterHours);
+    }
+    if (maxDisputeAmount !== undefined) {
+      updateData.maxDisputeAmount = Number(maxDisputeAmount);
+    }
+
+    await db.collection('system').doc('disputeEngineConfig').set(updateData, { merge: true });
+    console.log('✅ Dispute engine config updated');
+
+    return res.status(200).json({ success: true, message: 'Dispute engine config updated' });
+  } catch (error) {
+    console.error('❌ Error updating dispute engine config:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

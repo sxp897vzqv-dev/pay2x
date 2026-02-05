@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" rx="24" fill="#6366F1"/>
+  <text x="60" y="52" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="30" fill="white">PAY</text>
+  <text x="60" y="88" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="34" fill="#C7D2FE">2X</text>
+  <rect x="18" y="57" width="84" height="2.5" rx="1.25" fill="#A5B4FC" opacity="0.6"/>
+</svg>

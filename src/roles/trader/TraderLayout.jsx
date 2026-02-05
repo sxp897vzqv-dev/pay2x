@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
-import { query, collection, where, getDocs } from 'firebase/firestore';
+import { query, collection, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Building2,
@@ -65,21 +65,39 @@ export default function TraderLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => { fetchTraderInfo(); }, []);
+  useEffect(() => { 
+    const unsubscribe = setupTraderListener();
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
-  const fetchTraderInfo = async () => {
-    try {
-      const user = getAuth().currentUser;
-      if (!user) return;
-      const snap = await getDocs(query(collection(db, 'trader'), where('uid', '==', user.uid)));
+  // 🔒 Real-time listener - auto logout if account becomes inactive
+  const setupTraderListener = () => {
+    const user = getAuth().currentUser;
+    if (!user) return null;
+    
+    const q = query(collection(db, 'trader'), where('uid', '==', user.uid));
+    
+    return onSnapshot(q, (snap) => {
       if (!snap.empty) {
         const d = snap.docs[0].data();
+        
+        // 🔒 CHECK IF ACCOUNT IS STILL ACTIVE
+        const isActive = d.isActive === true || d.status === 'active';
+        if (!isActive) {
+          // Account deactivated - force logout
+          alert('Your account has been deactivated. Please contact admin.');
+          handleLogout();
+          return;
+        }
+        
         setTraderInfo(d);
         /* ✅ BUG FIX: no `workingBalance` field in Firestore — derive it */
         setWorkingBalance((Number(d.balance) || 0) - (Number(d.securityHold) || 0));
       }
-    } catch (e) { console.error(e); }
+    }, (error) => {
+      console.error('Trader listener error:', error);
+    });
   };
 
   const handleLogout = async () => {

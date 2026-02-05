@@ -641,7 +641,7 @@ export default function TraderDispute() {
       )}
 
       {/* Status pills */}
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex flex-wrap gap-2">
         {[
           { label: 'All', value: stats.total, color: 'bg-slate-100 text-slate-700', key: 'all' },
           { label: 'Pending', value: stats.pending, color: 'bg-amber-100 text-amber-700', key: 'pending' },
@@ -649,8 +649,8 @@ export default function TraderDispute() {
           { label: 'Rejected', value: stats.rejected, color: 'bg-red-100 text-red-700', key: 'rejected' },
         ].map(pill => (
           <button key={pill.key} onClick={() => setStatusFilter(pill.key)}
-            className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === pill.key ? `${pill.color} ring-2 ring-offset-1 ring-current` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              statusFilter === pill.key ? `${pill.color} ring-2 ring-current` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}>
             {pill.label}
             <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${statusFilter === pill.key ? 'bg-white/60' : 'bg-slate-200 text-slate-600'}`}>{pill.value}</span>
