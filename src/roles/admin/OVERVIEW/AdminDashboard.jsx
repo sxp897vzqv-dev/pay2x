@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
-import { useRealtimeMulti } from '../../../hooks/useRealtimeSubscription';
+import { useRealtimeRefresh } from '../../../hooks/useRealtimeSubscription';
 import { Link } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, DollarSign, Users, Store, Activity, RefreshCw,
@@ -53,14 +53,6 @@ export default function AdminDashboard() {
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    fetchStats();
-    fetchAlerts();
-  }, []);
-
-  // Realtime: refresh dashboard on any transaction changes
-  useRealtimeMulti(['payins', 'payouts', 'disputes'], () => fetchStats());
 
   const fetchAlerts = async () => {
     try {
@@ -150,6 +142,17 @@ export default function AdminDashboard() {
     setLoading(false);
     setRefreshing(false);
   };
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchStats();
+    fetchAlerts();
+  }, []);
+
+  // Realtime subscriptions - refresh dashboard on changes
+  useRealtimeRefresh('payins', () => fetchStats(), { debounceMs: 2000 });
+  useRealtimeRefresh('payouts', () => fetchStats(), { debounceMs: 2000 });
+  useRealtimeRefresh('disputes', () => fetchStats(), { debounceMs: 2000 });
 
   return (
     <div className="space-y-4 sm:space-y-5">

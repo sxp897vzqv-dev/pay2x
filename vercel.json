@@ -1,0 +1,50 @@
+{
+  "rewrites": [
+    {
+      "source": "/v1/payin/create",
+      "has": [{ "type": "host", "value": "api.pay2x.io" }],
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/create-payin"
+    },
+    {
+      "source": "/v1/payin/update",
+      "has": [{ "type": "host", "value": "api.pay2x.io" }],
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/update-payin"
+    },
+    {
+      "source": "/v1/payin/status",
+      "has": [{ "type": "host", "value": "api.pay2x.io" }],
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/get-payin-status"
+    },
+    {
+      "source": "/v1/health",
+      "has": [{ "type": "host", "value": "api.pay2x.io" }],
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/api-health"
+    },
+    {
+      "source": "/api/v1/payin/create",
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/create-payin"
+    },
+    {
+      "source": "/api/v1/payin/update",
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/update-payin"
+    },
+    {
+      "source": "/api/v1/payin/status",
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/get-payin-status"
+    },
+    {
+      "source": "/api/v1/health",
+      "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/api-health"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(v1|api)/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PATCH, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Idempotency-Key" }
+      ]
+    }
+  ]
+}

@@ -78,7 +78,46 @@ export default function MerchantPayout() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    await supabase.from('payouts').insert({
+    const amount = Number(formData.amount);
+    
+    // Get merchant info with rates
+    const { data: merchant } = await supabase
+      .from('merchants')
+      .select('available_balance, payout_rate')
+      .eq('id', user.id)
+      .single();
+    
+    if (!merchant) {
+      alert('Error: Could not fetch merchant data');
+      return;
+    }
+    
+    const payoutRate = merchant.payout_rate || 2; // Default 2%
+    const payoutFee = Math.round((amount * payoutRate) / 100);
+    const totalRequired = amount + payoutFee;
+    
+    // Check balance
+    if ((merchant.available_balance || 0) < totalRequired) {
+      alert(`Insufficient balance!\n\nRequired: ₹${totalRequired.toLocaleString()} (₹${amount.toLocaleString()} + ₹${payoutFee.toLocaleString()} fee)\nAvailable: ₹${(merchant.available_balance || 0).toLocaleString()}`);
+      return;
+    }
+    
+    // Reserve amount (deduct from available)
+    const { error: reserveError } = await supabase
+      .from('merchants')
+      .update({ 
+        available_balance: (merchant.available_balance || 0) - totalRequired,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', user.id);
+    
+    if (reserveError) {
+      alert('Error reserving balance: ' + reserveError.message);
+      return;
+    }
+    
+    // Create payout
+    const { error: payoutError } = await supabase.from('payouts').insert({
       merchant_id: user.id,
       payout_id: 'PO' + Date.now(),
       beneficiary_name: formData.beneficiaryName,
@@ -86,11 +125,24 @@ export default function MerchantPayout() {
       upi_id: formData.paymentMode === 'upi' ? formData.upiId : null,
       account_number: formData.paymentMode === 'bank' ? formData.accountNumber : null,
       ifsc_code: formData.paymentMode === 'bank' ? formData.ifscCode : null,
-      amount: Number(formData.amount),
+      amount: amount,
+      merchant_fee: payoutFee,
       purpose: formData.purpose,
-      status: 'queued',
+      status: 'pending',
     });
-
+    
+    if (payoutError) {
+      // Rollback balance reservation
+      await supabase
+        .from('merchants')
+        .update({ available_balance: merchant.available_balance })
+        .eq('id', user.id);
+      alert('Error creating payout: ' + payoutError.message);
+      return;
+    }
+    
+    // Refresh balance
+    setAvailableBalance((merchant.available_balance || 0) - totalRequired);
     setShowModal(false);
   };
 

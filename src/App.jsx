@@ -46,6 +46,16 @@ const AdminPayinEngine = React.lazy(() => import('./roles/admin/AdminPayinEngine
 const AdminPayoutEngine = React.lazy(() => import('./roles/admin/AdminPayoutEngine'));
 const AdminDisputeEngine = React.lazy(() => import('./roles/admin/AdminDisputeEngine'));
 const AdminWorkers = React.lazy(() => import('./roles/admin/AdminWorkers'));
+const AdminSecurity = React.lazy(() => import('./roles/admin/AdminSecurity'));
+// Enterprise features
+const AdminSettlements = React.lazy(() => import('./roles/admin/AdminSettlements'));
+const AdminRefunds = React.lazy(() => import('./roles/admin/AdminRefunds'));
+const AdminKYC = React.lazy(() => import('./roles/admin/AdminKYC'));
+const AdminAlerts = React.lazy(() => import('./roles/admin/AdminAlerts'));
+const AdminReports = React.lazy(() => import('./roles/admin/AdminReports'));
+const AdminSecurityStatus = React.lazy(() => import('./roles/admin/AdminSecurityStatus'));
+const AdminApiMonitoring = React.lazy(() => import('./roles/admin/AdminApiMonitoring'));
+const AdminPlatformEarnings = React.lazy(() => import('./roles/admin/AdminPlatformEarnings'));
 
 // Merchant pages
 const MerchantDashboard = React.lazy(() => import('./roles/merchant/MerchantDashboard'));
@@ -56,6 +66,12 @@ const MerchantAPI = React.lazy(() => import('./roles/merchant/MerchantAPI'));
 const MerchantAnalytics = React.lazy(() => import('./roles/merchant/MerchantAnalytics'));
 const MerchantDispute = React.lazy(() => import('./roles/merchant/MerchantDispute'));
 const MerchantSettings = React.lazy(() => import('./roles/merchant/MerchantSettings'));
+// Enterprise merchant pages
+const MerchantSecurity = React.lazy(() => import('./roles/merchant/MerchantSecurity'));
+const MerchantTeam = React.lazy(() => import('./roles/merchant/MerchantTeam'));
+const MerchantWebhooks = React.lazy(() => import('./roles/merchant/MerchantWebhooks'));
+const MerchantReports = React.lazy(() => import('./roles/merchant/MerchantReports'));
+const MerchantRefunds = React.lazy(() => import('./roles/merchant/MerchantRefunds'));
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRole, userRole }) {
@@ -273,10 +289,21 @@ function App() {
           <Route path="payout-engine" element={<AdminPayoutEngine />} />
           <Route path="dispute-engine" element={<AdminDisputeEngine />} />
           <Route path="workers" element={<AdminWorkers />} />
+          <Route path="security" element={<AdminSecurity />} />
+          
+          {/* Enterprise Features */}
+          <Route path="settlements" element={<AdminSettlements />} />
+          <Route path="refunds" element={<AdminRefunds />} />
+          <Route path="kyc" element={<AdminKYC />} />
+          <Route path="alerts" element={<AdminAlerts />} />
+          <Route path="reports" element={<AdminReports />} />
+          <Route path="security-status" element={<AdminSecurityStatus />} />
+          <Route path="api-monitoring" element={<AdminApiMonitoring />} />
+          <Route path="platform-earnings" element={<AdminPlatformEarnings />} />
         </Route>
 
         {/* ═══════════════════════════════════════════════════════════════
-            NEW MERCHANT ROUTES - 8 Pages (UPDATED)
+            MERCHANT ROUTES - 13 Enterprise Pages
             ═══════════════════════════════════════════════════════════════ */}
         <Route
           path="/merchant/*"
@@ -289,14 +316,27 @@ function App() {
           {/* Default redirect */}
           <Route index element={<Navigate to="/merchant/dashboard" replace />} />
           
-          {/* 8 Core Pages */}
+          {/* Core Pages */}
           <Route path="dashboard" element={<MerchantDashboard />} />
           <Route path="payins" element={<MerchantPayin />} />
           <Route path="payouts" element={<MerchantPayout />} />
+          <Route path="refunds" element={<MerchantRefunds />} />
           <Route path="balance" element={<MerchantBalance />} />
+          
+          {/* API & Integration */}
           <Route path="api" element={<MerchantAPI />} />
+          <Route path="webhooks" element={<MerchantWebhooks />} />
+          
+          {/* Analytics & Reports */}
           <Route path="analytics" element={<MerchantAnalytics />} />
+          <Route path="reports" element={<MerchantReports />} />
+          
+          {/* Support */}
           <Route path="disputes" element={<MerchantDispute />} />
+          
+          {/* Settings & Security */}
+          <Route path="team" element={<MerchantTeam />} />
+          <Route path="security" element={<MerchantSecurity />} />
           <Route path="settings" element={<MerchantSettings />} />
         </Route>
 

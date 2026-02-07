@@ -71,7 +71,15 @@ export default function AdminPayins() {
   }, [fetchPayins]);
 
   // Realtime: auto-refresh on any payins change
-  useRealtimeSubscription('payins', () => fetchPayins());
+  useRealtimeSubscription('payins', {
+    onInsert: (newPayin) => {
+      setPayins(prev => [newPayin, ...prev]);
+      setToast({ type: 'info', message: `New payin: ₹${newPayin.amount}` });
+    },
+    onUpdate: (updated) => {
+      setPayins(prev => prev.map(p => p.id === updated.id ? updated : p));
+    },
+  });
 
   // Load more (offset-based pagination)
   const loadMorePayins = async () => {

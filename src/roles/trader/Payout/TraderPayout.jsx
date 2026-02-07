@@ -98,12 +98,15 @@ export default function TraderPayout() {
   }, [traderId]);
 
   // Realtime: refresh when payouts change
-  useRealtimeSubscription('payouts', async () => {
-    if (!traderId) return;
-    const { data: assigned } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'assigned').limit(100);
-    setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
-    const { data: completed } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(200);
-    setCompletedPayouts((completed || []).map(mapPayout));
+  useRealtimeSubscription('payouts', {
+    onChange: async () => {
+      if (!traderId) return;
+      const { data: assigned } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'assigned').limit(100);
+      setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
+      const { data: completed } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(200);
+      setCompletedPayouts((completed || []).map(mapPayout));
+    },
+    filter: traderId ? `trader_id=eq.${traderId}` : undefined,
   });
 
   /* ── handlers ── */
@@ -158,22 +161,69 @@ export default function TraderPayout() {
       setUploadProgress(100);
 
       const amount = Number(selectedPayout.amount);
-      const commission = Math.round((amount * payoutCommission) / 100);
+      const traderComm = Math.round((amount * payoutCommission) / 100);
       const ts = new Date().toISOString();
+
+      // Get merchant info for rates and webhook
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('id, payout_rate, webhook_url, webhook_secret')
+        .eq('id', selectedPayout.merchantId || selectedPayout.merchant_id)
+        .single();
+      
+      const merchantRate = merchant?.payout_rate || 2; // Default 2%
 
       // Update payout
       await supabase.from('payouts').update({
         status: 'completed', completed_at: ts, trader_id: traderId,
-        utr: utrId, proof_url: proofUrl, commission,
+        utr: utrId, proof_url: proofUrl, commission: traderComm,
       }).eq('id', selectedPayout.id);
 
-      // Update trader balance
+      // Update trader balance (credit amount + commission)
       const { data: td } = await supabase.from('traders').select('balance, overall_commission').eq('id', traderId).single();
       if (td) {
         await supabase.from('traders').update({
-          balance: (Number(td.balance) || 0) + amount + commission,
-          overall_commission: (Number(td.overall_commission) || 0) + commission,
+          balance: (Number(td.balance) || 0) + amount + traderComm,
+          overall_commission: (Number(td.overall_commission) || 0) + traderComm,
         }).eq('id', traderId);
+      }
+
+      // Record platform profit for payout
+      const merchantFee = Math.round((amount * merchantRate) / 100);
+      const platformProfit = merchantFee - traderComm;
+      
+      await supabase.from('platform_earnings').insert({
+        type: 'payout',
+        reference_id: selectedPayout.id,
+        merchant_id: selectedPayout.merchantId || selectedPayout.merchant_id,
+        trader_id: traderId,
+        transaction_amount: amount,
+        merchant_fee: merchantFee,
+        trader_fee: traderComm,
+        platform_profit: platformProfit,
+      });
+      
+      console.log('💰 Payout complete:', { amount, traderComm, merchantFee, platformProfit });
+
+      // Queue webhook for merchant
+      if (merchant?.webhook_url) {
+        await supabase.from('payout_webhook_queue').insert({
+          payout_id: selectedPayout.id,
+          merchant_id: merchant.id,
+          webhook_url: merchant.webhook_url,
+          webhook_secret: merchant.webhook_secret,
+          event_type: 'payout.completed',
+          payload: {
+            event: 'payout.completed',
+            payout_id: selectedPayout.id,
+            payout_ref: selectedPayout.payout_id || selectedPayout.payoutId,
+            amount: amount,
+            beneficiary_name: selectedPayout.beneficiary_name || selectedPayout.beneficiaryName,
+            utr: utrId,
+            status: 'completed',
+            completed_at: ts,
+          },
+        });
       }
 
       // Check if all payouts for this request are completed
@@ -191,8 +241,7 @@ export default function TraderPayout() {
         }
       }
 
-      const comm = Math.round((selectedPayout.amount * payoutCommission) / 100);
-      setToast({ msg: `✅ Completed! ₹${(selectedPayout.amount + comm).toLocaleString()} credited`, success: true });
+      setToast({ msg: `✅ Completed! ₹${(amount + traderComm).toLocaleString()} credited`, success: true });
       setSelectedPayout(null);
 
       // Refresh balance

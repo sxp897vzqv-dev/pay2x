@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase';
+import TestModeBanner from './components/TestModeBanner';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
-  AlertCircle, Settings, LogOut, Menu, X, Shield,
+  AlertCircle, Settings, LogOut, Menu, X, Shield, Users,
+  Webhook, FileText, ShieldCheck, RotateCcw,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -46,14 +48,18 @@ import {
 
 /* ─── Nav config ─── */
 const sidebarLinks = [
-  { to: '/merchant/dashboard',  icon: LayoutDashboard, label: 'Dashboard',      shortLabel: 'Home' },
-  { to: '/merchant/payins',     icon: TrendingUp,      label: 'Payins',         shortLabel: 'Payins' },
-  { to: '/merchant/payouts',    icon: TrendingDown,    label: 'Payouts',        shortLabel: 'Payouts' },
-  { to: '/merchant/balance',    icon: Wallet,          label: 'Balance',        shortLabel: 'Balance' },
-  { to: '/merchant/api',        icon: Code,            label: 'API & Webhooks', shortLabel: 'API' },
-  { to: '/merchant/analytics',  icon: BarChart3,       label: 'Analytics',      shortLabel: 'Analytics' },
-  { to: '/merchant/disputes',   icon: AlertCircle,     label: 'Disputes',       shortLabel: 'Disputes' },
-  { to: '/merchant/settings',   icon: Settings,        label: 'Settings',       shortLabel: 'Settings' },
+  { to: '/merchant/dashboard',      icon: LayoutDashboard, label: 'Dashboard',       shortLabel: 'Home' },
+  { to: '/merchant/payins',         icon: TrendingUp,      label: 'Payins',          shortLabel: 'Payins' },
+  { to: '/merchant/payouts',        icon: TrendingDown,    label: 'Payouts',         shortLabel: 'Payouts' },
+  { to: '/merchant/refunds',        icon: RotateCcw,       label: 'Refunds',         shortLabel: 'Refunds' },
+  { to: '/merchant/balance',        icon: Wallet,          label: 'Balance',         shortLabel: 'Balance' },
+  { to: '/merchant/api',            icon: Code,            label: 'API Keys',        shortLabel: 'API' },
+  { to: '/merchant/webhooks',       icon: Webhook,         label: 'Webhooks',        shortLabel: 'Webhooks' },
+  { to: '/merchant/reports',        icon: FileText,        label: 'Reports',         shortLabel: 'Reports' },
+  { to: '/merchant/disputes',       icon: AlertCircle,     label: 'Disputes',        shortLabel: 'Disputes' },
+  { to: '/merchant/team',           icon: Users,           label: 'Team',            shortLabel: 'Team' },
+  { to: '/merchant/security',       icon: ShieldCheck,     label: 'Security',        shortLabel: 'Security' },
+  { to: '/merchant/settings',       icon: Settings,        label: 'Settings',        shortLabel: 'Settings' },
 ];
 
 const bottomNavItems = [
@@ -67,6 +73,7 @@ const bottomNavItems = [
 export default function MerchantLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [merchantInfo, setMerchantInfo] = useState(null);
+  const [testMode, setTestMode] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -74,7 +81,7 @@ export default function MerchantLayout() {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+      const { data } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
       if (data) {
         const isActive = data.is_active === true || data.status === 'active';
         if (!isActive) {
@@ -83,10 +90,18 @@ export default function MerchantLayout() {
           return;
         }
         setMerchantInfo(data);
+        setTestMode(data.test_mode || false);
       }
     };
     init();
   }, []);
+
+  const toggleTestMode = async () => {
+    if (!merchantInfo) return;
+    const newMode = !testMode;
+    await supabase.from('merchants').update({ test_mode: newMode }).eq('id', merchantInfo.id);
+    setTestMode(newMode);
+  };
 
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
@@ -241,9 +256,13 @@ export default function MerchantLayout() {
 
       {/* ═══════ MAIN CONTENT ═══════ */}
       <main className="flex-1 overflow-y-auto min-h-0 pb-24 md:pb-0" style={{ marginTop: 56 }}>
+        {/* Test Mode Banner */}
+        {testMode && (
+          <TestModeBanner onSwitch={toggleTestMode} />
+        )}
         <div className="md:mt-0" style={{ marginTop: 0 }}>
           <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 md:py-6">
-            <Outlet />
+            <Outlet context={{ testMode, toggleTestMode, merchantInfo }} />
           </div>
         </div>
       </main>

@@ -133,19 +133,27 @@ export default function TraderDispute() {
   const handleResponseSubmit = async ({ action, note, proofUrl }) => {
     if (!selectedDispute) return;
     try {
-      await supabase.from('disputes').update({
-        status: action === 'accept' ? 'approved' : 'rejected',
-        trader_note: note,
-        trader_action: action,
-        proof_url: proofUrl || null,
-        responded_at: new Date().toISOString(),
-      }).eq('id', selectedDispute.id);
+      // Call Supabase Edge Function for proper workflow
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/trader-dispute-response`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          disputeId: selectedDispute.id,
+          response: action === 'accept' ? 'accepted' : 'rejected',
+          statement: note || '',
+          proofUrl: proofUrl || null,
+        }),
+      });
+      
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Failed to submit response');
       
       // Mark as seen
       notificationManager.markAsSeen(selectedDispute.id);
       
       setSelectedDispute(null);
-      setToast({ msg: `✅ Dispute ${action === 'accept' ? 'accepted' : 'rejected'}`, success: true });
+      setToast({ msg: `✅ ${data.message}`, success: true });
     } catch (e) {
       setToast({ msg: '❌ Error: ' + e.message, success: false });
     }

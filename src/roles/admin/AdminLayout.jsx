@@ -6,7 +6,8 @@ import NotificationCenter from '../../components/admin/NotificationCenter';
 import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
   AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
-  ChevronDown, ChevronRight, Settings, Bell, Cpu, Search,
+  ChevronDown, ChevronRight, Settings, Bell, Cpu, Search, Wallet, 
+  RefreshCw, BarChart3, FileCheck, Activity,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -63,6 +64,16 @@ const ROUTE_PERMISSIONS = {
   '/admin/logs': 'logs',
   '/admin/commission': 'commission',
   '/admin/workers': 'admin_only',
+  '/admin/security': 'admin_only',
+  // Enterprise features
+  '/admin/settlements': 'admin_only',
+  '/admin/refunds': 'admin_only',
+  '/admin/kyc': 'admin_only',
+  '/admin/alerts': 'admin_only',
+  '/admin/reports': 'admin_only',
+  '/admin/security-status': 'admin_only',
+  '/admin/api-monitoring': 'admin_only',
+  '/admin/platform-earnings': 'admin_only',
 };
 
 /* ─── Nav config with groups ─── */
@@ -94,16 +105,30 @@ const navGroups = [
     ],
   },
   {
-    label: 'Audit',
+    label: 'Finance',
     items: [
-      { to: '/admin/logs',       icon: FileText,   label: 'Logs',       shortLabel: 'Logs' },
-      { to: '/admin/commission', icon: DollarSign, label: 'Commission', shortLabel: 'Comm.' },
+      { to: '/admin/settlements', icon: Wallet,     label: 'Settlements', shortLabel: 'Settle' },
+      { to: '/admin/refunds',     icon: RefreshCw,  label: 'Refunds',     shortLabel: 'Refunds' },
+      { to: '/admin/commission',  icon: DollarSign, label: 'Commission',  shortLabel: 'Comm.' },
+    ],
+  },
+  {
+    label: 'Compliance',
+    items: [
+      { to: '/admin/kyc',     icon: FileCheck, label: 'KYC',     shortLabel: 'KYC' },
+      { to: '/admin/logs',    icon: FileText,  label: 'Logs',    shortLabel: 'Logs' },
+      { to: '/admin/reports', icon: BarChart3, label: 'Reports', shortLabel: 'Reports' },
     ],
   },
   {
     label: 'Settings',
     items: [
-      { to: '/admin/workers', icon: Users, label: 'Workers', shortLabel: 'Workers' },
+      { to: '/admin/workers',         icon: Users,  label: 'Workers',         shortLabel: 'Workers' },
+      { to: '/admin/security',        icon: Shield, label: 'Security',        shortLabel: 'Security' },
+      { to: '/admin/security-status', icon: Shield, label: 'Security Status', shortLabel: 'Status' },
+      { to: '/admin/alerts',          icon: Bell,   label: 'Alerts',          shortLabel: 'Alerts' },
+      { to: '/admin/api-monitoring',  icon: Activity, label: 'API Monitoring',  shortLabel: 'API' },
+      { to: '/admin/platform-earnings', icon: DollarSign, label: 'Platform Earnings', shortLabel: 'Earnings' },
     ],
   },
 ];

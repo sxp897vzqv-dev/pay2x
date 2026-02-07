@@ -67,17 +67,36 @@ export default function MerchantDispute() {
       }
     }
 
-    await supabase.from('disputes').insert({
+    // Create dispute
+    const { data: dispute, error: insertError } = await supabase.from('disputes').insert({
       merchant_id: user.id,
       dispute_id: 'DSP' + Date.now(),
       transaction_id: formData.transactionId,
+      payin_id: formData.type === 'payin' ? formData.payinId : null,
+      payout_id: formData.type === 'payout' ? formData.payoutId : null,
+      upi_id: formData.upiId || null,
+      utr: formData.utr || null,
       amount: Number(formData.amount),
       reason: formData.reason,
       type: formData.type,
       evidence_url: evidenceUrl,
-      status: 'open',
+      status: 'pending',
       deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    });
+    }).select().single();
+
+    if (!insertError && dispute) {
+      // Auto-route dispute to trader
+      try {
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
+        await fetch(`${SUPABASE_URL}/functions/v1/route-dispute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ disputeId: dispute.id }),
+        });
+      } catch (routeErr) {
+        console.error('Auto-route failed:', routeErr);
+      }
+    }
 
     setShowModal(false);
   };

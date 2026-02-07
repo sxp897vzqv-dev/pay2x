@@ -59,6 +59,7 @@ export async function createTrader(formData) {
 
   const { error } = await supabaseAdmin.from('traders').insert({
     id: uid,
+    profile_id: uid,  // Link to profile
     name: formData.name,
     email: formData.email,
     phone: formData.phone || '',
@@ -93,6 +94,7 @@ export async function createMerchant(formData) {
 
   const { error } = await supabaseAdmin.from('merchants').insert({
     id: uid,
+    profile_id: uid,  // Link to profile
     name: formData.name,
     email: formData.email,
     phone: formData.phone || '',

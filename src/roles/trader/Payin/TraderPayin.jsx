@@ -264,18 +264,20 @@ export default function TraderPayin() {
   }, []);
 
   // Realtime: refresh when payins change for this trader
-  useRealtimeSubscription('payins', async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', user.id).order('requested_at', { ascending: false }).limit(200);
-    setPayins((rows || []).map(r => ({
-      ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
-      userId: r.merchant_id, transactionId: r.transaction_id,
-      screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
-      requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
-      completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
-      rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
-    })));
+  useRealtimeSubscription('payins', {
+    onChange: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', user.id).order('requested_at', { ascending: false }).limit(200);
+      setPayins((rows || []).map(r => ({
+        ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
+        userId: r.merchant_id, transactionId: r.transaction_id,
+        screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
+        requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+        completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
+        rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
+      })));
+    },
   });
 
   /* Auto-reject expired */
@@ -314,23 +316,86 @@ export default function TraderPayin() {
   const onAccept = useCallback(async (payin) => {
     setProcessing(true);
     try {
-      const comm = Math.round((Number(payin.amount) * commissionRate) / 100);
+      const amount = Number(payin.amount);
+      const traderComm = Math.round((amount * commissionRate) / 100);
       const ts = new Date().toISOString();
-      // Update payin status
-      await supabase.from('payins').update({ status: 'completed', completed_at: ts, commission: comm }).eq('id', payin.id);
-      // Update trader balance
+      
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: td } = await supabase.from('traders').select('balance, overall_commission').eq('id', user.id).single();
-        if (td) {
-          await supabase.from('traders').update({
-            balance: (Number(td.balance) || 0) - Number(payin.amount) + comm,
-            overall_commission: (Number(td.overall_commission) || 0) + comm,
-          }).eq('id', user.id);
-        }
+      if (!user) throw new Error('Not authenticated');
+
+      // Get merchant info for commission calculation
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('id, payin_rate, webhook_url, webhook_secret')
+        .eq('id', payin.merchant_id)
+        .single();
+      
+      const merchantRate = merchant?.payin_rate || 6; // Default 6%
+      
+      // Update payin status
+      await supabase.from('payins').update({ 
+        status: 'completed', 
+        completed_at: ts, 
+        commission: traderComm 
+      }).eq('id', payin.id);
+      
+      // Update trader balance (deduct amount, add commission)
+      const { data: td } = await supabase
+        .from('traders')
+        .select('balance, overall_commission')
+        .eq('id', user.id)
+        .single();
+      
+      if (td) {
+        await supabase.from('traders').update({
+          balance: (Number(td.balance) || 0) - amount + traderComm,
+          overall_commission: (Number(td.overall_commission) || 0) + traderComm,
+        }).eq('id', user.id);
       }
-      setPayins(prev => prev.map(x => x.id === payin.id ? { ...x, status: 'completed', commission: comm } : x));
-    } catch(e) { console.error(e); }
+      
+      // Credit merchant balance & record platform profit
+      const { data: profitResult } = await supabase.rpc('credit_merchant_on_payin', {
+        p_payin_id: payin.id,
+        p_merchant_id: payin.merchant_id,
+        p_trader_id: user.id,
+        p_amount: amount,
+        p_merchant_rate: merchantRate,
+        p_trader_rate: commissionRate
+      });
+      
+      console.log('💰 Payin complete:', { 
+        amount, 
+        traderComm, 
+        merchantCredit: profitResult?.merchant_credit,
+        platformProfit: profitResult?.platform_profit 
+      });
+      
+      // Queue webhook for merchant
+      if (merchant?.webhook_url) {
+        await supabase.from('payin_webhook_queue').insert({
+          payin_id: payin.id,
+          merchant_id: payin.merchant_id,
+          webhook_url: merchant.webhook_url,
+          webhook_secret: merchant.webhook_secret,
+          event_type: 'payment.completed',
+          payload: {
+            event: 'payment.completed',
+            payment_id: payin.id,
+            txn_id: payin.txn_id || payin.transactionId,
+            order_id: payin.order_id,
+            amount: amount,
+            status: 'completed',
+            utr: payin.utrId || payin.utr,
+            completed_at: ts,
+          },
+        });
+      }
+      
+      setPayins(prev => prev.map(x => x.id === payin.id ? { ...x, status: 'completed', commission: traderComm } : x));
+    } catch(e) { 
+      console.error('❌ Accept error:', e); 
+      alert('Error: ' + e.message);
+    }
     setProcessing(false);
   }, [commissionRate]);
 

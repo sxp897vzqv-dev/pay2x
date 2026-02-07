@@ -1,9 +1,33 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import {
   Key, Copy, CheckCircle, RefreshCw, AlertCircle, Code, Book, Download,
   Globe, Shield, Eye, EyeOff, Terminal, FileText, Zap, X, ExternalLink,
 } from 'lucide-react';
+
+/* ─── Test Mode Toggle ─── */
+function TestModeToggle() {
+  const context = useOutletContext();
+  const testMode = context?.testMode || false;
+  const toggleTestMode = context?.toggleTestMode;
+
+  return (
+    <button
+      onClick={toggleTestMode}
+      className={`relative w-14 h-7 rounded-full transition-colors duration-200 ${
+        testMode ? 'bg-amber-500' : 'bg-slate-300'
+      }`}
+    >
+      <div
+        className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+          testMode ? 'left-8' : 'left-1'
+        }`}
+      />
+      <span className="sr-only">{testMode ? 'Disable' : 'Enable'} test mode</span>
+    </button>
+  );
+}
 
 /* ─── API Key Card ─── */
 function APIKeyCard({ apiKey, mode, onCopy, onRegenerate, regenerating }) {
@@ -130,7 +154,7 @@ export default function MerchantAPI() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       try {
-        const { data } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+        const { data } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
         if (data) {
           setApiKeys({ live: data.live_api_key || data.api_key || '', test: data.test_api_key || '' });
           setWebhookUrl(data.webhook_url || '');
@@ -264,6 +288,22 @@ export default function MerchantAPI() {
       {/* API Keys Tab */}
       {activeTab === 'keys' && (
         <div className="space-y-4">
+          {/* Test Mode Toggle */}
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-100 rounded-lg">
+                  <Shield className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900">Test Mode</h3>
+                  <p className="text-sm text-slate-600">Use test API key for sandbox transactions</p>
+                </div>
+              </div>
+              <TestModeToggle />
+            </div>
+          </div>
+
           <APIKeyCard apiKey={apiKeys.live} mode="live" onCopy={handleCopyKey} onRegenerate={handleRegenerateKey} regenerating={regenerating} />
           <APIKeyCard apiKey={apiKeys.test} mode="test" onCopy={handleCopyKey} onRegenerate={handleRegenerateKey} regenerating={regenerating} />
 

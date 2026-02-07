@@ -74,7 +74,15 @@ export default function AdminPayouts() {
   }, [fetchPayouts]);
 
   // Realtime: auto-refresh on any payouts change
-  useRealtimeSubscription('payouts', () => fetchPayouts());
+  useRealtimeSubscription('payouts', {
+    onInsert: (newPayout) => {
+      setPayouts(prev => [newPayout, ...prev]);
+      setToast({ type: 'info', message: `New payout: ₹${newPayout.amount}` });
+    },
+    onUpdate: (updated) => {
+      setPayouts(prev => prev.map(p => p.id === updated.id ? updated : p));
+    },
+  });
 
   // Fetch waiting requests
   const fetchWaitingRequests = useCallback(async () => {

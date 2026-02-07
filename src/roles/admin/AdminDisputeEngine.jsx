@@ -7,7 +7,9 @@ import {
 } from 'lucide-react';
 import { Toast } from '../../components/admin';
 
-const API_BASE = 'https://us-central1-pay2x-4748c.cloudfunctions.net';
+// Supabase Edge Functions URL
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
+const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 export default function AdminDisputeEngine() {
   const [loading, setLoading] = useState(true);
@@ -56,13 +58,16 @@ export default function AdminDisputeEngine() {
 
   useEffect(() => { fetchDisputes(); }, []);
 
-  // Fetch engine logs
+  // Fetch engine logs from Supabase
   const fetchLogs = async () => {
     try {
-      const response = await fetch(`${API_BASE}/getDisputeEngineStats`);
-      const data = await response.json();
-      if (data.success) {
-        setLogs(data.logs || []);
+      const { data, error } = await supabase
+        .from('dispute_routing_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (!error) {
+        setLogs(data || []);
       }
     } catch (err) {
       console.error('Fetch logs error:', err);
@@ -107,27 +112,30 @@ export default function AdminDisputeEngine() {
     return groups;
   }, [disputes]);
 
-  // Admin resolve
+  // Admin resolve via Supabase Edge Function
   const handleResolve = async (disputeId, decision) => {
     if (!window.confirm(`${decision === 'approve' ? 'APPROVE' : 'REJECT'} this dispute? This will adjust balances.`)) return;
 
     setResolving(disputeId);
     try {
-      const response = await fetch(`${API_BASE}/adminResolveDispute`, {
+      const response = await fetch(`${FUNCTIONS_URL}/admin-resolve-dispute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+        },
         body: JSON.stringify({
           disputeId,
-          decision,
-          adminNote: adminNote || '',
-          adminId: 'admin',
+          decision: decision === 'approve' ? 'approved' : 'rejected',
+          note: adminNote || '',
         }),
       });
       const data = await response.json();
       if (data.success) {
-        setToast({ msg: `Dispute ${decision}d! ${data.resolution}`, success: true });
+        setToast({ msg: `Dispute ${decision}d! ${data.message}`, success: true });
         setAdminNote('');
         setExpandedDispute(null);
+        fetchDisputes();
         fetchLogs();
       } else {
         setToast({ msg: data.error || 'Failed', success: false });
@@ -140,9 +148,17 @@ export default function AdminDisputeEngine() {
 
   const initEngine = async () => {
     try {
-      const response = await fetch(`${API_BASE}/initDisputeEngine`);
-      const data = await response.json();
-      if (data.success) alert('✅ Dispute Engine config initialized!');
+      // Initialize dispute config in Supabase
+      await supabase.from('system_config').upsert({
+        key: 'dispute_engine_config',
+        value: {
+          slaHours: 24,
+          autoEscalateHours: 12,
+          maxDisputeAmount: 50000,
+        },
+        description: 'Dispute Engine configuration',
+      }, { onConflict: 'key' });
+      alert('✅ Dispute Engine config initialized!');
     } catch (err) {
       alert('❌ Error: ' + err.message);
     }
