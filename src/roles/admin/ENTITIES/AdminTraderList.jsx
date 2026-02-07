@@ -152,7 +152,6 @@ export default function AdminTraderList() {
         await supabase.from('traders').update({
           name: updateData.name,
           phone: updateData.phone || '',
-          priority: updateData.priority || 'Normal',
           payin_commission: Number(updateData.payinCommission) || 4,
           payout_commission: Number(updateData.payoutCommission) || 1,
           balance: Number(updateData.balance) || 0,
@@ -181,10 +180,24 @@ export default function AdminTraderList() {
 
         const uid = result.uid;
 
+        // Link to affiliate if selected
+        if (formData.affiliateId) {
+          await supabase.from('affiliate_traders').insert({
+            affiliate_id: formData.affiliateId,
+            trader_id: uid,
+            commission_rate: Number(formData.affiliateCommission) || 5
+          });
+          
+          // Also update trader's affiliate_id for quick reference
+          await supabase.from('traders').update({
+            affiliate_id: formData.affiliateId
+          }).eq('id', uid);
+        }
+
         // Generate USDT address
         try {
           await generateTatumAddress(uid);
-          setToast({ msg: '✅ Trader created with USDT address!', success: true });
+          setToast({ msg: '✅ Trader created' + (formData.affiliateId ? ' with affiliate link' : '') + ' and USDT address!', success: true });
         } catch (error) {
           console.error('USDT address generation failed:', error);
           setToast({ msg: '✅ Trader created! USDT address failed - generate from menu.', success: true });

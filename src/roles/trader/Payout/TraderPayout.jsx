@@ -205,6 +205,19 @@ export default function TraderPayout() {
       
       console.log('💰 Payout complete:', { amount, traderComm, merchantFee, platformProfit });
 
+      // Credit affiliate if trader has one
+      const { data: affiliateResult } = await supabase.rpc('credit_affiliate_on_trader_transaction', {
+        p_trader_id: traderId,
+        p_transaction_type: 'payout',
+        p_transaction_id: selectedPayout.id,
+        p_transaction_amount: amount,
+        p_trader_earning: traderComm
+      });
+      
+      if (affiliateResult?.credited) {
+        console.log('👥 Affiliate credited:', affiliateResult);
+      }
+
       // Queue webhook for merchant
       if (merchant?.webhook_url) {
         await supabase.from('payout_webhook_queue').insert({

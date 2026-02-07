@@ -74,6 +74,7 @@ const ROUTE_PERMISSIONS = {
   '/admin/security-status': 'admin_only',
   '/admin/api-monitoring': 'admin_only',
   '/admin/platform-earnings': 'admin_only',
+  '/admin/affiliates': 'admin_only',
 };
 
 /* ─── Nav config with groups ─── */
@@ -129,6 +130,7 @@ const navGroups = [
       { to: '/admin/alerts',          icon: Bell,   label: 'Alerts',          shortLabel: 'Alerts' },
       { to: '/admin/api-monitoring',  icon: Activity, label: 'API Monitoring',  shortLabel: 'API' },
       { to: '/admin/platform-earnings', icon: DollarSign, label: 'Platform Earnings', shortLabel: 'Earnings' },
+      { to: '/admin/affiliates', icon: Users, label: 'Affiliates', shortLabel: 'Affiliates' },
     ],
   },
 ];

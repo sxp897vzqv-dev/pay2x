@@ -56,6 +56,15 @@ const AdminReports = React.lazy(() => import('./roles/admin/AdminReports'));
 const AdminSecurityStatus = React.lazy(() => import('./roles/admin/AdminSecurityStatus'));
 const AdminApiMonitoring = React.lazy(() => import('./roles/admin/AdminApiMonitoring'));
 const AdminPlatformEarnings = React.lazy(() => import('./roles/admin/AdminPlatformEarnings'));
+const AdminAffiliates = React.lazy(() => import('./roles/admin/AdminAffiliates'));
+
+// Affiliate pages
+const AffiliateLayout = React.lazy(() => import('./roles/affiliate/AffiliateLayout'));
+const AffiliateDashboard = React.lazy(() => import('./roles/affiliate/AffiliateDashboard'));
+const AffiliateTraders = React.lazy(() => import('./roles/affiliate/AffiliateTraders'));
+const AffiliateEarnings = React.lazy(() => import('./roles/affiliate/AffiliateEarnings'));
+const AffiliateSettlements = React.lazy(() => import('./roles/affiliate/AffiliateSettlements'));
+const AffiliateSettings = React.lazy(() => import('./roles/affiliate/AffiliateSettings'));
 
 // Merchant pages
 const MerchantDashboard = React.lazy(() => import('./roles/merchant/MerchantDashboard'));
@@ -300,6 +309,26 @@ function App() {
           <Route path="security-status" element={<AdminSecurityStatus />} />
           <Route path="api-monitoring" element={<AdminApiMonitoring />} />
           <Route path="platform-earnings" element={<AdminPlatformEarnings />} />
+          <Route path="affiliates" element={<AdminAffiliates />} />
+        </Route>
+
+        {/* ═══════════════════════════════════════════════════════════════
+            AFFILIATE ROUTES
+            ═══════════════════════════════════════════════════════════════ */}
+        <Route
+          path="/affiliate/*"
+          element={
+            <ProtectedRoute userRole={userRole} allowedRole="affiliate">
+              <AffiliateLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Navigate to="/affiliate/dashboard" replace />} />
+          <Route path="dashboard" element={<AffiliateDashboard />} />
+          <Route path="traders" element={<AffiliateTraders />} />
+          <Route path="earnings" element={<AffiliateEarnings />} />
+          <Route path="settlements" element={<AffiliateSettlements />} />
+          <Route path="settings" element={<AffiliateSettings />} />
         </Route>
 
         {/* ═══════════════════════════════════════════════════════════════

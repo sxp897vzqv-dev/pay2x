@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../../../supabase';
 import {
   RefreshCw, AlertCircle, X, User, Mail, Phone, Key,
-  DollarSign, Shield, MessageCircle, Wallet, Lock, UserPlus,
+  DollarSign, Shield, MessageCircle, Wallet, Lock, UserPlus, Users,
 } from 'lucide-react';
 
 export default function TraderModal({ trader, onClose, onSave }) {
@@ -18,10 +19,36 @@ export default function TraderModal({ trader, onClose, onSave }) {
     telegramId: '',
     telegramGroupLink: '',
     active: true,
+    affiliateId: '',
+    affiliateCommission: 5,
     ...trader,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [affiliates, setAffiliates] = useState([]);
+
+  // Fetch affiliates for dropdown
+  useEffect(() => {
+    const fetchAffiliates = async () => {
+      const { data } = await supabase
+        .from('affiliates')
+        .select('id, name, email, default_commission_rate')
+        .eq('status', 'active')
+        .order('name');
+      setAffiliates(data || []);
+    };
+    fetchAffiliates();
+  }, []);
+
+  // When affiliate is selected, set default commission
+  const handleAffiliateChange = (affiliateId) => {
+    const affiliate = affiliates.find(a => a.id === affiliateId);
+    setFormData(prev => ({
+      ...prev,
+      affiliateId,
+      affiliateCommission: affiliate?.default_commission_rate || 5
+    }));
+  };
 
   const handleChange = (key, value) => {
     setFormData(prev => ({ ...prev, [key]: value }));
@@ -158,6 +185,49 @@ export default function TraderModal({ trader, onClose, onSave }) {
                   <option value="High">High</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          {/* Affiliate Settings */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+              <Users className="w-3.5 h-3.5" /> Affiliate (Optional)
+            </p>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5">Select Affiliate</label>
+                <select
+                  value={formData.affiliateId || ''}
+                  onChange={e => handleAffiliateChange(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent bg-white"
+                >
+                  <option value="">No Affiliate</option>
+                  {affiliates.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.email}) - {a.default_commission_rate}%
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Affiliate who referred this trader</p>
+              </div>
+
+              {formData.affiliateId && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5">Affiliate Commission (%)</label>
+                  <input
+                    type="number"
+                    value={formData.affiliateCommission}
+                    onChange={e => handleChange('affiliateCommission', Number(e.target.value))}
+                    placeholder="5"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">% of trader earnings to affiliate</p>
+                </div>
+              )}
             </div>
           </div>
 

@@ -369,6 +369,19 @@ export default function TraderPayin() {
         merchantCredit: profitResult?.merchant_credit,
         platformProfit: profitResult?.platform_profit 
       });
+
+      // Credit affiliate if trader has one
+      const { data: affiliateResult } = await supabase.rpc('credit_affiliate_on_trader_transaction', {
+        p_trader_id: user.id,
+        p_transaction_type: 'payin',
+        p_transaction_id: payin.id,
+        p_transaction_amount: amount,
+        p_trader_earning: traderComm
+      });
+      
+      if (affiliateResult?.credited) {
+        console.log('👥 Affiliate credited:', affiliateResult);
+      }
       
       // Queue webhook for merchant
       if (merchant?.webhook_url) {

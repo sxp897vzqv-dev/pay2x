@@ -63,7 +63,6 @@ export async function createTrader(formData) {
     name: formData.name,
     email: formData.email,
     phone: formData.phone || '',
-    priority: formData.priority || 'Normal',
     payin_commission: Number(formData.payinCommission) || 4,
     payout_commission: Number(formData.payoutCommission) || 1,
     balance: Number(formData.balance) || 0,
