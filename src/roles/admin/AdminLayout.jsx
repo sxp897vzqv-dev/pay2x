@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
   AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
   ChevronDown, ChevronRight, Settings, Bell, Cpu, Search, Wallet, 
-  RefreshCw, BarChart3, FileCheck, Activity,
+  RefreshCw, BarChart3, FileCheck, Activity, BookOpen,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -74,6 +74,7 @@ const ROUTE_PERMISSIONS = {
   '/admin/security-status': 'admin_only',
   '/admin/api-monitoring': 'admin_only',
   '/admin/platform-earnings': 'admin_only',
+  '/admin/balance-book': 'admin_only',
   '/admin/affiliates': 'admin_only',
 };
 
@@ -108,9 +109,10 @@ const navGroups = [
   {
     label: 'Finance',
     items: [
-      { to: '/admin/settlements', icon: Wallet,     label: 'Settlements', shortLabel: 'Settle' },
-      { to: '/admin/refunds',     icon: RefreshCw,  label: 'Refunds',     shortLabel: 'Refunds' },
-      { to: '/admin/commission',  icon: DollarSign, label: 'Commission',  shortLabel: 'Comm.' },
+      { to: '/admin/balance-book', icon: BookOpen,   label: 'Balance Book', shortLabel: 'Ledger' },
+      { to: '/admin/settlements',  icon: Wallet,     label: 'Settlements',  shortLabel: 'Settle' },
+      { to: '/admin/refunds',      icon: RefreshCw,  label: 'Refunds',      shortLabel: 'Refunds' },
+      { to: '/admin/commission',   icon: DollarSign, label: 'Commission',   shortLabel: 'Comm.' },
     ],
   },
   {
