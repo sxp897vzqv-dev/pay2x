@@ -110,8 +110,9 @@ export default function MerchantDashboard() {
   });
   const [alerts, setAlerts] = useState([]);
   const [recentTx, setRecentTx] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedOnce = useRef(false);
   
   // Date filters
   const [datePreset, setDatePreset] = useState('today');
@@ -141,14 +142,20 @@ export default function MerchantDashboard() {
     } catch (e) { console.error(e); }
   };
 
-  const fetchStats = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true); else setLoading(true);
+  const fetchStats = useCallback(async () => {
+    // Only show full loading on initial load, use refreshing for subsequent fetches
+    if (!hasLoadedOnce.current) {
+      setInitialLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+    
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); setRefreshing(false); return; }
+    if (!user) { setInitialLoading(false); setRefreshing(false); return; }
 
     try {
       const { data: merchant } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
-      if (!merchant) { setLoading(false); setRefreshing(false); return; }
+      if (!merchant) { setInitialLoading(false); setRefreshing(false); return; }
 
       // Get date range
       let fromDate, toDate;
@@ -199,7 +206,8 @@ export default function MerchantDashboard() {
     } catch (e) {
       console.error(e);
     }
-    setLoading(false);
+    hasLoadedOnce.current = true;
+    setInitialLoading(false);
     setRefreshing(false);
   }, [datePreset, dateFrom, dateTo]);
 
@@ -212,8 +220,8 @@ export default function MerchantDashboard() {
 
   // Real-time subscriptions - stable reference to avoid re-subscriptions
   const realtimeSubscriptions = useMemo(() => [
-    { table: 'payins', options: { onChange: () => fetchStatsRef.current(true) } },
-    { table: 'payouts', options: { onChange: () => fetchStatsRef.current(true) } },
+    { table: 'payins', options: { onChange: () => fetchStatsRef.current() } },
+    { table: 'payouts', options: { onChange: () => fetchStatsRef.current() } },
   ], []); // Empty deps - ref.current always has latest
   
   useMultipleRealtimeSubscriptions(realtimeSubscriptions);
@@ -246,7 +254,7 @@ export default function MerchantDashboard() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
@@ -270,7 +278,7 @@ export default function MerchantDashboard() {
             className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-semibold">
             <Download className="w-4 h-4" /> Export
           </button>
-          <button onClick={() => fetchStats(true)} disabled={refreshing}
+          <button onClick={() => fetchStats()} disabled={refreshing}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors text-sm font-semibold disabled:opacity-50">
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </button>
@@ -283,7 +291,7 @@ export default function MerchantDashboard() {
           className="p-2 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200">
           <Download className="w-4 h-4 text-slate-600" />
         </button>
-        <button onClick={() => fetchStats(true)} disabled={refreshing}
+        <button onClick={() => fetchStats()} disabled={refreshing}
           className="p-2 bg-purple-50 border border-purple-200 rounded-xl hover:bg-purple-100 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 text-purple-600 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
