@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { useOutletContext } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useOutletContext, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
-import { useRealtimeRefresh } from '../../hooks/useRealtimeSubscription';
+import { useMultipleRealtimeSubscriptions } from '../../hooks/useRealtimeSubscription';
 import {
   TrendingUp, TrendingDown, DollarSign, Activity, RefreshCw,
   AlertCircle, CheckCircle, Clock, AlertTriangle, Eye,
@@ -102,6 +102,7 @@ function getDateRange(preset) {
 
 export default function MerchantDashboard() {
   const { merchantInfo } = useOutletContext() || {};
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     payins: 0, payouts: 0, successRate: 0,
     availableBalance: 0, pendingSettlement: 0, reservedAmount: 0,
@@ -205,8 +206,17 @@ export default function MerchantDashboard() {
   // Initial fetch and when date changes
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
-  // Real-time refresh
-  useRealtimeRefresh(['payins', 'payouts'], () => fetchStats(true), 5000);
+  // Keep ref to latest fetchStats to avoid stale closures in subscriptions
+  const fetchStatsRef = useRef(fetchStats);
+  useEffect(() => { fetchStatsRef.current = fetchStats; }, [fetchStats]);
+
+  // Real-time subscriptions - stable reference to avoid re-subscriptions
+  const realtimeSubscriptions = useMemo(() => [
+    { table: 'payins', options: { onChange: () => fetchStatsRef.current(true) } },
+    { table: 'payouts', options: { onChange: () => fetchStatsRef.current(true) } },
+  ], []); // Empty deps - ref.current always has latest
+  
+  useMultipleRealtimeSubscriptions(realtimeSubscriptions);
 
   const handlePresetChange = (preset) => {
     setDatePreset(preset);
@@ -326,7 +336,7 @@ export default function MerchantDashboard() {
           </h3>
           <div className="grid gap-2">
             {alerts.map(alert => (
-              <AlertCard key={alert.id} alert={alert} onView={() => window.location.href = alert.link} />
+              <AlertCard key={alert.id} alert={alert} onView={() => navigate(alert.link)} />
             ))}
           </div>
         </div>
@@ -385,13 +395,13 @@ export default function MerchantDashboard() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3">
           {[
-            { href: '/merchant/payins', icon: TrendingUp, title: 'View Payins', sub: `${stats.totalTransactions} transactions`, color: '#16a34a', bg: 'from-green-50 to-emerald-50' },
-            { href: '/merchant/payouts', icon: TrendingDown, title: 'Create Payout', sub: 'Process withdrawals', color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
-            { href: '/merchant/balance', icon: Wallet, title: 'Request Settlement', sub: `₹${stats.availableBalance.toLocaleString()} available`, color: '#9333ea', bg: 'from-purple-50 to-pink-50' },
+            { to: '/merchant/payins', icon: TrendingUp, title: 'View Payins', sub: `${stats.totalTransactions} transactions`, color: '#16a34a', bg: 'from-green-50 to-emerald-50' },
+            { to: '/merchant/payouts', icon: TrendingDown, title: 'Create Payout', sub: 'Process withdrawals', color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
+            { to: '/merchant/balance', icon: Wallet, title: 'Request Settlement', sub: `₹${stats.availableBalance.toLocaleString()} available`, color: '#9333ea', bg: 'from-purple-50 to-pink-50' },
           ].map((item, i) => {
             const Icon = item.icon;
             return (
-              <a key={i} href={item.href}
+              <Link key={i} to={item.to}
                 className={`flex items-center gap-3 p-4 bg-gradient-to-br ${item.bg} hover:shadow-md active:scale-[0.98] transition-all border-b sm:border-b-0 sm:border-r border-slate-100 last:border-0`}>
                 <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center flex-shrink-0">
                   <Icon className="w-5 h-5" style={{ color: item.color }} />
@@ -401,7 +411,7 @@ export default function MerchantDashboard() {
                   <p className="text-xs text-slate-500 truncate">{item.sub}</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
-              </a>
+              </Link>
             );
           })}
         </div>
@@ -411,9 +421,9 @@ export default function MerchantDashboard() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900">Recent Transactions</h3>
-          <a href="/merchant/payins" className="text-xs text-purple-600 font-semibold hover:text-purple-700 flex items-center gap-1">
+          <Link to="/merchant/payins" className="text-xs text-purple-600 font-semibold hover:text-purple-700 flex items-center gap-1">
             View All <ArrowRight className="w-3 h-3" />
-          </a>
+          </Link>
         </div>
         <div className="px-4 py-1">
           {recentTx.length > 0 ? (
