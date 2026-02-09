@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
-  AlertCircle, RefreshCw, Search, Filter, Bell, BellOff,
+  AlertCircle, RefreshCw, Search, Filter, Bell, BellOff, Calendar, X, Download,
 } from "lucide-react";
 import Toast from '../../../components/admin/Toast';
 import DisputeNotifications from './components/DisputeNotifications';
@@ -14,11 +14,15 @@ const notificationManager = new DisputeNotifications();
 /* ─── Main Page ─── */
 export default function TraderDispute() {
   const [disputes, setDisputes] = useState([]);
+  const [traderId, setTraderId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('pending');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedDispute, setSelectedDispute] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -31,46 +35,35 @@ export default function TraderDispute() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Load disputes
-  useEffect(() => {
-    const fetchDisputes = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from('disputes')
-        .select('*')
-        .eq('trader_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(200);
-      const mapped = (data || []).map(d => ({
-        ...d,
-        traderId: d.trader_id, merchantId: d.merchant_id,
-        orderId: d.order_id || d.payin_id || d.payout_id,
-        upiId: d.upi_id, traderNote: d.trader_note,
-        traderAction: d.trader_action, proofUrl: d.proof_url,
-        createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
-        respondedAt: d.responded_at ? { seconds: new Date(d.responded_at).getTime() / 1000 } : null,
-      }));
-      setDisputes(mapped);
-      setLoading(false);
-      if (notificationsEnabled) notificationManager.checkNewDisputes(mapped);
-    };
-    fetchDisputes();
+  // Fetch disputes
+  const fetchDisputes = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); setRefreshing(false); return; }
+    setTraderId(user.id);
+
+    const { data } = await supabase
+      .from('disputes')
+      .select('*')
+      .eq('trader_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    setDisputes(data || []);
+    setLoading(false);
+    setRefreshing(false);
+    if (notificationsEnabled) notificationManager.checkNewDisputes(data || []);
   }, [notificationsEnabled]);
 
-  // Realtime: refresh on dispute changes
-  useRealtimeSubscription('disputes', async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase.from('disputes').select('*').eq('trader_id', user.id).order('created_at', { ascending: false }).limit(200);
-    setDisputes((data || []).map(d => ({
-      ...d, traderId: d.trader_id, merchantId: d.merchant_id,
-      orderId: d.order_id || d.payin_id || d.payout_id,
-      upiId: d.upi_id, traderNote: d.trader_note,
-      traderAction: d.trader_action, proofUrl: d.proof_url,
-      createdAt: d.created_at ? { seconds: new Date(d.created_at).getTime() / 1000 } : null,
-      respondedAt: d.responded_at ? { seconds: new Date(d.responded_at).getTime() / 1000 } : null,
-    })));
+  // Initial fetch
+  useEffect(() => { fetchDisputes(); }, [fetchDisputes]);
+
+  // Realtime subscription
+  useRealtimeSubscription('disputes', {
+    filter: traderId ? `trader_id=eq.${traderId}` : undefined,
+    onInsert: () => fetchDisputes(true),
+    onUpdate: () => fetchDisputes(true),
   });
 
   // Load unread message counts
@@ -106,34 +99,47 @@ export default function TraderDispute() {
     const granted = await notificationManager.requestPermission();
     if (granted) {
       setNotificationsEnabled(true);
-      setToast({ msg: '✅ Notifications enabled!', success: true });
+      setToast({ type: 'success', message: 'Notifications enabled!' });
     } else {
-      setToast({ msg: '❌ Notification permission denied', success: false });
+      setToast({ type: 'error', message: 'Notification permission denied' });
     }
   };
 
   const filtered = useMemo(() => {
     let r = disputes;
-    if (statusFilter !== 'all') r = r.filter(d => d.status === statusFilter);
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'pending') {
+        r = r.filter(d => d.status === 'pending' || d.status === 'routed_to_trader');
+      } else {
+        r = r.filter(d => d.status === statusFilter);
+      }
+    }
     if (typeFilter !== 'all') r = r.filter(d => d.type === typeFilter);
     if (debouncedSearch) {
       const s = debouncedSearch.toLowerCase();
-      r = r.filter(d => d.orderId?.toLowerCase().includes(s) || d.upiId?.toLowerCase().includes(s) || d.reason?.toLowerCase().includes(s));
+      r = r.filter(d => 
+        d.dispute_id?.toLowerCase().includes(s) ||
+        d.upi_id?.toLowerCase().includes(s) || 
+        d.utr?.toLowerCase().includes(s) ||
+        d.reason?.toLowerCase().includes(s)
+      );
     }
+    // Date filters
+    if (dateFrom) r = r.filter(d => new Date(d.created_at) >= new Date(dateFrom));
+    if (dateTo) r = r.filter(d => new Date(d.created_at) <= new Date(dateTo + 'T23:59:59'));
     return r;
-  }, [disputes, statusFilter, typeFilter, debouncedSearch]);
+  }, [disputes, statusFilter, typeFilter, debouncedSearch, dateFrom, dateTo]);
 
   const stats = useMemo(() => ({
     total: disputes.length,
-    pending: disputes.filter(d => d.status === 'pending').length,
-    approved: disputes.filter(d => d.status === 'approved').length,
-    rejected: disputes.filter(d => d.status === 'rejected').length,
+    pending: disputes.filter(d => d.status === 'pending' || d.status === 'routed_to_trader').length,
+    accepted: disputes.filter(d => d.status === 'trader_accepted').length,
+    rejected: disputes.filter(d => d.status === 'trader_rejected').length,
   }), [disputes]);
 
   const handleResponseSubmit = async ({ action, note, proofUrl }) => {
     if (!selectedDispute) return;
     try {
-      // Call Supabase Edge Function for proper workflow
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
       const response = await fetch(`${SUPABASE_URL}/functions/v1/trader-dispute-response`, {
         method: 'POST',
@@ -149,13 +155,11 @@ export default function TraderDispute() {
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Failed to submit response');
       
-      // Mark as seen
       notificationManager.markAsSeen(selectedDispute.id);
-      
       setSelectedDispute(null);
-      setToast({ msg: `✅ ${data.message}`, success: true });
+      setToast({ type: 'success', message: data.message });
     } catch (e) {
-      setToast({ msg: '❌ Error: ' + e.message, success: false });
+      setToast({ type: 'error', message: 'Error: ' + e.message });
     }
   };
 
@@ -164,11 +168,35 @@ export default function TraderDispute() {
     notificationManager.markAsSeen(dispute.id);
   };
 
+  const handleExport = () => {
+    const csv = [
+      ['Dispute ID', 'Type', 'Amount', 'UPI', 'UTR', 'Status', 'Reason', 'Created'],
+      ...filtered.map(d => [
+        d.dispute_id || d.id,
+        d.type || '',
+        d.amount || 0,
+        d.upi_id || '',
+        d.utr || '',
+        d.status || '',
+        `"${(d.reason || '').replace(/"/g, '""')}"`,
+        new Date(d.created_at).toLocaleString(),
+      ])
+    ].map(r => r.join(',')).join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `trader-disputes-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-amber-500 animate-spin mx-auto mb-3" />
+          <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-slate-500 text-sm font-medium">Loading disputes…</p>
         </div>
       </div>
@@ -183,38 +211,60 @@ export default function TraderDispute() {
       <div className="hidden sm:flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <AlertCircle className="w-6 h-6 text-amber-600" /> Disputes
+            <div className="p-2 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl shadow-sm">
+              <AlertCircle className="w-5 h-5 text-white" />
+            </div>
+            Disputes
           </h1>
-          <p className="text-slate-500 text-sm mt-0.5">Respond to merchant disputes</p>
+          <p className="text-slate-500 text-sm mt-0.5 ml-11">Respond to merchant disputes</p>
         </div>
-        <button
-          onClick={handleEnableNotifications}
-          disabled={notificationsEnabled}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold ${
-            notificationsEnabled
-              ? 'bg-green-50 border border-green-200 text-green-700'
-              : 'bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100'
-          }`}
-        >
-          {notificationsEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-          {notificationsEnabled ? 'Notifications On' : 'Enable Notifications'}
-        </button>
-      </div>
-
-      {/* Notification banner (mobile) */}
-      {!notificationsEnabled && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2">
-          <BellOff className="w-4 h-4 text-amber-600 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-amber-900">Get instant alerts</p>
-            <p className="text-xs text-amber-700 mt-0.5">Enable notifications for new disputes</p>
-          </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => fetchDisputes(true)} disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-semibold disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
           <button
             onClick={handleEnableNotifications}
-            className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 flex-shrink-0"
+            disabled={notificationsEnabled}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold ${
+              notificationsEnabled
+                ? 'bg-green-50 border border-green-200 text-green-700'
+                : 'bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100'
+            }`}
           >
-            Enable
+            {notificationsEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+            {notificationsEnabled ? 'On' : 'Notify'}
           </button>
+        </div>
+      </div>
+
+      {/* Mobile buttons */}
+      <div className="flex sm:hidden justify-between items-center">
+        <button onClick={() => fetchDisputes(true)} disabled={refreshing}
+          className="p-2 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 text-slate-600 ${refreshing ? 'animate-spin' : ''}`} />
+        </button>
+        {!notificationsEnabled && (
+          <button onClick={handleEnableNotifications}
+            className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-xl text-xs font-bold">
+            <Bell className="w-3.5 h-3.5" /> Enable Alerts
+          </button>
+        )}
+      </div>
+
+      {/* Summary card */}
+      {stats.pending > 0 && (
+        <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl p-4 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-amber-100 text-xs font-semibold">Awaiting Response</p>
+              <p className="text-2xl font-bold">{stats.pending}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-amber-100 text-xs">Total</p>
+              <p className="text-lg font-bold">{stats.total}</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -223,42 +273,76 @@ export default function TraderDispute() {
         {[
           { label: 'All', value: stats.total, color: 'bg-slate-100 text-slate-700', key: 'all' },
           { label: 'Pending', value: stats.pending, color: 'bg-amber-100 text-amber-700', key: 'pending' },
-          { label: 'Approved', value: stats.approved, color: 'bg-green-100 text-green-700', key: 'approved' },
-          { label: 'Rejected', value: stats.rejected, color: 'bg-red-100 text-red-700', key: 'rejected' },
+          { label: 'Accepted', value: stats.accepted, color: 'bg-green-100 text-green-700', key: 'trader_accepted' },
+          { label: 'Rejected', value: stats.rejected, color: 'bg-red-100 text-red-700', key: 'trader_rejected' },
         ].map(pill => (
           <button key={pill.key} onClick={() => setStatusFilter(pill.key)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === pill.key ? `${pill.color} ring-2 ring-current` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              statusFilter === pill.key ? `${pill.color} shadow-sm` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}>
             {pill.label}
-            <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${statusFilter === pill.key ? 'bg-white/60' : 'bg-slate-200 text-slate-600'}`}>{pill.value}</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${statusFilter === pill.key ? 'bg-white/60' : 'bg-slate-200 text-slate-600'}`}>
+              {pill.value}
+            </span>
           </button>
         ))}
       </div>
 
-      {/* Search + filter toggle */}
+      {/* Search + filters + export */}
       <div className="flex gap-2">
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder="Search dispute, UTR, UPI..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent bg-white" />
         </div>
         <button onClick={() => setShowFilters(!showFilters)}
           className={`w-10 h-10 flex items-center justify-center rounded-xl border flex-shrink-0 ${
-            showFilters ? 'bg-amber-50 border-amber-300 text-amber-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            showFilters || dateFrom || dateTo ? 'bg-amber-50 border-amber-300 text-amber-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
           }`}>
           <Filter className="w-4 h-4" />
         </button>
+        <button onClick={handleExport}
+          className="w-10 h-10 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 flex-shrink-0">
+          <Download className="w-4 h-4 text-slate-600" />
+        </button>
       </div>
 
+      {/* Filters panel */}
       {showFilters && (
-        <div className="bg-white border border-slate-200 rounded-xl p-3">
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
-            <option value="all">All Types</option>
-            <option value="payin">Payin</option>
-            <option value="payout">Payout</option>
-          </select>
+        <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-3">
+          {/* Type filter */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Type</label>
+            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white">
+              <option value="all">All Types</option>
+              <option value="payin">Payin</option>
+              <option value="payout">Payout</option>
+            </select>
+          </div>
+          {/* Date filters */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> From
+              </label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> To
+              </label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
+            </div>
+          </div>
+          {(dateFrom || dateTo || typeFilter !== 'all') && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setTypeFilter('all'); }} 
+              className="text-xs text-amber-600 font-semibold flex items-center gap-1 hover:text-amber-700">
+              <X className="w-3 h-3" /> Clear all filters
+            </button>
+          )}
         </div>
       )}
 
@@ -276,10 +360,10 @@ export default function TraderDispute() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <AlertCircle className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-          <p className="text-slate-500 text-sm font-medium">No disputes found</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {statusFilter !== 'all' || typeFilter !== 'all' || search ? 'Try adjusting your filters' : 'No active disputes'}
+          <AlertCircle className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+          <p className="text-slate-500 font-medium">No disputes found</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {statusFilter !== 'all' || typeFilter !== 'all' || search || dateFrom || dateTo ? 'Try adjusting your filters' : 'No active disputes'}
           </p>
         </div>
       )}
