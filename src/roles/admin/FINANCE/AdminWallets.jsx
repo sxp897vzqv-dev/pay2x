@@ -707,6 +707,9 @@ function ConfigModal({ config, onClose, onSuccess }) {
     setLoading(true);
     try {
       const updates = {
+        network: 'tron',
+        token: 'USDT',
+        contract_address: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         admin_wallet_address: adminWallet || null,
         updated_at: new Date().toISOString(),
       };
@@ -716,10 +719,29 @@ function ConfigModal({ config, onClose, onSuccess }) {
       if (mnemonic) updates.mnemonic_encrypted = mnemonic; // In production, encrypt this
       if (xpub) updates.xpub = xpub;
       
-      const { error } = await supabase
+      // Check if config exists
+      const { data: existing } = await supabase
         .from('wallet_config')
-        .update(updates)
-        .eq('id', config.id);
+        .select('id')
+        .limit(1)
+        .single();
+      
+      let error;
+      
+      if (existing?.id) {
+        // Update existing config
+        const res = await supabase
+          .from('wallet_config')
+          .update(updates)
+          .eq('id', existing.id);
+        error = res.error;
+      } else {
+        // Insert new config
+        const res = await supabase
+          .from('wallet_config')
+          .insert(updates);
+        error = res.error;
+      }
       
       if (error) throw error;
       onSuccess();
