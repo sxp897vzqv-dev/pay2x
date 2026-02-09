@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "../../supabase";
+import { useRealtimeSubscription } from "../../hooks/useRealtimeSubscription";
 import {
   TrendingUp, Search, Download, Filter, X, CheckCircle, XCircle, Clock,
-  AlertCircle, ExternalLink, Calendar, Hash, User, CreditCard, Smartphone,
-  RefreshCw, Copy, MoreHorizontal,
+  AlertCircle, Calendar, Hash, User, CreditCard, Smartphone,
+  RefreshCw, Copy, MoreHorizontal, Eye, ArrowRight,
 } from "lucide-react";
+import { Toast } from '../../components/admin';
 
 /* ─── Payin Card ─── */
-function PayinCard({ payin, onViewWebhook }) {
+function PayinCard({ payin, onViewWebhook, isNew }) {
   const [copied, setCopied] = useState(false);
 
   const statusColors = {
@@ -27,7 +29,7 @@ function PayinCard({ payin, onViewWebhook }) {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all ${isNew ? 'ring-2 ring-purple-400 ring-offset-2' : ''}`}>
       <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : payin.status === 'rejected' || payin.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'}`} />
       <div className="p-3 space-y-3">
 
@@ -37,9 +39,9 @@ function PayinCard({ payin, onViewWebhook }) {
             <p className="text-xs text-slate-400 mb-0.5">Order ID</p>
             <div className="flex items-center gap-1.5">
               <p className="font-mono text-sm font-bold text-slate-900 truncate bg-slate-50 px-2 py-1 rounded-lg inline-block" style={{ fontFamily: 'var(--font-mono)' }}>
-                {payin.orderId || payin.id.slice(-8)}
+                {payin.order_id || payin.id?.slice(-8)}
               </p>
-              <button onClick={() => copyText(payin.orderId || payin.id)} className="p-1 hover:bg-slate-100 rounded">
+              <button onClick={() => copyText(payin.order_id || payin.id)} className="p-1 hover:bg-slate-100 rounded">
                 {copied ? <CheckCircle className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
               </button>
             </div>
@@ -50,7 +52,7 @@ function PayinCard({ payin, onViewWebhook }) {
               {payin.status?.toUpperCase()}
             </span>
             <button onClick={() => onViewWebhook(payin)} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
-              <MoreHorizontal className="w-4 h-4 text-slate-500" />
+              <Eye className="w-4 h-4 text-slate-500" />
             </button>
           </div>
         </div>
@@ -63,7 +65,7 @@ function PayinCard({ payin, onViewWebhook }) {
               <p className="text-xs font-bold text-slate-400 uppercase">Customer</p>
             </div>
             <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.userId || 'N/A'}
+              {payin.customer_id || payin.user_id || 'N/A'}
             </p>
           </div>
 
@@ -80,7 +82,7 @@ function PayinCard({ payin, onViewWebhook }) {
               <Smartphone className="w-3 h-3 text-blue-600" />
               <p className="text-xs font-bold text-slate-400 uppercase">Method</p>
             </div>
-            <p className="text-xs font-semibold text-slate-800 capitalize">{payin.paymentMethod || 'UPI'}</p>
+            <p className="text-xs font-semibold text-slate-800 capitalize">{payin.payment_method || 'UPI'}</p>
           </div>
 
           <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
@@ -89,23 +91,20 @@ function PayinCard({ payin, onViewWebhook }) {
               <p className="text-xs font-bold text-slate-400 uppercase">UTR</p>
             </div>
             <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.utrId || 'Pending'}
+              {payin.utr || 'Pending'}
             </p>
           </div>
         </div>
 
         {/* Webhook status */}
-        {payin.webhookStatus && (
+        {payin.webhook_status && (
           <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold ${
-            payin.webhookStatus === 'delivered' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-            payin.webhookStatus === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' :
+            payin.webhook_status === 'delivered' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+            payin.webhook_status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' :
             'bg-yellow-50 text-yellow-700 border border-yellow-200'
           }`}>
             <AlertCircle className="w-3.5 h-3.5" />
-            Webhook: {payin.webhookStatus?.toUpperCase()}
-            {payin.webhookStatus === 'failed' && (
-              <button className="ml-auto text-xs text-red-600 underline">Retry</button>
-            )}
+            Webhook: {payin.webhook_status?.toUpperCase()}
           </div>
         )}
 
@@ -113,10 +112,10 @@ function PayinCard({ payin, onViewWebhook }) {
         <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100">
           <div className="flex items-center gap-1">
             <Clock size={11} />
-            {new Date((payin.requestedAt?.seconds || 0) * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+            {payin.created_at ? new Date(payin.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
           </div>
-          {payin.upiId && (
-            <span className="font-mono text-slate-600">UPI: {payin.upiId}</span>
+          {payin.upi_id && (
+            <span className="font-mono text-slate-600">UPI: {payin.upi_id}</span>
           )}
         </div>
       </div>
@@ -124,8 +123,8 @@ function PayinCard({ payin, onViewWebhook }) {
   );
 }
 
-/* ─── Webhook Details Modal ─── */
-function WebhookModal({ payin, onClose }) {
+/* ─── Transaction Details Modal ─── */
+function TransactionModal({ payin, onClose }) {
   if (!payin) return null;
 
   return (
@@ -142,7 +141,7 @@ function WebhookModal({ payin, onClose }) {
           <div>
             <h3 className="text-base font-bold text-slate-900">Transaction Details</h3>
             <p className="text-xs text-slate-400" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.orderId}
+              {payin.order_id}
             </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
@@ -164,14 +163,26 @@ function WebhookModal({ payin, onClose }) {
                 <p className="font-bold text-slate-900 capitalize">{payin.status}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500 mb-0.5">User ID</p>
+                <p className="text-xs text-slate-500 mb-0.5">Customer ID</p>
                 <p className="font-mono text-xs text-slate-800" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {payin.userId || 'N/A'}
+                  {payin.customer_id || payin.user_id || 'N/A'}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-0.5">UPI ID</p>
-                <p className="text-xs font-semibold text-slate-800">{payin.upiId || 'N/A'}</p>
+                <p className="text-xs font-semibold text-slate-800">{payin.upi_id || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-0.5">UTR</p>
+                <p className="font-mono text-xs text-slate-800" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {payin.utr || 'N/A'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-0.5">Created</p>
+                <p className="text-xs text-slate-700">
+                  {payin.created_at ? new Date(payin.created_at).toLocaleString('en-IN') : '—'}
+                </p>
               </div>
             </div>
           </div>
@@ -185,20 +196,12 @@ function WebhookModal({ payin, onClose }) {
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">Status:</span>
-                <span className="font-bold text-blue-900 capitalize">{payin.webhookStatus || 'Pending'}</span>
+                <span className="font-bold text-blue-900 capitalize">{payin.webhook_status || 'Pending'}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">Attempts:</span>
-                <span className="font-bold text-blue-900">{payin.webhookAttempts || 0}</span>
+                <span className="font-bold text-blue-900">{payin.webhook_attempts || 0}</span>
               </div>
-              {payin.webhookLastAttempt && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">Last Attempt:</span>
-                  <span className="text-xs text-slate-700">
-                    {new Date(payin.webhookLastAttempt.seconds * 1000).toLocaleString('en-IN')}
-                  </span>
-                </div>
-              )}
             </div>
           </div>
 
@@ -208,24 +211,16 @@ function WebhookModal({ payin, onClose }) {
             <pre className="bg-slate-900 text-green-400 p-3 rounded-xl text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
 {JSON.stringify({
   event: payin.status === 'completed' ? 'payment.completed' : 'payment.pending',
-  orderId: payin.orderId,
-  utrId: payin.utrId,
+  order_id: payin.order_id,
+  utr: payin.utr,
   amount: payin.amount,
   status: payin.status,
-  userId: payin.userId,
-  upiId: payin.upiId,
-  timestamp: payin.requestedAt?.seconds * 1000,
+  customer_id: payin.customer_id,
+  upi_id: payin.upi_id,
+  timestamp: new Date(payin.created_at).getTime(),
 }, null, 2)}
             </pre>
           </div>
-
-          {/* Actions */}
-          {payin.webhookStatus === 'failed' && (
-            <button className="w-full px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold text-sm flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4" />
-              Retry Webhook
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -235,7 +230,9 @@ function WebhookModal({ payin, onClose }) {
 /* ─── Main Component ─── */
 export default function MerchantPayin() {
   const [payins, setPayins] = useState([]);
+  const [merchantId, setMerchantId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -243,47 +240,69 @@ export default function MerchantPayin() {
   const [dateTo, setDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPayin, setSelectedPayin] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [newPayinIds, setNewPayinIds] = useState(new Set());
 
   // Debounce search
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 300);
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  useEffect(() => {
-    const fetchPayins = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
+  // Fetch payins
+  const fetchPayins = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
 
-      try {
-        // Get merchant doc
-        const { data: merchant } = await supabase.from('merchants').select('id').eq('id', user.id).single();
-        if (!merchant) { setLoading(false); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); setRefreshing(false); return; }
 
-        const { data } = await supabase
-          .from('payins')
-          .select('*')
-          .eq('merchant_id', merchant.id)
-          .order('requested_at', { ascending: false })
-          .limit(200);
-        setPayins((data || []).map(r => ({
-          ...r,
-          merchantId: r.merchant_id, traderId: r.trader_id,
-          upiId: r.upi_id, utrId: r.utr,
-          transactionId: r.transaction_id, userId: r.merchant_id,
-          screenshotUrl: r.screenshot_url, orderId: r.order_id,
-          requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
-          completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
-        })));
-      } catch (error) {
-        console.error("Error fetching payins:", error);
-      }
-      setLoading(false);
-    };
-    fetchPayins();
+    try {
+      const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+      if (!merchant) { setLoading(false); setRefreshing(false); return; }
+
+      setMerchantId(merchant.id);
+
+      const { data } = await supabase
+        .from('payins')
+        .select('*')
+        .eq('merchant_id', merchant.id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      setPayins(data || []);
+    } catch (error) {
+      console.error("Error fetching payins:", error);
+    }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
+
+  // Initial fetch
+  useEffect(() => { fetchPayins(); }, [fetchPayins]);
+
+  // Real-time subscription (like Admin)
+  useRealtimeSubscription('payins', {
+    filter: merchantId ? `merchant_id=eq.${merchantId}` : undefined,
+    onInsert: (newPayin) => {
+      setPayins(prev => [newPayin, ...prev]);
+      setNewPayinIds(prev => new Set([...prev, newPayin.id]));
+      setToast({ type: 'success', message: `New payin: ₹${newPayin.amount?.toLocaleString()}` });
+      // Clear highlight after 5s
+      setTimeout(() => {
+        setNewPayinIds(prev => {
+          const next = new Set(prev);
+          next.delete(newPayin.id);
+          return next;
+        });
+      }, 5000);
+    },
+    onUpdate: (updated) => {
+      setPayins(prev => prev.map(p => p.id === updated.id ? updated : p));
+      if (updated.status === 'completed') {
+        setToast({ type: 'success', message: `Payin completed: ₹${updated.amount?.toLocaleString()}` });
+      }
+    },
+  });
 
   const filtered = useMemo(() => {
     let r = payins;
@@ -291,14 +310,14 @@ export default function MerchantPayin() {
     if (debouncedSearch) {
       const s = debouncedSearch.toLowerCase();
       r = r.filter(p => 
-        p.orderId?.toLowerCase().includes(s) || 
-        p.userId?.toLowerCase().includes(s) || 
-        p.utrId?.toLowerCase().includes(s) ||
-        p.upiId?.toLowerCase().includes(s)
+        p.order_id?.toLowerCase().includes(s) || 
+        p.customer_id?.toLowerCase().includes(s) || 
+        p.utr?.toLowerCase().includes(s) ||
+        p.upi_id?.toLowerCase().includes(s)
       );
     }
-    if (dateFrom) r = r.filter(p => (p.requestedAt?.seconds || 0) * 1000 >= new Date(dateFrom).getTime());
-    if (dateTo) r = r.filter(p => (p.requestedAt?.seconds || 0) * 1000 <= new Date(dateTo).getTime() + 86399999);
+    if (dateFrom) r = r.filter(p => new Date(p.created_at) >= new Date(dateFrom));
+    if (dateTo) r = r.filter(p => new Date(p.created_at) <= new Date(dateTo + 'T23:59:59'));
     return r;
   }, [payins, statusFilter, debouncedSearch, dateFrom, dateTo]);
 
@@ -311,15 +330,15 @@ export default function MerchantPayin() {
 
   const handleExport = () => {
     const csv = [
-      ['Order ID', 'User ID', 'Amount', 'Status', 'UPI ID', 'UTR', 'Timestamp'],
+      ['Order ID', 'Customer ID', 'Amount', 'Status', 'UPI ID', 'UTR', 'Timestamp'],
       ...filtered.map(p => [
-        p.orderId || '',
-        p.userId || '',
+        p.order_id || '',
+        p.customer_id || '',
         p.amount || 0,
         p.status || '',
-        p.upiId || '',
-        p.utrId || '',
-        new Date((p.requestedAt?.seconds || 0) * 1000).toLocaleString(),
+        p.upi_id || '',
+        p.utr || '',
+        new Date(p.created_at).toLocaleString(),
       ])
     ].map(r => r.join(',')).join('\n');
 
@@ -336,7 +355,7 @@ export default function MerchantPayin() {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-green-500 animate-spin mx-auto mb-3" />
+          <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-slate-500 text-sm font-medium">Loading payins…</p>
         </div>
       </div>
@@ -345,6 +364,12 @@ export default function MerchantPayin() {
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
+      {/* Toast */}
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+
+      {/* Modal */}
+      {selectedPayin && <TransactionModal payin={selectedPayin} onClose={() => setSelectedPayin(null)} />}
+
       {/* Desktop header */}
       <div className="hidden sm:flex items-center justify-between">
         <div>
@@ -356,6 +381,18 @@ export default function MerchantPayin() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Monitor incoming payments</p>
         </div>
+        <button onClick={() => fetchPayins(true)} disabled={refreshing}
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors text-sm font-semibold disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {/* Mobile refresh */}
+      <div className="flex sm:hidden justify-end">
+        <button onClick={() => fetchPayins(true)} disabled={refreshing}
+          className="p-2 bg-purple-50 border border-purple-200 rounded-xl hover:bg-purple-100 active:bg-purple-200 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 text-purple-600 ${refreshing ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
       {/* Status pills */}
@@ -370,7 +407,7 @@ export default function MerchantPayin() {
             key={pill.key}
             onClick={() => setStatusFilter(pill.key)}
             className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === pill.key ? `${pill.color} ring-2 ring-offset-1 ring-current` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              statusFilter === pill.key ? `${pill.color} shadow-sm` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
           >
             {pill.label}
@@ -387,25 +424,25 @@ export default function MerchantPayin() {
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search order, customer, txn ID…"
+            placeholder="Search order, customer, UTR…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent bg-white"
+            className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent bg-white"
           />
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={`w-10 h-10 flex items-center justify-center rounded-xl border flex-shrink-0 ${
-            showFilters ? 'bg-green-50 border-green-300 text-green-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            showFilters ? 'bg-purple-50 border-purple-300 text-purple-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
           }`}
         >
           <Filter className="w-4 h-4" />
         </button>
         <button
           onClick={handleExport}
-          className="w-10 h-10 flex items-center justify-center bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 active:bg-blue-200 flex-shrink-0"
+          className="w-10 h-10 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 active:bg-slate-300 flex-shrink-0"
         >
-          <Download className="w-4 h-4 text-blue-600" />
+          <Download className="w-4 h-4 text-slate-600" />
         </button>
       </div>
 
@@ -421,7 +458,7 @@ export default function MerchantPayin() {
                 type="date"
                 value={dateFrom}
                 onChange={e => setDateFrom(e.target.value)}
-                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-400"
               />
             </div>
             <div>
@@ -432,10 +469,16 @@ export default function MerchantPayin() {
                 type="date"
                 value={dateTo}
                 onChange={e => setDateTo(e.target.value)}
-                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-purple-400"
               />
             </div>
           </div>
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); }} 
+              className="text-xs text-purple-600 font-semibold flex items-center gap-1 hover:text-purple-700">
+              <X className="w-3 h-3" /> Clear filters
+            </button>
+          )}
         </div>
       )}
 
@@ -443,22 +486,17 @@ export default function MerchantPayin() {
       {filtered.length > 0 ? (
         <div className="space-y-3">
           {filtered.map(p => (
-            <PayinCard key={p.id} payin={p} onViewWebhook={setSelectedPayin} />
+            <PayinCard key={p.id} payin={p} onViewWebhook={setSelectedPayin} isNew={newPayinIds.has(p.id)} />
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <TrendingUp className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-          <p className="text-slate-500 text-sm font-medium">No payins found</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {statusFilter !== "all" || search || dateFrom || dateTo ? "Try adjusting your filters" : "Payins will appear here"}
+        <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
+          <TrendingUp className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+          <p className="text-slate-500 font-semibold mb-1">No payins found</p>
+          <p className="text-slate-400 text-sm">
+            {search || statusFilter !== 'all' ? 'Try adjusting your filters' : 'Payins will appear here when received'}
           </p>
         </div>
-      )}
-
-      {/* Webhook Modal */}
-      {selectedPayin && (
-        <WebhookModal payin={selectedPayin} onClose={() => setSelectedPayin(null)} />
       )}
     </div>
   );

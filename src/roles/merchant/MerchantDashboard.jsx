@@ -1,11 +1,42 @@
 import React, { useEffect, useState } from "react";
+import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../supabase';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeSubscription';
 import {
   TrendingUp, TrendingDown, DollarSign, Activity, RefreshCw,
-  AlertCircle, CheckCircle, Clock,
-  Wallet, PieChart, Download, IndianRupee,
+  AlertCircle, CheckCircle, Clock, AlertTriangle, Eye,
+  Wallet, Download, ArrowRight, XCircle,
 } from 'lucide-react';
 import StatCard from '../../components/admin/StatCard';
+
+/* ─── Alert Card (like Admin) ─── */
+const AlertCard = ({ alert, onView }) => {
+  const typeStyles = {
+    critical: { bg: 'bg-red-50', border: 'border-red-200', icon: XCircle, iconColor: 'text-red-600' },
+    warning: { bg: 'bg-amber-50', border: 'border-amber-200', icon: AlertTriangle, iconColor: 'text-amber-600' },
+    info: { bg: 'bg-blue-50', border: 'border-blue-200', icon: AlertCircle, iconColor: 'text-blue-600' },
+  };
+  const style = typeStyles[alert.type] || typeStyles.info;
+  const Icon = style.icon;
+
+  return (
+    <div className={`${style.bg} ${style.border} border rounded-xl p-3 flex items-start gap-3`}>
+      <Icon className={`w-5 h-5 ${style.iconColor} flex-shrink-0 mt-0.5`} />
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-slate-900 text-sm">{alert.title}</p>
+        <p className="text-xs text-slate-600 mt-0.5 line-clamp-2">{alert.message}</p>
+        <p className="text-xs text-slate-400 mt-1">
+          {alert.createdAt ? new Date(alert.createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+        </p>
+      </div>
+      {onView && (
+        <button onClick={() => onView(alert)} className="p-1.5 hover:bg-white/50 rounded-lg flex-shrink-0">
+          <Eye className="w-4 h-4 text-slate-500" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 /* ─── RecentTransaction ─── */
 function RecentTransaction({ tx }) {
@@ -27,7 +58,7 @@ function RecentTransaction({ tx }) {
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-900 text-sm">{isPayin ? 'Payment In' : 'Payout'}</p>
         <p className="text-xs text-slate-400 truncate">
-          {tx.orderId || tx.payoutId || tx.id.slice(-8)}
+          {tx.order_id || tx.payout_id || tx.id?.slice(-8)}
         </p>
       </div>
       <div className="text-right flex-shrink-0">
@@ -43,17 +74,39 @@ function RecentTransaction({ tx }) {
 }
 
 export default function MerchantDashboard() {
+  const { merchantInfo } = useOutletContext() || {};
   const [stats, setStats] = useState({
     todayPayins: 0, todayPayouts: 0, successRate: 0,
     availableBalance: 0, pendingSettlement: 0, reservedAmount: 0,
     totalTransactions: 0, failedTransactions: 0,
-    yesterdayPayins: 0, // For comparison
+    yesterdayPayins: 0, pendingDisputes: 0,
   });
+  const [alerts, setAlerts] = useState([]);
   const [recentTx, setRecentTx] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => { fetchStats(); }, []);
+  const fetchAlerts = async (merchantId) => {
+    try {
+      const { data } = await supabase
+        .from('disputes')
+        .select('*')
+        .eq('merchant_id', merchantId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      const list = (data || []).map(d => ({
+        id: d.id,
+        type: 'warning',
+        title: `Dispute: ₹${(Number(d.amount) || 0).toLocaleString()}`,
+        message: d.reason || 'Pending response required',
+        createdAt: d.created_at,
+        link: `/merchant/disputes/${d.id}`,
+      }));
+      setAlerts(list);
+    } catch (e) { console.error(e); }
+  };
 
   const fetchStats = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -61,19 +114,21 @@ export default function MerchantDashboard() {
     if (!user) { setLoading(false); setRefreshing(false); return; }
 
     try {
-      const { data: merchant } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+      const { data: merchant } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
+      if (!merchant) { setLoading(false); setRefreshing(false); return; }
 
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const todayISO = today.toISOString();
       const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayISO = yesterday.toISOString();
 
-      const [payinRes, payoutRes, allPayinsRes, allPayoutsRes, yesterdayPayinsRes] = await Promise.all([
-        supabase.from('payins').select('amount, status').eq('merchant_id', user.id).gte('created_at', todayISO),
-        supabase.from('payouts').select('amount').eq('merchant_id', user.id).gte('created_at', todayISO),
-        supabase.from('payins').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('payouts').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('payins').select('amount').eq('merchant_id', user.id).gte('created_at', yesterdayISO).lt('created_at', todayISO),
+      const [payinRes, payoutRes, allPayinsRes, allPayoutsRes, yesterdayPayinsRes, disputesRes] = await Promise.all([
+        supabase.from('payins').select('amount, status').eq('merchant_id', merchant.id).gte('created_at', todayISO),
+        supabase.from('payouts').select('amount').eq('merchant_id', merchant.id).gte('created_at', todayISO),
+        supabase.from('payins').select('*').eq('merchant_id', merchant.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('payouts').select('*').eq('merchant_id', merchant.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('payins').select('amount').eq('merchant_id', merchant.id).gte('created_at', yesterdayISO).lt('created_at', todayISO),
+        supabase.from('disputes').select('id', { count: 'exact', head: true }).eq('merchant_id', merchant.id).eq('status', 'pending'),
       ]);
 
       let todayPayins = 0, todayPayouts = 0, successCount = 0, totalCount = 0, yesterdayPayins = 0;
@@ -88,27 +143,36 @@ export default function MerchantDashboard() {
 
       const successRate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
 
-      const mapTs = r => ({ ...r, createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null });
       const recent = [
-        ...(allPayinsRes.data || []).map(d => ({ ...mapTs(d), type: 'payin' })),
-        ...(allPayoutsRes.data || []).map(d => ({ ...mapTs(d), type: 'payout' })),
-      ].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        ...(allPayinsRes.data || []).map(d => ({ ...d, type: 'payin' })),
+        ...(allPayoutsRes.data || []).map(d => ({ ...d, type: 'payout' })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       setStats({
         todayPayins, todayPayouts, yesterdayPayins, successRate,
         availableBalance: Number(merchant?.available_balance || 0),
-        pendingSettlement: Number(merchant?.pending_settlement || 0),
+        pendingSettlement: Number(merchant?.pending_settlement || merchant?.pending_balance || 0),
         reservedAmount: Number(merchant?.reserved_amount || 0),
         totalTransactions: totalCount,
         failedTransactions: totalCount - successCount,
+        pendingDisputes: disputesRes.count || 0,
       });
       setRecentTx(recent.slice(0, 10));
+
+      // Fetch alerts
+      fetchAlerts(merchant.id);
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
     setRefreshing(false);
   };
+
+  // Initial fetch
+  useEffect(() => { fetchStats(); }, []);
+
+  // Real-time: auto-refresh on payins/payouts changes (like Admin)
+  useRealtimeRefresh(['payins', 'payouts'], () => fetchStats(true), 5000);
 
   const handleExportReport = () => {
     const csv = [
@@ -132,7 +196,6 @@ export default function MerchantDashboard() {
   const payinGrowth = stats.yesterdayPayins > 0 
     ? ((stats.todayPayins - stats.yesterdayPayins) / stats.yesterdayPayins * 100).toFixed(1)
     : (stats.todayPayins > 0 ? '+100' : '0');
-  const payinGrowthPositive = Number(payinGrowth) >= 0;
 
   if (loading) {
     return (
@@ -155,7 +218,7 @@ export default function MerchantDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handleExportReport}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-100 text-sm font-semibold">
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-semibold">
             <Download className="w-4 h-4" /> Export
           </button>
           <button onClick={() => fetchStats(true)} disabled={refreshing}
@@ -168,8 +231,8 @@ export default function MerchantDashboard() {
       {/* Mobile refresh */}
       <div className="flex sm:hidden justify-between items-center">
         <button onClick={handleExportReport}
-          className="p-2 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 active:bg-blue-200">
-          <Download className="w-4 h-4 text-blue-600" />
+          className="p-2 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 active:bg-slate-300">
+          <Download className="w-4 h-4 text-slate-600" />
         </button>
         <button onClick={() => fetchStats(true)} disabled={refreshing}
           className="p-2 bg-purple-50 border border-purple-200 rounded-xl hover:bg-purple-100 active:bg-purple-200 disabled:opacity-50">
@@ -177,8 +240,23 @@ export default function MerchantDashboard() {
         </button>
       </div>
 
-      {/* Hero Balance Card */}
-      <div className="bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
+      {/* Alerts Section (like Admin) */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            Requires Attention
+          </h3>
+          <div className="grid gap-2">
+            {alerts.map(alert => (
+              <AlertCard key={alert.id} alert={alert} onView={() => window.location.href = alert.link} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Hero Balance Card (like Trader) */}
+      <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-4 sm:p-5 text-white shadow-lg">
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-purple-200 text-xs font-semibold uppercase tracking-wide mb-0.5">Available Balance</p>
@@ -189,7 +267,7 @@ export default function MerchantDashboard() {
           <div className="text-right">
             <p className="text-purple-200 text-xs">Today's Net</p>
             <p className="text-lg font-bold">
-              {loading ? '—' : `₹${(stats.todayPayins - stats.todayPayouts).toLocaleString()}`}
+              ₹{(stats.todayPayins - stats.todayPayouts).toLocaleString()}
             </p>
           </div>
         </div>
@@ -255,14 +333,15 @@ export default function MerchantDashboard() {
           icon={AlertCircle} 
           color="red" 
           loading={loading}
-          subtitle="Requires attention"
+          subtitle={stats.failedTransactions > 0 ? "Requires attention" : "All good!"}
         />
         <StatCard 
-          title="Wallet Balance" 
-          value={`₹${stats.availableBalance.toLocaleString()}`} 
-          icon={Wallet} 
+          title="Pending Disputes" 
+          value={stats.pendingDisputes.toString()} 
+          icon={AlertTriangle} 
           color="orange" 
           loading={loading}
+          subtitle={stats.pendingDisputes > 0 ? "Action needed" : "None"}
         />
         <StatCard 
           title="Net Revenue" 
@@ -273,7 +352,7 @@ export default function MerchantDashboard() {
         />
       </div>
 
-      {/* Quick Actions */}
+      {/* Quick Actions (like Trader) */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100">
           <h2 className="text-sm font-bold text-slate-900">Quick Actions</h2>
@@ -281,7 +360,7 @@ export default function MerchantDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-3">
           {[
             { href: '/merchant/payins', icon: TrendingUp, title: 'View Payins', sub: `${stats.totalTransactions} today`, color: '#16a34a', bg: 'from-green-50 to-emerald-50' },
-            { href: '/merchant/payouts', icon: TrendingDown, title: 'Manage Payouts', sub: 'Process withdrawals', color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
+            { href: '/merchant/payouts', icon: TrendingDown, title: 'Create Payout', sub: 'Process withdrawals', color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
             { href: '/merchant/balance', icon: Wallet, title: 'Request Settlement', sub: `₹${stats.availableBalance.toLocaleString()} available`, color: '#9333ea', bg: 'from-purple-50 to-pink-50' },
           ].map((item, i) => {
             const Icon = item.icon;
@@ -289,18 +368,16 @@ export default function MerchantDashboard() {
               <a
                 key={i}
                 href={item.href}
-                className={`flex items-center gap-3 p-4 bg-gradient-to-br ${item.bg} hover:shadow-md active:scale-[0.98] transition-all`}
-                style={{
-                  borderBottom: i < 2 ? '1px solid #e2e8f0' : 'none',
-                }}
+                className={`flex items-center gap-3 p-4 bg-gradient-to-br ${item.bg} hover:shadow-md active:scale-[0.98] transition-all border-b sm:border-b-0 sm:border-r border-slate-100 last:border-0`}
               >
                 <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center flex-shrink-0">
                   <Icon className="w-5 h-5" style={{ color: item.color }} />
                 </div>
-                <div className="min-w-0">
+                <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 text-sm">{item.title}</p>
                   <p className="text-xs text-slate-500 truncate">{item.sub}</p>
                 </div>
+                <ArrowRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
               </a>
             );
           })}
@@ -311,7 +388,9 @@ export default function MerchantDashboard() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900">Recent Transactions</h3>
-          <a href="/merchant/payins" className="text-xs text-purple-600 font-semibold hover:text-purple-700">View All →</a>
+          <a href="/merchant/payins" className="text-xs text-purple-600 font-semibold hover:text-purple-700 flex items-center gap-1">
+            View All <ArrowRight className="w-3 h-3" />
+          </a>
         </div>
         <div className="px-4 py-1">
           {recentTx.length > 0 ? (
@@ -320,6 +399,7 @@ export default function MerchantDashboard() {
             <div className="text-center py-10">
               <Activity className="w-10 h-10 text-slate-200 mx-auto mb-2" />
               <p className="text-slate-500 text-sm font-medium">No recent transactions</p>
+              <p className="text-slate-400 text-xs mt-1">Transactions will appear here</p>
             </div>
           )}
         </div>

@@ -1,17 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../../supabase';
+import { useRealtimeSubscription } from '../../hooks/useRealtimeSubscription';
 import {
   TrendingDown, Plus, Search, Download, Filter, X,
-  RefreshCw, Calendar,
+  RefreshCw, Calendar, Wallet,
 } from 'lucide-react';
 import PayoutCard from './components/MerchantPayoutCard';
 import CreatePayoutModal from './components/CreatePayoutModal';
+import { Toast } from '../../components/admin';
 
 /* ─── Main Component ─── */
 export default function MerchantPayout() {
   const [payouts, setPayouts] = useState([]);
+  const [merchantId, setMerchantId] = useState(null);
   const [availableBalance, setAvailableBalance] = useState(0);
+  const [payoutRate, setPayoutRate] = useState(2);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -19,36 +24,87 @@ export default function MerchantPayout() {
   const [showFilters, setShowFilters] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [toast, setToast] = useState(null);
+  const [newPayoutIds, setNewPayoutIds] = useState(new Set());
 
   // Debounce search
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 300);
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      // Balance
-      const { data: merchant } = await supabase.from('merchants').select('available_balance').eq('id', user.id).single();
-      if (merchant) setAvailableBalance(merchant.available_balance || 0);
-      // Payouts
-      const { data } = await supabase.from('payouts').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(200);
-      setPayouts((data || []).map(r => ({
-        ...r,
-        merchantId: r.merchant_id, payoutId: r.payout_id,
-        beneficiaryName: r.beneficiary_name, paymentMode: r.payment_mode,
-        upiId: r.upi_id, accountNumber: r.account_number, ifscCode: r.ifsc_code,
-        failureReason: r.failure_reason,
-        createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null,
-      })));
-      setLoading(false);
-    };
-    fetchData();
+  // Fetch data
+  const fetchData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); setRefreshing(false); return; }
+
+    try {
+      // Get merchant info
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('id, available_balance, payout_rate')
+        .eq('profile_id', user.id)
+        .single();
+
+      if (merchant) {
+        setMerchantId(merchant.id);
+        setAvailableBalance(merchant.available_balance || 0);
+        setPayoutRate(merchant.payout_rate || 2);
+      }
+
+      // Get payouts
+      const { data } = await supabase
+        .from('payouts')
+        .select('*')
+        .eq('merchant_id', merchant?.id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      setPayouts(data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+    setLoading(false);
+    setRefreshing(false);
   }, []);
+
+  // Initial fetch
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Real-time subscription
+  useRealtimeSubscription('payouts', {
+    filter: merchantId ? `merchant_id=eq.${merchantId}` : undefined,
+    onInsert: (newPayout) => {
+      setPayouts(prev => [newPayout, ...prev]);
+      setNewPayoutIds(prev => new Set([...prev, newPayout.id]));
+      setToast({ type: 'info', message: `New payout: ₹${newPayout.amount?.toLocaleString()}` });
+      setTimeout(() => {
+        setNewPayoutIds(prev => {
+          const next = new Set(prev);
+          next.delete(newPayout.id);
+          return next;
+        });
+      }, 5000);
+    },
+    onUpdate: (updated) => {
+      setPayouts(prev => prev.map(p => p.id === updated.id ? updated : p));
+      if (updated.status === 'completed') {
+        setToast({ type: 'success', message: `Payout completed: ₹${updated.amount?.toLocaleString()}` });
+      } else if (updated.status === 'failed') {
+        setToast({ type: 'error', message: `Payout failed: ${updated.failure_reason || 'Unknown error'}` });
+      }
+    },
+  });
+
+  // Also subscribe to merchant balance updates
+  useRealtimeSubscription('merchants', {
+    filter: merchantId ? `id=eq.${merchantId}` : undefined,
+    onUpdate: (updated) => {
+      setAvailableBalance(updated.available_balance || 0);
+    },
+  });
 
   const filtered = useMemo(() => {
     let r = payouts;
@@ -56,18 +112,19 @@ export default function MerchantPayout() {
     if (debouncedSearch) {
       const s = debouncedSearch.toLowerCase();
       r = r.filter(p => 
-        p.payoutId?.toLowerCase().includes(s) || 
-        p.beneficiaryName?.toLowerCase().includes(s) ||
-        p.upiId?.toLowerCase().includes(s)
+        p.payout_id?.toLowerCase().includes(s) || 
+        p.beneficiary_name?.toLowerCase().includes(s) ||
+        p.upi_id?.toLowerCase().includes(s)
       );
     }
-    if (dateFrom) r = r.filter(p => (p.createdAt?.seconds || 0) * 1000 >= new Date(dateFrom).getTime());
-    if (dateTo) r = r.filter(p => (p.createdAt?.seconds || 0) * 1000 <= new Date(dateTo).getTime() + 86399999);
+    if (dateFrom) r = r.filter(p => new Date(p.created_at) >= new Date(dateFrom));
+    if (dateTo) r = r.filter(p => new Date(p.created_at) <= new Date(dateTo + 'T23:59:59'));
     return r;
   }, [payouts, statusFilter, debouncedSearch, dateFrom, dateTo]);
 
   const stats = useMemo(() => ({
     total: payouts.length,
+    pending: payouts.filter(p => p.status === 'pending').length,
     queued: payouts.filter(p => p.status === 'queued').length,
     processing: payouts.filter(p => p.status === 'processing').length,
     completed: payouts.filter(p => p.status === 'completed').length,
@@ -83,22 +140,25 @@ export default function MerchantPayout() {
     // Get merchant info with rates
     const { data: merchant } = await supabase
       .from('merchants')
-      .select('available_balance, payout_rate')
-      .eq('id', user.id)
+      .select('id, available_balance, payout_rate')
+      .eq('profile_id', user.id)
       .single();
     
     if (!merchant) {
-      alert('Error: Could not fetch merchant data');
+      setToast({ type: 'error', message: 'Error: Could not fetch merchant data' });
       return;
     }
     
-    const payoutRate = merchant.payout_rate || 2; // Default 2%
-    const payoutFee = Math.round((amount * payoutRate) / 100);
+    const rate = merchant.payout_rate || 2;
+    const payoutFee = Math.round((amount * rate) / 100);
     const totalRequired = amount + payoutFee;
     
     // Check balance
     if ((merchant.available_balance || 0) < totalRequired) {
-      alert(`Insufficient balance!\n\nRequired: ₹${totalRequired.toLocaleString()} (₹${amount.toLocaleString()} + ₹${payoutFee.toLocaleString()} fee)\nAvailable: ₹${(merchant.available_balance || 0).toLocaleString()}`);
+      setToast({ 
+        type: 'error', 
+        message: `Insufficient balance! Required: ₹${totalRequired.toLocaleString()} (incl. ₹${payoutFee.toLocaleString()} fee)` 
+      });
       return;
     }
     
@@ -109,16 +169,16 @@ export default function MerchantPayout() {
         available_balance: (merchant.available_balance || 0) - totalRequired,
         updated_at: new Date().toISOString()
       })
-      .eq('id', user.id);
+      .eq('id', merchant.id);
     
     if (reserveError) {
-      alert('Error reserving balance: ' + reserveError.message);
+      setToast({ type: 'error', message: 'Error reserving balance: ' + reserveError.message });
       return;
     }
     
     // Create payout
     const { error: payoutError } = await supabase.from('payouts').insert({
-      merchant_id: user.id,
+      merchant_id: merchant.id,
       payout_id: 'PO' + Date.now(),
       beneficiary_name: formData.beneficiaryName,
       payment_mode: formData.paymentMode,
@@ -136,14 +196,15 @@ export default function MerchantPayout() {
       await supabase
         .from('merchants')
         .update({ available_balance: merchant.available_balance })
-        .eq('id', user.id);
-      alert('Error creating payout: ' + payoutError.message);
+        .eq('id', merchant.id);
+      setToast({ type: 'error', message: 'Error creating payout: ' + payoutError.message });
       return;
     }
     
-    // Refresh balance
+    // Update local balance
     setAvailableBalance((merchant.available_balance || 0) - totalRequired);
     setShowModal(false);
+    setToast({ type: 'success', message: `Payout of ₹${amount.toLocaleString()} created successfully!` });
   };
 
   const handleCancelPayout = async (payoutId) => {
@@ -154,8 +215,9 @@ export default function MerchantPayout() {
         status: 'failed',
         failure_reason: 'Cancelled by merchant',
       }).eq('id', payoutId);
+      setToast({ type: 'info', message: 'Payout cancelled' });
     } catch (e) {
-      alert('Error: ' + e.message);
+      setToast({ type: 'error', message: 'Error: ' + e.message });
     }
   };
 
@@ -163,12 +225,12 @@ export default function MerchantPayout() {
     const csv = [
       ['Payout ID', 'Beneficiary', 'Amount', 'Status', 'Payment Mode', 'Created At'],
       ...filtered.map(p => [
-        p.payoutId || '',
-        p.beneficiaryName || '',
+        p.payout_id || '',
+        p.beneficiary_name || '',
         p.amount || 0,
         p.status || '',
-        p.paymentMode || '',
-        new Date((p.createdAt?.seconds || 0) * 1000).toLocaleString(),
+        p.payment_mode || '',
+        new Date(p.created_at).toLocaleString(),
       ])
     ].map(r => r.join(',')).join('\n');
 
@@ -185,7 +247,7 @@ export default function MerchantPayout() {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-blue-500 animate-spin mx-auto mb-3" />
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-slate-500 text-sm font-medium">Loading payouts…</p>
         </div>
       </div>
@@ -194,6 +256,9 @@ export default function MerchantPayout() {
 
   return (
     <div className="space-y-4 max-w-3xl mx-auto">
+      {/* Toast */}
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+
       {/* Desktop header */}
       <div className="hidden sm:flex items-center justify-between">
         <div>
@@ -205,16 +270,26 @@ export default function MerchantPayout() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Manage outgoing payments</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-semibold"
-        >
-          <Plus className="w-4 h-4" /> Create Payout
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => fetchData(true)} disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-semibold disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-semibold"
+          >
+            <Plus className="w-4 h-4" /> Create Payout
+          </button>
+        </div>
       </div>
 
-      {/* Mobile create button */}
-      <div className="flex sm:hidden justify-end">
+      {/* Mobile buttons */}
+      <div className="flex sm:hidden justify-between items-center">
+        <button onClick={() => fetchData(true)} disabled={refreshing}
+          className="p-2 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 text-slate-600 ${refreshing ? 'animate-spin' : ''}`} />
+        </button>
         <button
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-semibold active:scale-[0.96]"
@@ -223,18 +298,28 @@ export default function MerchantPayout() {
         </button>
       </div>
 
-      {/* Balance card */}
-      <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-xl p-4 text-white shadow-md">
-        <p className="text-blue-100 text-xs mb-1">Available for Payout</p>
-        <p className="text-3xl font-bold">₹{availableBalance.toLocaleString()}</p>
+      {/* Balance card (like Trader) */}
+      <div className="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl p-4 text-white shadow-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-blue-100 text-xs font-semibold uppercase tracking-wide mb-0.5">Available Balance</p>
+            <p className="text-3xl font-bold">₹{availableBalance.toLocaleString()}</p>
+          </div>
+          <div className="text-right">
+            <div className="flex items-center gap-1.5 text-blue-200 text-xs">
+              <Wallet className="w-3.5 h-3.5" />
+              <span>Payout Fee: {payoutRate}%</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Status pills */}
       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
         {[
           { label: 'All', value: stats.total, color: 'bg-slate-100 text-slate-700', key: 'all' },
-          { label: 'Queued', value: stats.queued, color: 'bg-blue-100 text-blue-700', key: 'queued' },
-          { label: 'Processing', value: stats.processing, color: 'bg-yellow-100 text-yellow-700', key: 'processing' },
+          { label: 'Pending', value: stats.pending, color: 'bg-yellow-100 text-yellow-700', key: 'pending' },
+          { label: 'Processing', value: stats.processing, color: 'bg-blue-100 text-blue-700', key: 'processing' },
           { label: 'Completed', value: stats.completed, color: 'bg-green-100 text-green-700', key: 'completed' },
           { label: 'Failed', value: stats.failed, color: 'bg-red-100 text-red-700', key: 'failed' },
         ].map(pill => (
@@ -242,7 +327,7 @@ export default function MerchantPayout() {
             key={pill.key}
             onClick={() => setStatusFilter(pill.key)}
             className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              statusFilter === pill.key ? `${pill.color} ring-2 ring-offset-1 ring-current` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              statusFilter === pill.key ? `${pill.color} shadow-sm` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
           >
             {pill.label}
@@ -275,9 +360,9 @@ export default function MerchantPayout() {
         </button>
         <button
           onClick={handleExport}
-          className="w-10 h-10 flex items-center justify-center bg-green-50 border border-green-200 rounded-xl hover:bg-green-100 active:bg-green-200 flex-shrink-0"
+          className="w-10 h-10 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 active:bg-slate-300 flex-shrink-0"
         >
-          <Download className="w-4 h-4 text-green-600" />
+          <Download className="w-4 h-4 text-slate-600" />
         </button>
       </div>
 
@@ -308,6 +393,12 @@ export default function MerchantPayout() {
               />
             </div>
           </div>
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); }} 
+              className="text-xs text-blue-600 font-semibold flex items-center gap-1 hover:text-blue-700">
+              <X className="w-3 h-3" /> Clear filters
+            </button>
+          )}
         </div>
       )}
 
@@ -315,14 +406,19 @@ export default function MerchantPayout() {
       {filtered.length > 0 ? (
         <div className="space-y-3">
           {filtered.map(p => (
-            <PayoutCard key={p.id} payout={p} onCancel={handleCancelPayout} />
+            <PayoutCard 
+              key={p.id} 
+              payout={p} 
+              onCancel={handleCancelPayout}
+              isNew={newPayoutIds.has(p.id)}
+            />
           ))}
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <TrendingDown className="w-10 h-10 text-slate-200 mx-auto mb-2" />
-          <p className="text-slate-500 text-sm font-medium">No payouts found</p>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <TrendingDown className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+          <p className="text-slate-500 font-semibold mb-1">No payouts found</p>
+          <p className="text-xs text-slate-400">
             {statusFilter !== "all" || search || dateFrom || dateTo ? "Try adjusting your filters" : "Create your first payout"}
           </p>
         </div>
@@ -334,6 +430,7 @@ export default function MerchantPayout() {
           onClose={() => setShowModal(false)}
           onSubmit={handleCreatePayout}
           availableBalance={availableBalance}
+          payoutRate={payoutRate}
         />
       )}
     </div>

@@ -4,8 +4,8 @@ import { supabase } from '../../supabase';
 import TestModeBanner from './components/TestModeBanner';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
-  AlertCircle, Settings, LogOut, Menu, X, Shield, Users,
-  Webhook, FileText, ShieldCheck, RotateCcw,
+  AlertCircle, Settings, LogOut, Menu, X, Shield, Users, ChevronDown, ChevronRight,
+  Webhook, FileText, ShieldCheck, RotateCcw, Link as LinkIcon, CreditCard,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -46,22 +46,54 @@ import {
   }
 })();
 
-/* ─── Nav config ─── */
-const sidebarLinks = [
-  { to: '/merchant/dashboard',      icon: LayoutDashboard, label: 'Dashboard',       shortLabel: 'Home' },
-  { to: '/merchant/payins',         icon: TrendingUp,      label: 'Payins',          shortLabel: 'Payins' },
-  { to: '/merchant/payouts',        icon: TrendingDown,    label: 'Payouts',         shortLabel: 'Payouts' },
-  { to: '/merchant/refunds',        icon: RotateCcw,       label: 'Refunds',         shortLabel: 'Refunds' },
-  { to: '/merchant/balance',        icon: Wallet,          label: 'Balance',         shortLabel: 'Balance' },
-  { to: '/merchant/api',            icon: Code,            label: 'API Keys',        shortLabel: 'API' },
-  { to: '/merchant/webhooks',       icon: Webhook,         label: 'Webhooks',        shortLabel: 'Webhooks' },
-  { to: '/merchant/reports',        icon: FileText,        label: 'Reports',         shortLabel: 'Reports' },
-  { to: '/merchant/disputes',       icon: AlertCircle,     label: 'Disputes',        shortLabel: 'Disputes' },
-  { to: '/merchant/team',           icon: Users,           label: 'Team',            shortLabel: 'Team' },
-  { to: '/merchant/security',       icon: ShieldCheck,     label: 'Security',        shortLabel: 'Security' },
-  { to: '/merchant/settings',       icon: Settings,        label: 'Settings',        shortLabel: 'Settings' },
+/* ─── Nav config with groups (like Admin) ─── */
+const navGroups = [
+  {
+    label: 'Overview',
+    items: [
+      { to: '/merchant/dashboard', icon: LayoutDashboard, label: 'Dashboard', shortLabel: 'Home' },
+    ],
+  },
+  {
+    label: 'Transactions',
+    items: [
+      { to: '/merchant/payins',  icon: TrendingUp,   label: 'Payins',  shortLabel: 'Payins' },
+      { to: '/merchant/payouts', icon: TrendingDown, label: 'Payouts', shortLabel: 'Payouts' },
+      { to: '/merchant/refunds', icon: RotateCcw,    label: 'Refunds', shortLabel: 'Refunds' },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { to: '/merchant/balance',       icon: Wallet,   label: 'Balance',       shortLabel: 'Balance' },
+      { to: '/merchant/payment-links', icon: LinkIcon, label: 'Payment Links', shortLabel: 'Links' },
+    ],
+  },
+  {
+    label: 'Integration',
+    items: [
+      { to: '/merchant/api',      icon: Code,    label: 'API Keys',  shortLabel: 'API' },
+      { to: '/merchant/webhooks', icon: Webhook, label: 'Webhooks',  shortLabel: 'Webhooks' },
+    ],
+  },
+  {
+    label: 'Reports',
+    items: [
+      { to: '/merchant/reports',  icon: FileText,    label: 'Reports',  shortLabel: 'Reports' },
+      { to: '/merchant/disputes', icon: AlertCircle, label: 'Disputes', shortLabel: 'Disputes' },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { to: '/merchant/team',     icon: Users,       label: 'Team',     shortLabel: 'Team' },
+      { to: '/merchant/security', icon: ShieldCheck, label: 'Security', shortLabel: 'Security' },
+      { to: '/merchant/settings', icon: Settings,    label: 'Settings', shortLabel: 'Settings' },
+    ],
+  },
 ];
 
+/* Bottom nav shows 5 items max */
 const bottomNavItems = [
   { to: '/merchant/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
   { to: '/merchant/payins',    icon: TrendingUp,      shortLabel: 'Payins' },
@@ -70,17 +102,25 @@ const bottomNavItems = [
   { to: '/merchant/api',       icon: Code,            shortLabel: 'API' },
 ];
 
+const allLinks = navGroups.flatMap(g => g.items);
+
 export default function MerchantLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [merchantInfo, setMerchantInfo] = useState(null);
+  const [availableBalance, setAvailableBalance] = useState(0);
   const [testMode, setTestMode] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(['Overview', 'Transactions', 'Finance', 'Integration']);
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
+    let channel;
+
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Initial fetch
       const { data } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
       if (data) {
         const isActive = data.is_active === true || data.status === 'active';
@@ -90,10 +130,31 @@ export default function MerchantLayout() {
           return;
         }
         setMerchantInfo(data);
+        setAvailableBalance(Number(data.available_balance || 0));
         setTestMode(data.test_mode || false);
       }
+
+      // Real-time subscription for balance updates (like trader)
+      channel = supabase.channel('merchant-layout')
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'merchants',
+          filter: `profile_id=eq.${user.id}`
+        }, (payload) => {
+          const d = payload.new;
+          if (!d.is_active && d.status !== 'active') {
+            alert('Your account has been deactivated. Please contact admin.');
+            handleLogout();
+            return;
+          }
+          setMerchantInfo(d);
+          setAvailableBalance(Number(d.available_balance || 0));
+          setTestMode(d.test_mode || false);
+        })
+        .subscribe();
     };
+
     init();
+    return () => { if (channel) supabase.removeChannel(channel); };
   }, []);
 
   const toggleTestMode = async () => {
@@ -110,34 +171,67 @@ export default function MerchantLayout() {
     catch (e) { alert('Logout failed: ' + e.message); }
   };
 
-  const currentTitle = (sidebarLinks.find(l => location.pathname.startsWith(l.to)) || {}).label || 'Merchant Portal';
-
-  const renderNav = (links, extraPy = 'py-2.5') => links.map(link => {
-    const Icon = link.icon;
-    return (
-      <NavLink
-        key={link.to}
-        to={link.to}
-        className={({ isActive }) =>
-          `flex items-center gap-3 px-4 ${extraPy} rounded-xl transition-all duration-200 group ${
-            isActive ? 'bg-white/20 text-white shadow-sm' : 'text-purple-100 hover:bg-white/10 hover:text-white'
-          }`
-        }
-      >
-        {({ isActive }) => (
-          <>
-            <Icon className={`w-5 h-5 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-105'}`} style={{ width: 18, height: 18 }} />
-            <span className="font-medium text-sm">{link.label}</span>
-          </>
-        )}
-      </NavLink>
+  const toggleGroup = (label) => {
+    setExpandedGroups(prev =>
+      prev.includes(label) ? prev.filter(g => g !== label) : [...prev, label]
     );
-  });
+  };
+
+  const currentTitle = (allLinks.find(l => location.pathname.startsWith(l.to)) || {}).label || 'Merchant Portal';
+
+  /* ── Sidebar nav renderer with groups (like Admin) ── */
+  const renderGroupedNav = (extraPy = 'py-2.5') => (
+    <div className="space-y-1">
+      {navGroups.map(group => {
+        const isExpanded = expandedGroups.includes(group.label);
+        return (
+          <div key={group.label}>
+            {/* Group header */}
+            <button
+              onClick={() => toggleGroup(group.label)}
+              className="w-full flex items-center justify-between px-3 py-2 text-purple-200 hover:text-white transition-colors"
+            >
+              <span className="text-xs font-bold uppercase tracking-wider">{group.label}</span>
+              {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            </button>
+            {/* Group items */}
+            {isExpanded && (
+              <div className="space-y-0.5 mb-2">
+                {group.items.map(link => {
+                  const Icon = link.icon;
+                  return (
+                    <NavLink
+                      key={link.to}
+                      to={link.to}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-4 ${extraPy} rounded-xl transition-all duration-200 group ml-1 ${
+                          isActive
+                            ? 'bg-white/20 text-white shadow-sm'
+                            : 'text-purple-100 hover:bg-white/10 hover:text-white'
+                        }`
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          <Icon className={`w-4.5 h-4.5 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-105'}`} style={{ width: 18, height: 18 }} />
+                          <span className="font-medium text-sm">{link.label}</span>
+                        </>
+                      )}
+                    </NavLink>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="merchant-root w-full min-h-screen flex flex-col md:flex-row bg-slate-50">
 
-      {/* ═══════ MOBILE TOP BAR ═══════ */}
+      {/* ═══════ MOBILE TOP BAR (with balance like Trader) ═══════ */}
       <header
         className="md:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-slate-200"
         style={{ paddingTop: 'env(safe-area-inset-top)', boxShadow: '0 1px 4px rgba(0,0,0,.07)' }}
@@ -151,17 +245,20 @@ export default function MerchantLayout() {
             <Menu className="w-5 h-5 text-slate-700" />
           </button>
           <h1 className="text-sm font-bold text-slate-900 tracking-tight">{currentTitle}</h1>
-          <div className="w-10" /> {/* spacer */}
+          {/* Balance badge (like Trader) */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-1">
+            <span className="text-xs font-bold text-purple-700">₹{availableBalance.toLocaleString()}</span>
+          </div>
         </div>
       </header>
 
       {/* ═══════ DESKTOP SIDEBAR ═══════ */}
-      <aside className="hidden md:flex md:flex-col md:w-64 lg:w-72 bg-gradient-to-b from-purple-600 via-purple-700 to-blue-700 shadow-xl flex-shrink-0 sticky top-0 h-screen">
+      <aside className="hidden md:flex md:flex-col md:w-64 lg:w-72 bg-gradient-to-b from-purple-600 via-purple-700 to-indigo-800 shadow-xl flex-shrink-0 sticky top-0 h-screen">
         {/* Brand */}
         <div className="px-5 py-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-blue-500 rounded-xl flex items-center justify-center shadow-lg">
-              <Shield className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 bg-gradient-to-br from-purple-400 to-pink-500 rounded-xl flex items-center justify-center shadow-lg">
+              <CreditCard className="w-5 h-5 text-white" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-white leading-tight">Merchant Portal</h2>
@@ -170,26 +267,29 @@ export default function MerchantLayout() {
           </div>
         </div>
 
-        {/* Merchant info */}
+        {/* Merchant info with balance (like Trader) */}
         {merchantInfo && (
           <div className="mx-4 mt-4 bg-white/10 backdrop-blur-sm rounded-xl p-3">
             <div className="flex items-center gap-2 text-white mb-1.5">
               <div className="w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
                 <Shield className="w-4 h-4" />
               </div>
-              <span className="font-semibold text-sm truncate">{merchantInfo.businessName || merchantInfo.name || 'Merchant'}</span>
+              <span className="font-semibold text-sm truncate">{merchantInfo.business_name || merchantInfo.name || 'Merchant'}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-purple-200 text-xs ml-9">
+            <div className="text-purple-100 text-xs ml-9">Balance: ₹{availableBalance.toLocaleString()}</div>
+            <div className="flex items-center gap-1.5 text-purple-200 text-xs ml-9 mt-1">
               <span className="w-2 h-2 bg-green-400 rounded-full pulse-dot" />
-              <span>Active</span>
+              <span>{testMode ? 'Test Mode' : 'Live'}</span>
             </div>
           </div>
         )}
 
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {renderNav(sidebarLinks)}
+        {/* Navigation with groups */}
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          {renderGroupedNav()}
         </nav>
 
+        {/* Logout */}
         <div className="p-3 border-t border-white/10">
           <button
             onClick={handleLogout}
@@ -206,13 +306,13 @@ export default function MerchantLayout() {
         <div className="fixed inset-0 z-50 md:hidden anim-fade">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
           <div
-            className="absolute inset-y-0 left-0 w-72 bg-gradient-to-b from-purple-600 via-purple-700 to-blue-700 shadow-2xl flex flex-col anim-slide-left"
+            className="absolute inset-y-0 left-0 w-72 bg-gradient-to-b from-purple-600 via-purple-700 to-indigo-800 shadow-2xl flex flex-col anim-slide-left"
             style={{ paddingTop: 'env(safe-area-inset-top)' }}
           >
             <div className="flex items-center justify-between px-5 pt-4 pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-gradient-to-br from-purple-400 to-blue-500 rounded-xl flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-white" />
+                <div className="w-9 h-9 bg-gradient-to-br from-purple-400 to-pink-500 rounded-xl flex items-center justify-center">
+                  <CreditCard className="w-5 h-5 text-white" />
                 </div>
                 <span className="text-lg font-bold text-white">Merchant Portal</span>
               </div>
@@ -228,17 +328,18 @@ export default function MerchantLayout() {
               <div className="mx-4 mb-2 bg-white/10 rounded-xl p-3">
                 <div className="flex items-center gap-2 text-white mb-1">
                   <Shield className="w-4 h-4" />
-                  <span className="font-semibold text-sm truncate">{merchantInfo.businessName || merchantInfo.name || 'Merchant'}</span>
+                  <span className="font-semibold text-sm truncate">{merchantInfo.business_name || merchantInfo.name || 'Merchant'}</span>
                 </div>
-                <div className="flex items-center gap-1.5 text-purple-200 text-xs ml-6">
+                <div className="text-purple-100 text-xs ml-6">Balance: ₹{availableBalance.toLocaleString()}</div>
+                <div className="flex items-center gap-1.5 text-purple-200 text-xs ml-6 mt-1">
                   <span className="w-2 h-2 bg-green-400 rounded-full pulse-dot" />
-                  <span>Active</span>
+                  <span>{testMode ? 'Test Mode' : 'Live'}</span>
                 </div>
               </div>
             )}
 
-            <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-              {renderNav(sidebarLinks, 'py-3')}
+            <nav className="flex-1 px-3 py-2 overflow-y-auto">
+              {renderGroupedNav('py-3')}
             </nav>
 
             <div className="p-3 border-t border-white/10" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
@@ -262,7 +363,7 @@ export default function MerchantLayout() {
         )}
         <div className="md:mt-0" style={{ marginTop: 0 }}>
           <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 md:py-6">
-            <Outlet context={{ testMode, toggleTestMode, merchantInfo }} />
+            <Outlet context={{ testMode, toggleTestMode, merchantInfo, availableBalance }} />
           </div>
         </div>
       </main>
