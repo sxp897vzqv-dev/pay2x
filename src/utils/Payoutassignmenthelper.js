@@ -41,6 +41,7 @@ export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
       .from('payout_requests')
       .insert({
         trader_id: traderId,
+        amount: requestedAmount, // Required column
         requested_amount: requestedAmount,
         assigned_amount: assignedAmount,
         remaining_amount: remainingAmount > 0 ? remainingAmount : 0,
