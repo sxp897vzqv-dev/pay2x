@@ -51,6 +51,18 @@ export default function TraderPayout() {
   const canCreateRequest   = !hasActiveRequest && !hasAssignedPayouts;
   const canCancelRequest   = hasActiveRequest && !hasAssignedPayouts;
 
+  // Map request row for display (snake_case → camelCase)
+  const mapRequest = (r) => ({
+    ...r,
+    traderId: r.trader_id,
+    requestedAmount: r.requested_amount || r.amount || 0,
+    assignedAmount: r.assigned_amount || 0,
+    remainingAmount: r.remaining_amount || 0,
+    fullyAssigned: r.fully_assigned,
+    inWaitingList: r.in_waiting_list,
+    createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null,
+  });
+
   // Map payout row for child components
   const mapPayout = (r) => ({
     ...r,
@@ -79,7 +91,7 @@ export default function TraderPayout() {
         let active = null;
         (requests || []).forEach(r => {
           if (r.status !== 'completed' && r.status !== 'cancelled') {
-            active = { ...r, traderId: r.trader_id, createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null };
+            active = mapRequest(r);
           }
         });
         setActiveRequest(active);
@@ -124,7 +136,26 @@ export default function TraderPayout() {
       const result = await immediateAutoAssignPayouts(traderId, amount);
       setToast({ msg: result.message, success: true });
       setRequestAmount('');
-      if (result.assignedCount > 0) setActiveTab('assigned');
+      
+      // Immediately set the active request state
+      setActiveRequest({
+        id: result.requestId,
+        status: result.status,
+        traderId: traderId,
+        requestedAmount: amount,
+        assignedAmount: result.assignedAmount || 0,
+        remainingAmount: result.remainingAmount || 0,
+        fullyAssigned: result.fullyAssigned,
+        inWaitingList: result.inWaitingList,
+        createdAt: { seconds: Date.now() / 1000 },
+      });
+      
+      // Refresh assigned payouts
+      if (result.assignedCount > 0) {
+        const { data: assigned } = await supabase.from('payouts').select('*').eq('trader_id', traderId).eq('status', 'assigned').limit(100);
+        setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
+        setActiveTab('assigned');
+      }
     } catch (e) {
       setToast({ msg: '❌ ' + e.message, success: false });
     }
