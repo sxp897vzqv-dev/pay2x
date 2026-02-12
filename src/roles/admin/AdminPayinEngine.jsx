@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../../supabase';
+import { useRealtimeSubscription } from '../../hooks/useRealtimeSubscription';
 import {
   Cpu, Activity, TrendingUp, RefreshCw, CheckCircle, XCircle,
   Zap, Settings, BarChart3, Database, AlertTriangle
 } from 'lucide-react';
 import { Toast } from '../../components/admin';
 
-const API_BASE = 'https://us-central1-pay2x-4748c.cloudfunctions.net';
-
 export default function AdminPayinEngine() {
   const [loading, setLoading] = useState(true);
-  const [migrating, setMigrating] = useState(false);
   const [stats, setStats] = useState(null);
+  const [upis, setUpis] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [config, setConfig] = useState({});
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [editingConfig, setEditingConfig] = useState(false);
@@ -20,17 +22,54 @@ export default function AdminPayinEngine() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const fetchStats = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/getEngineStats`);
-      const data = await response.json();
-      if (data.success) {
-        setStats(data);
-        setError(null);
-      } else {
-        setError(data.error || 'Unknown error');
+      // Fetch UPI Pool
+      const { data: upiData, error: upiError } = await supabase
+        .from('upi_pool')
+        .select('*')
+        .order('today_volume', { ascending: false });
+
+      if (upiError) throw upiError;
+      setUpis(upiData || []);
+
+      // Fetch Selection Logs
+      const { data: logData, error: logError } = await supabase
+        .from('selection_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (!logError) setLogs(logData || []);
+
+      // Fetch Engine Config
+      const { data: configData } = await supabase
+        .from('system_config')
+        .select('*')
+        .eq('key', 'payin_engine')
+        .single();
+
+      if (configData?.value) {
+        setConfig(configData.value);
       }
+
+      // Calculate stats
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const activeUpis = (upiData || []).filter(u => u.is_active);
+      const todayVolume = (upiData || []).reduce((sum, u) => sum + (Number(u.today_volume) || 0), 0);
+      const todayTxns = (upiData || []).reduce((sum, u) => sum + (Number(u.today_count) || 0), 0);
+
+      setStats({
+        totalUpisInPool: (upiData || []).length,
+        activeUpis: activeUpis.length,
+        todayTotalVolume: todayVolume,
+        todayTotalTxns: todayTxns,
+      });
+
+      setError(null);
     } catch (err) {
       console.error('Fetch error:', err);
       setError(err.message);
@@ -38,68 +77,82 @@ export default function AdminPayinEngine() {
     setLoading(false);
   };
 
-  const initEngine = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/initPayinEngine`);
-      const data = await response.json();
-      if (data.success) {
-        setToast({ msg: '✅ Payin Engine config reset to defaults!', success: true });
-        fetchStats();
-      } else {
-        setToast({ msg: `❌ Error: ${data.error}`, success: false });
-      }
-    } catch (err) {
-      setToast({ msg: `❌ Error: ${err.message}`, success: false });
-    }
-  };
+  // Realtime subscriptions
+  useRealtimeSubscription('upi_pool', {
+    onChange: fetchData,
+  });
+
+  useRealtimeSubscription('selection_logs', {
+    onInsert: (newLog) => {
+      setLogs(prev => [newLog, ...prev.slice(0, 19)]);
+      setToast({ msg: `New selection: ₹${newLog.amount}`, success: true });
+    },
+  });
 
   const saveConfig = async () => {
     setSavingConfig(true);
     try {
-      const response = await fetch(`${API_BASE}/updateEngineConfig`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          weights: editWeights,
-          enableRandomness: editEnableRandomness,
-          randomExponent: editRandomExponent,
-        }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setToast({ msg: '✅ Config saved successfully!', success: true });
-        setEditingConfig(false);
-        fetchStats();
-      } else {
-        setToast({ msg: `❌ Error: ${data.error}`, success: false });
-      }
+      const newConfig = {
+        weights: editWeights,
+        enableRandomness: editEnableRandomness,
+        scoreExponent: editRandomExponent,
+      };
+
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({
+          key: 'payin_engine',
+          value: newConfig,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setConfig(newConfig);
+      setToast({ msg: '✅ Config saved successfully!', success: true });
+      setEditingConfig(false);
     } catch (err) {
       setToast({ msg: `❌ Error: ${err.message}`, success: false });
     }
     setSavingConfig(false);
   };
 
-  const migrateUpis = async () => {
-    setMigrating(true);
+  const resetToDefaults = async () => {
+    const defaultConfig = {
+      weights: {
+        successRate: 25,
+        dailyLimitLeft: 20,
+        cooldown: 15,
+        amountMatch: 15,
+        traderBalance: 10,
+        bankHealth: 5,
+        timeWindow: 5,
+        recentFailures: 5,
+      },
+      enableRandomness: true,
+      scoreExponent: 2,
+    };
+
     try {
-      const response = await fetch(`${API_BASE}/migrateUpisToPool`);
-      const data = await response.json();
-      if (data.success) {
-        alert(`✅ Migrated ${data.count} UPIs to pool!`);
-        fetchStats();
-      } else {
-        alert(`❌ Error: ${data.error}`);
-      }
+      const { error } = await supabase
+        .from('system_config')
+        .upsert({
+          key: 'payin_engine',
+          value: defaultConfig,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setConfig(defaultConfig);
+      setToast({ msg: '✅ Config reset to defaults!', success: true });
     } catch (err) {
-      alert(`❌ Error: ${err.message}`);
+      setToast({ msg: `❌ Error: ${err.message}`, success: false });
     }
-    setMigrating(false);
   };
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
+    fetchData();
   }, []);
 
   if (loading && !stats) {
@@ -118,21 +171,15 @@ export default function AdminPayinEngine() {
       <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
         <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-2" />
         <p className="text-red-700 font-medium">{error}</p>
-        <button onClick={fetchStats} className="mt-3 text-red-600 underline text-sm">
+        <button onClick={fetchData} className="mt-3 text-red-600 underline text-sm">
           Retry
         </button>
       </div>
     );
   }
 
-  const summary = stats?.summary || {};
-  const recentSelections = stats?.recentSelections || [];
-  const upiPerformance = stats?.upiPerformance || [];
-  const config = stats?.config || {};
-
   return (
     <div className="space-y-4">
-      {/* Toast */}
       {toast && <Toast msg={toast.msg} success={toast.success} onClose={() => setToast(null)} />}
 
       {/* Header */}
@@ -143,43 +190,33 @@ export default function AdminPayinEngine() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900">Payin Engine v2.0</h1>
-            <p className="text-slate-500 text-xs">Smart UPI Selection</p>
+            <p className="text-slate-500 text-xs">Smart UPI Selection • Supabase</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={migrateUpis}
-            disabled={migrating}
-            className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-medium flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <Database className="w-4 h-4" />
-            {migrating ? 'Migrating...' : 'Migrate'}
-          </button>
-          <button
-            onClick={fetchStats}
-            disabled={loading}
-            className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium flex items-center gap-1.5"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium flex items-center gap-1.5"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border p-3">
           <p className="text-xs text-slate-500 mb-1">UPIs in Pool</p>
-          <p className="text-xl font-bold">{summary.totalUpisInPool || 0}</p>
-          <p className="text-xs text-green-600">{summary.activeUpis || 0} active</p>
+          <p className="text-xl font-bold">{stats?.totalUpisInPool || 0}</p>
+          <p className="text-xs text-green-600">{stats?.activeUpis || 0} active</p>
         </div>
         <div className="bg-white rounded-xl border p-3">
           <p className="text-xs text-slate-500 mb-1">Today Volume</p>
-          <p className="text-xl font-bold text-green-600">₹{(summary.todayTotalVolume || 0).toLocaleString()}</p>
+          <p className="text-xl font-bold text-green-600">₹{(stats?.todayTotalVolume || 0).toLocaleString()}</p>
         </div>
         <div className="bg-white rounded-xl border p-3">
           <p className="text-xs text-slate-500 mb-1">Today Txns</p>
-          <p className="text-xl font-bold">{summary.todayTotalTxns || 0}</p>
+          <p className="text-xl font-bold">{stats?.todayTotalTxns || 0}</p>
         </div>
         <div className="bg-white rounded-xl border p-3">
           <p className="text-xs text-slate-500 mb-1">Randomness</p>
@@ -207,22 +244,22 @@ export default function AdminPayinEngine() {
         {/* UPI Performance Tab */}
         {activeTab === 'overview' && (
           <div className="divide-y">
-            {upiPerformance.length > 0 ? (
-              upiPerformance.map((upi, i) => (
-                <div key={i} className="p-3">
+            {upis.length > 0 ? (
+              upis.map((upi) => (
+                <div key={upi.id} className="p-3">
                   <div className="flex items-start justify-between mb-1">
                     <div>
-                      <p className="font-mono text-sm font-medium">{upi.upiId}</p>
-                      <p className="text-xs text-slate-400">{upi.trader}</p>
+                      <p className="font-mono text-sm font-medium">{upi.upi_id}</p>
+                      <p className="text-xs text-slate-400">{upi.holder_name || upi.trader_id?.slice(0, 8)}</p>
                     </div>
-                    <span className={`w-2 h-2 rounded-full mt-1.5 ${upi.active ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className={`w-2 h-2 rounded-full mt-1.5 ${upi.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2">
-                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.bank}</span>
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{upi.type}</span>
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">₹{(upi.todayVolume || 0).toLocaleString()}</span>
-                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.todayCount || 0} txns</span>
-                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">{upi.successRate || 0}%</span>
+                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.bank || 'Unknown'}</span>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{upi.type || 'UPI'}</span>
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">₹{(upi.today_volume || 0).toLocaleString()}</span>
+                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.today_count || 0} txns</span>
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">{upi.success_rate || 0}%</span>
                   </div>
                 </div>
               ))
@@ -230,9 +267,6 @@ export default function AdminPayinEngine() {
               <div className="p-8 text-center text-slate-400">
                 <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p>No UPIs in pool</p>
-                <button onClick={migrateUpis} className="mt-2 text-indigo-600 text-sm underline">
-                  Migrate UPIs
-                </button>
               </div>
             )}
           </div>
@@ -241,9 +275,9 @@ export default function AdminPayinEngine() {
         {/* Selection Logs Tab */}
         {activeTab === 'logs' && (
           <div className="divide-y">
-            {recentSelections.length > 0 ? (
-              recentSelections.map((log, i) => (
-                <div key={i} className="p-3">
+            {logs.length > 0 ? (
+              logs.map((log) => (
+                <div key={log.id} className="p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-semibold">₹{(log.amount || 0).toLocaleString()}</span>
                     <div className="flex items-center gap-2">
@@ -259,10 +293,10 @@ export default function AdminPayinEngine() {
                       )}
                     </div>
                   </div>
-                  <p className="font-mono text-sm text-slate-600">{log.selectedUpi || 'None'}</p>
+                  <p className="font-mono text-sm text-slate-600">{log.selected_upi || 'None'}</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    {log.timestamp?._seconds 
-                      ? new Date(log.timestamp._seconds * 1000).toLocaleString() 
+                    {log.created_at 
+                      ? new Date(log.created_at).toLocaleString('en-IN') 
                       : 'Unknown'
                     } • {log.attempts || 1} attempt(s)
                   </p>
@@ -306,6 +340,9 @@ export default function AdminPayinEngine() {
                       <p className="text-lg font-bold text-indigo-600">{value}</p>
                     </div>
                   ))}
+                  {Object.keys(config.weights || {}).length === 0 && (
+                    <p className="text-slate-400 text-sm col-span-2">No config found. Click "Reset to Defaults" to initialize.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -335,7 +372,7 @@ export default function AdminPayinEngine() {
                     className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm font-bold"
                   />
                 ) : (
-                  <p className="text-lg font-bold text-indigo-600">{config.scoreExponent ?? config.randomExponent ?? 2}</p>
+                  <p className="text-lg font-bold text-indigo-600">{config.scoreExponent ?? 2}</p>
                 )}
               </div>
             </div>
@@ -362,9 +399,18 @@ export default function AdminPayinEngine() {
                 <>
                   <button
                     onClick={() => {
-                      setEditWeights({...(config.weights || {})});
-                      setEditEnableRandomness(config.enableRandomness || false);
-                      setEditRandomExponent(config.scoreExponent ?? config.randomExponent ?? 2);
+                      setEditWeights({...(config.weights || {
+                        successRate: 25,
+                        dailyLimitLeft: 20,
+                        cooldown: 15,
+                        amountMatch: 15,
+                        traderBalance: 10,
+                        bankHealth: 5,
+                        timeWindow: 5,
+                        recentFailures: 5,
+                      })});
+                      setEditEnableRandomness(config.enableRandomness ?? true);
+                      setEditRandomExponent(config.scoreExponent ?? 2);
                       setEditingConfig(true);
                     }}
                     className="flex-1 px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium"
@@ -372,7 +418,7 @@ export default function AdminPayinEngine() {
                     Edit Config
                   </button>
                   <button
-                    onClick={initEngine}
+                    onClick={resetToDefaults}
                     className="flex-1 px-3 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-medium"
                   >
                     Reset to Defaults
