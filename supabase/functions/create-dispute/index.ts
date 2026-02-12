@@ -188,11 +188,11 @@ serve(async (req: Request) => {
         payout_id: payoutId || null,
         type,
         reason,
-        utr: utr || null,
+        transaction_id: utr || null,
         amount: amount || null,
         proof_url: proofUrl || null,
         status: 'pending',
-        metadata: metadata || null,
+        description: metadata ? JSON.stringify(metadata) : null,
       })
       .select('id')
       .single();

@@ -14,7 +14,7 @@ import ActiveRequestBanner from './components/ActiveRequestBanner';
 import RequestTab from './components/RequestTab';
 import AssignedTab from './components/AssignedTab';
 import HistoryTab from './components/HistoryTab';
-import ProcessModal from './components/ProcessModal';
+import VerificationUploadModal from './components/VerificationUploadModal';
 
 /* ─── Tabs config ─── */
 const TABS = [
@@ -140,132 +140,29 @@ export default function TraderPayout() {
     } catch (e) { setToast({ msg: '❌ ' + e.message, success: false }); }
   };
 
-  const handleUploadAndComplete = async (utrId, proofFile) => {
-    if (!selectedPayout || !utrId || !proofFile) { setToast({ msg: 'Provide both UTR and proof', success: false }); return; }
-    if (proofFile.size > 5 * 1024 * 1024)         { setToast({ msg: 'File must be < 5 MB', success: false }); return; }
-    if (!proofFile.type.startsWith('image/'))      { setToast({ msg: 'Only image files allowed', success: false }); return; }
-
-    setProcessingPayout(selectedPayout.id);
-    setUploadProgress(0);
-    try {
-      const filename = `${selectedPayout.id}-${Date.now()}-${proofFile.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-
-      // Upload to Supabase Storage
-      const progressInterval = setInterval(() => setUploadProgress(p => p >= 90 ? 90 : p + 10), 200);
-      const { error: upErr } = await supabase.storage.from('payout-proofs').upload(filename, proofFile);
-      clearInterval(progressInterval);
-      if (upErr) throw upErr;
-      setUploadProgress(95);
-      const { data: urlData } = supabase.storage.from('payout-proofs').getPublicUrl(filename);
-      const proofUrl = urlData.publicUrl;
-      setUploadProgress(100);
-
-      const amount = Number(selectedPayout.amount);
-      const traderComm = Math.round((amount * payoutCommission) / 100);
-      const ts = new Date().toISOString();
-
-      // Get merchant info for rates and webhook
-      const { data: merchant } = await supabase
-        .from('merchants')
-        .select('id, payout_rate, webhook_url, webhook_secret')
-        .eq('id', selectedPayout.merchantId || selectedPayout.merchant_id)
-        .single();
-      
-      const merchantRate = merchant?.payout_rate || 2; // Default 2%
-
-      // Update payout
-      await supabase.from('payouts').update({
-        status: 'completed', completed_at: ts, trader_id: traderId,
-        utr: utrId, proof_url: proofUrl, commission: traderComm,
-      }).eq('id', selectedPayout.id);
-
-      // Update trader balance (credit amount + commission)
-      const { data: td } = await supabase.from('traders').select('balance, overall_commission').eq('id', traderId).single();
-      if (td) {
-        await supabase.from('traders').update({
-          balance: (Number(td.balance) || 0) + amount + traderComm,
-          overall_commission: (Number(td.overall_commission) || 0) + traderComm,
-        }).eq('id', traderId);
-      }
-
-      // Record platform profit for payout
-      const merchantFee = Math.round((amount * merchantRate) / 100);
-      const platformProfit = merchantFee - traderComm;
-      
-      await supabase.from('platform_earnings').insert({
-        type: 'payout',
-        reference_id: selectedPayout.id,
-        merchant_id: selectedPayout.merchantId || selectedPayout.merchant_id,
-        trader_id: traderId,
-        transaction_amount: amount,
-        merchant_fee: merchantFee,
-        trader_fee: traderComm,
-        platform_profit: platformProfit,
+  // Handle verification proof submission (new flow with admin approval)
+  const handleVerificationSubmit = async (result) => {
+    if (result?.success) {
+      const hasFlags = result.flags && result.flags.length > 0;
+      setToast({ 
+        msg: hasFlags 
+          ? '📤 Proof submitted for verification (flagged for review)' 
+          : '📤 Proof submitted! Awaiting admin verification', 
+        success: true 
       });
-      
-      console.log('💰 Payout complete:', { amount, traderComm, merchantFee, platformProfit });
-
-      // Credit affiliate if trader has one
-      const { data: affiliateResult } = await supabase.rpc('credit_affiliate_on_trader_transaction', {
-        p_trader_id: traderId,
-        p_transaction_type: 'payout',
-        p_transaction_id: selectedPayout.id,
-        p_transaction_amount: amount,
-        p_trader_earning: traderComm
-      });
-      
-      if (affiliateResult?.credited) {
-        console.log('👥 Affiliate credited:', affiliateResult);
-      }
-
-      // Queue webhook for merchant
-      if (merchant?.webhook_url) {
-        await supabase.from('payout_webhook_queue').insert({
-          payout_id: selectedPayout.id,
-          merchant_id: merchant.id,
-          webhook_url: merchant.webhook_url,
-          webhook_secret: merchant.webhook_secret,
-          event_type: 'payout.completed',
-          payload: {
-            event: 'payout.completed',
-            payout_id: selectedPayout.id,
-            payout_ref: selectedPayout.payout_id || selectedPayout.payoutId,
-            amount: amount,
-            beneficiary_name: selectedPayout.beneficiary_name || selectedPayout.beneficiaryName,
-            utr: utrId,
-            status: 'completed',
-            completed_at: ts,
-          },
-        });
-      }
-
-      // Check if all payouts for this request are completed
-      if (selectedPayout.payoutRequestId) {
-        const { count } = await supabase
-          .from('payouts')
-          .select('*', { count: 'exact', head: true })
-          .eq('payout_request_id', selectedPayout.payoutRequestId)
-          .eq('status', 'assigned');
-        if (count === 0) {
-          await supabase.from('payout_requests').update({
-            status: 'completed', completed_at: ts, fully_completed: true,
-          }).eq('id', selectedPayout.payoutRequestId);
-          setToast({ msg: '✅ All payouts completed! Request closed automatically', success: true });
-        }
-      }
-
-      setToast({ msg: `✅ Completed! ₹${(amount + traderComm).toLocaleString()} credited`, success: true });
       setSelectedPayout(null);
-
-      // Refresh balance
-      const { data: fresh } = await supabase.from('traders').select('balance, security_hold').eq('id', traderId).single();
-      if (fresh) setWorkingBalance((Number(fresh.balance) || 0) - (Number(fresh.security_hold) || 0));
-    } catch (e) {
-      console.error(e);
-      setToast({ msg: '❌ ' + (e.message || 'Upload failed'), success: false });
+      
+      // Refresh assigned payouts to show updated status
+      const { data: assigned } = await supabase
+        .from('payouts')
+        .select('*')
+        .eq('trader_id', traderId)
+        .in('status', ['assigned'])
+        .limit(100);
+      setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
+    } else {
+      setToast({ msg: '❌ ' + (result?.error || 'Submission failed'), success: false });
     }
-    setProcessingPayout(null);
-    setUploadProgress(0);
   };
 
   const handleCancelPayout = async (payout, reason) => {
@@ -408,14 +305,12 @@ export default function TraderPayout() {
         <HistoryTab payouts={completedPayouts} totalAmount={totalCompleted} />
       )}
 
-      {/* Process modal (bottom sheet) */}
+      {/* Verification Upload Modal (new flow with admin approval) */}
       {selectedPayout && (
-        <ProcessModal
+        <VerificationUploadModal
           payout={selectedPayout}
           onClose={() => setSelectedPayout(null)}
-          onComplete={handleUploadAndComplete}
-          isUploading={processingPayout === selectedPayout.id}
-          uploadProgress={uploadProgress}
+          onSubmit={handleVerificationSubmit}
         />
       )}
     </div>

@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { createTrader } from '../../../supabaseAdmin';
 import { Link, useNavigate } from 'react-router-dom';
+import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 import {
   Users, Search, Filter, Plus, RefreshCw, Eye, CheckCircle, AlertCircle,
   Wallet, Phone, Mail, Download, UserPlus, ToggleLeft, ToggleRight, X,
@@ -48,6 +50,9 @@ export default function AdminTraderList() {
   const [selectedTrader, setSelectedTrader] = useState(null);
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   const fetchTraders = useCallback(async () => {
     const { data, error } = await supabase
@@ -87,53 +92,79 @@ export default function AdminTraderList() {
     totalBalance: traders.reduce((sum, t) => sum + (t.balance || 0), 0),
   }), [traders]);
 
-  // Generate USDT address using Tatum
+  // Generate USDT address using Tatum (via Edge Function or direct API)
   const generateTatumAddress = async (traderId) => {
     try {
-      const { data: configRow } = await supabase
-        .from('system_config')
-        .select('value')
-        .eq('key', 'tatum_config')
+      // Read from tatum_config table (matches Edge Functions schema)
+      const { data: configRow, error: configError } = await supabase
+        .from('tatum_config')
+        .select('*')
+        .eq('id', 'main')
         .single();
-      if (!configRow?.value?.masterWallet) {
-        throw new Error('Master wallet not configured. Please generate master wallet in Settings first.');
+
+      if (configError || !configRow?.master_xpub) {
+        throw new Error('Master wallet not configured. Please set up Tatum config (master_xpub) in the database first.');
       }
 
-      const config = configRow.value;
-      const { tatumApiKey, masterWallet } = config;
-
-      if (!tatumApiKey || !masterWallet.xpub) {
-        throw new Error('Tatum API key or XPUB not found');
+      if (!configRow.tatum_api_key) {
+        throw new Error('Tatum API key not configured');
       }
 
+      // Get and increment derivation index manually (RPC function has issues)
       const { data: metaRow } = await supabase
-        .from('system_config')
-        .select('value')
-        .eq('key', 'address_meta')
+        .from('address_meta')
+        .select('last_index')
+        .eq('id', 'main')
         .single();
-      const nextIndex = metaRow?.value?.lastIndex ? metaRow.value.lastIndex + 1 : 1;
+      
+      const nextIndex = (metaRow?.last_index || 0) + 1;
 
-      const response = await fetch(`https://api.tatum.io/v3/tron/address/${masterWallet.xpub}/${nextIndex}`, {
+      console.log(`Generating address for trader ${traderId} at index ${nextIndex}`);
+
+      // Derive address from XPUB using Tatum API
+      const response = await fetch(`https://api.tatum.io/v3/tron/address/${configRow.master_xpub}/${nextIndex}`, {
         method: 'GET',
-        headers: { 'x-api-key': tatumApiKey },
+        headers: { 'x-api-key': configRow.tatum_api_key },
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || 'Failed to generate address');
+        throw new Error(error.message || 'Failed to generate address from Tatum');
       }
 
       const addressData = await response.json();
+      console.log('✅ Address generated:', addressData.address);
 
-      await supabase.from('traders').update({
+      // Update trader with new address
+      const { error: traderError } = await supabase.from('traders').update({
         usdt_deposit_address: addressData.address,
         derivation_index: nextIndex,
+        address_generated_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }).eq('id', traderId);
 
-      await supabase.from('system_config').upsert({
-        key: 'address_meta',
-        value: { lastIndex: nextIndex, lastUpdated: new Date().toISOString() },
+      if (traderError) {
+        console.error('Trader update error:', traderError);
+        throw new Error('Failed to update trader');
+      }
+
+      // Create address mapping
+      const { error: mappingError } = await supabase.from('address_mapping').upsert({
+        address: addressData.address,
+        trader_id: traderId,
+        derivation_index: nextIndex,
       });
+
+      if (mappingError) {
+        console.error('Mapping error:', mappingError);
+        // Non-fatal, continue
+      }
+
+      // Update the derivation index counter
+      await supabase.from('address_meta').update({
+        last_index: nextIndex,
+        last_updated: new Date().toISOString(),
+      }).eq('id', 'main');
 
       return addressData.address;
     } catch (error) {
@@ -163,9 +194,9 @@ export default function AdminTraderList() {
 
         setToast({ msg: '✅ Trader updated successfully!', success: true });
       } else {
+        // Password is auto-generated and emailed to trader
         const result = await createTrader({
           email: formData.email,
-          password: formData.password,
           name: formData.name,
           phone: formData.phone || '',
           priority: formData.priority || 'Normal',
@@ -226,10 +257,8 @@ export default function AdminTraderList() {
     }
   };
 
-  // Delete trader
-  const handleDeleteTrader = async (trader) => {
-    if (!window.confirm(`Delete ${trader.name}?\n\nThis cannot be undone.`)) return;
-
+  // Delete trader (2FA protected)
+  const doDeleteTrader = async (trader) => {
     try {
       await supabase.from('traders').delete().eq('id', trader.id);
       
@@ -249,8 +278,13 @@ export default function AdminTraderList() {
     }
   };
 
-  // Toggle status
-  const handleToggleStatus = async (trader) => {
+  const handleDeleteTrader = (trader) => {
+    if (!window.confirm(`Delete ${trader.name}?\n\nThis cannot be undone.`)) return;
+    requireVerification('Delete Trader', TwoFactorActions.DELETE_ENTITY, () => doDeleteTrader(trader));
+  };
+
+  // Toggle status (2FA protected)
+  const doToggleStatus = async (trader) => {
     const isActive = trader.active || trader.isActive || trader.status === 'active';
     try {
       await supabase.from('traders').update({
@@ -261,6 +295,10 @@ export default function AdminTraderList() {
     } catch (error) {
       setToast({ msg: 'Error: ' + error.message, success: false });
     }
+  };
+
+  const handleToggleStatus = (trader) => {
+    requireVerification('Deactivate Trader', TwoFactorActions.DEACTIVATE_ENTITY, () => doToggleStatus(trader));
   };
 
   // Export
@@ -413,6 +451,9 @@ export default function AdminTraderList() {
           )}
         </div>
       )}
+      
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import { getSettlements, createSettlement, processSettlement, getSettlementSettings, updateSettlementSettings } from '../../utils/enterprise';
-import { Search, Filter, Download, CheckCircle, Clock, XCircle, AlertCircle, Settings, Plus, RefreshCw } from 'lucide-react';
+import { Search, Filter, Download, CheckCircle, Clock, XCircle, AlertCircle, Settings, Plus, RefreshCw, Shield } from 'lucide-react';
+import TwoFactorModal, { useTwoFactorVerification } from '../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../hooks/useTwoFactor';
 
 const STATUS_CONFIG = {
   pending: { color: 'yellow', icon: Clock, label: 'Pending' },
@@ -320,9 +322,11 @@ function SettingsTab({ settings, onUpdate }) {
 function ProcessModal({ settlement, onClose, onSuccess }) {
   const [transactionRef, setTransactionRef] = useState('');
   const [processing, setProcessing] = useState(false);
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
-  const handleProcess = async () => {
-    if (!transactionRef.trim()) return;
+  const doProcess = async () => {
     setProcessing(true);
     try {
       await processSettlement(settlement.id, transactionRef);
@@ -333,6 +337,11 @@ function ProcessModal({ settlement, onClose, onSuccess }) {
       alert('Failed to process settlement');
     }
     setProcessing(false);
+  };
+
+  const handleProcess = () => {
+    if (!transactionRef.trim()) return;
+    requireVerification('Process Settlement', TwoFactorActions.PROCESS_SETTLEMENT, doProcess);
   };
 
   return (
@@ -375,11 +384,15 @@ function ProcessModal({ settlement, onClose, onSuccess }) {
           <button
             onClick={handleProcess}
             disabled={processing || !transactionRef.trim()}
-            className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50"
+            className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
           >
+            <Shield className="w-4 h-4" />
             {processing ? 'Processing...' : 'Mark as Completed'}
           </button>
         </div>
+        
+        {/* 2FA Modal */}
+        <TwoFactorModalComponent />
       </div>
     </div>
   );

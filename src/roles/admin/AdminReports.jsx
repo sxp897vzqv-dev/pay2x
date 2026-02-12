@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase';
 import { getDailySummaries, generateDailySummary, createExportJob, getExportJobs } from '../../utils/enterprise';
-import { BarChart3, Download, Calendar, TrendingUp, TrendingDown, RefreshCw, FileText, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { BarChart3, Download, Calendar, TrendingUp, TrendingDown, RefreshCw, FileText, Clock, CheckCircle, XCircle, Shield } from 'lucide-react';
+import TwoFactorModal, { useTwoFactorVerification } from '../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../hooks/useTwoFactor';
 
 export default function AdminReports() {
   const [summaries, setSummaries] = useState([]);
@@ -13,6 +15,9 @@ export default function AdminReports() {
     end: new Date().toISOString().split('T')[0],
   });
   const [generating, setGenerating] = useState(false);
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   useEffect(() => { fetchData(); }, [dateRange]);
 
@@ -43,7 +48,7 @@ export default function AdminReports() {
     setGenerating(false);
   };
 
-  const handleExport = async (type) => {
+  const doExport = async (type) => {
     try {
       await createExportJob(type, {}, dateRange.start, dateRange.end);
       fetchData();
@@ -52,6 +57,10 @@ export default function AdminReports() {
       console.error(e);
       alert('Failed to create export job');
     }
+  };
+
+  const handleExport = (type) => {
+    requireVerification('Export Sensitive Data', TwoFactorActions.EXPORT_SENSITIVE, () => doExport(type));
   };
 
   const totals = summaries.reduce((acc, s) => ({
@@ -304,6 +313,9 @@ function ExportsTab({ exports, onExport, loading }) {
           </div>
         )}
       </div>
+      
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

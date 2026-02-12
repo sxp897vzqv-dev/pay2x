@@ -8,6 +8,7 @@ import {
   logAuditEvent,
   logMerchantAPIKeyGenerated,
 } from '../../../utils/auditLogger';
+import ResetPasswordButton from './components/ResetPasswordButton';
 
 function Toast({ msg, success, onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -95,6 +96,15 @@ function ProfileTab({ merchant, onUpdate, saving }) {
               </div>
             );
           })}
+        </div>
+        
+        {/* Password Reset Section */}
+        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Password</p>
+            <p className="text-xs text-slate-400">Reset merchant's login password</p>
+          </div>
+          <ResetPasswordButton email={merchant.email} name={merchant.name || merchant.businessName} />
         </div>
       </div>
     </div>

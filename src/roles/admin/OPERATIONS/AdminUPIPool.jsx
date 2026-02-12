@@ -5,9 +5,11 @@ import { Link } from 'react-router-dom';
 import { 
   Database, Search, RefreshCw, CheckCircle, ToggleLeft, ToggleRight, 
   User, Trash2, CreditCard, Building, TrendingUp, Clock, 
-  Zap, AlertTriangle, Target, X
+  Zap, AlertTriangle, Target, X, Shield
 } from 'lucide-react';
 import { logUPIEnabled, logUPIDisabled, logUPIDeleted } from '../../../utils/auditLogger';
+import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 
 // Shared components
 import { Toast, FilterPills, SearchInput, CardSkeleton } from '../../../components/admin';
@@ -208,6 +210,9 @@ export default function AdminUPIPool() {
   const [sortBy, setSortBy] = useState('conversion');
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState(null);
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   const fetchPool = useCallback(async () => {
     const { data } = await supabase.from('upi_pool').select('*');
@@ -347,7 +352,8 @@ export default function AdminUPIPool() {
     return { total: pool.length, active: activePool.length, inactive: pool.length - activePool.length, totalVolume, overallConversion, totalCompleted, totalFailed, healthy, idle, problem };
   }, [pool, upiStats]);
 
-  const handleToggle = async (upi) => {
+  // Toggle UPI (2FA protected)
+  const doToggle = async (upi) => {
     const willActivate = upi.status !== 'active';
     try {
       await supabase.from('upi_pool').update({ status: willActivate ? 'active' : 'inactive' }).eq('id', upi.id);
@@ -362,8 +368,12 @@ export default function AdminUPIPool() {
     } catch (e) { console.error(e); setToast({ msg: 'Failed to update', success: false }); }
   };
 
-  const handleDelete = async (upi) => {
-    if (!window.confirm(`Remove ${upi.upi_id || upi.account_number} from pool?`)) return;
+  const handleToggle = (upi) => {
+    requireVerification('Modify UPI Pool', TwoFactorActions.MODIFY_UPI_POOL, () => doToggle(upi));
+  };
+
+  // Delete UPI (2FA protected)
+  const doDelete = async (upi) => {
     try {
       await supabase.from('upi_pool').delete().eq('id', upi.id);
       const upiIdentifier = upi.upi_id || upi.account_number || 'Unknown';
@@ -371,6 +381,11 @@ export default function AdminUPIPool() {
       setToast({ msg: 'Removed from pool', success: true });
       fetchPool();
     } catch (e) { console.error(e); setToast({ msg: 'Failed to remove', success: false }); }
+  };
+
+  const handleDelete = (upi) => {
+    if (!window.confirm(`Remove ${upi.upi_id || upi.account_number} from pool?`)) return;
+    requireVerification('Modify UPI Pool', TwoFactorActions.MODIFY_UPI_POOL, () => doDelete(upi));
   };
 
   const handleUpdateLimit = async (upi, limit) => {
@@ -463,6 +478,9 @@ export default function AdminUPIPool() {
           <p className="text-slate-500 font-medium">No UPIs found</p>
         </div>
       )}
+      
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

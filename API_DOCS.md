@@ -367,6 +367,236 @@ curl -X POST https://xxx.supabase.co/functions/v1/create-payin \
 
 ---
 
+## 5. Virtual Accounts API
+
+Virtual Accounts let you generate unique bank account numbers for each customer. When customers transfer to their VA, funds are automatically credited to your merchant balance.
+
+### 5.1 Generate Virtual Account
+
+Create a new virtual account for a customer.
+
+**Endpoint:** `POST /generate-virtual-account`
+
+### Request Headers
+```
+X-API-Key: <live_api_key>
+Content-Type: application/json
+```
+
+### Request Body
+```json
+{
+  "customer_id": "cust_123",
+  "customer_name": "John Doe",
+  "customer_email": "john@example.com",
+  "customer_phone": "9876543210",
+  "expected_amount": 5000,
+  "expires_in_days": 30,
+  "auto_sweep": true,
+  "metadata": {
+    "plan": "premium"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| customer_id | string | ❌ | Your customer's unique ID |
+| customer_name | string | ❌ | Customer's name (used as account holder name) |
+| customer_email | string | ❌ | Customer email |
+| customer_phone | string | ❌ | Customer phone |
+| expected_amount | number | ❌ | Expected payment amount (null = any) |
+| min_amount | number | ❌ | Minimum accepted amount |
+| max_amount | number | ❌ | Maximum accepted amount |
+| expires_in_days | number | ❌ | VA validity in days (null = no expiry) |
+| auto_sweep | boolean | ❌ | Auto-credit to balance (default: true) |
+| webhook_url | string | ❌ | Custom webhook URL for this VA |
+| metadata | object | ❌ | Custom data |
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "virtual_account": {
+    "id": "va_abc123",
+    "account_number": "TB123456789012",
+    "ifsc_code": "TEST0000001",
+    "bank_name": "Test Bank Ltd",
+    "account_holder_name": "John Doe",
+    "expected_amount": 5000,
+    "min_amount": 1,
+    "max_amount": 10000000,
+    "expires_at": "2026-03-12T00:00:00Z",
+    "customer_id": "cust_123"
+  }
+}
+```
+
+### Error Response
+```json
+{
+  "success": false,
+  "error": "Invalid API key"
+}
+```
+
+---
+
+### 5.2 Get VA Transactions
+
+List all VAs or get transactions for a specific VA.
+
+**Endpoint:** `GET /get-va-transactions`
+
+### Query Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| va_id | string | Get specific VA by ID |
+| account_number | string | Get specific VA by account number |
+| customer_id | string | Filter VAs by customer ID |
+| status | string | Filter by status (active/expired/closed or pending/credited/failed for txns) |
+| limit | number | Results per page (default: 50) |
+| offset | number | Pagination offset |
+
+### List All VAs
+```
+GET /get-va-transactions?limit=20&status=active
+```
+
+### Response
+```json
+{
+  "success": true,
+  "virtual_accounts": [
+    {
+      "id": "va_abc123",
+      "account_number": "TB123456789012",
+      "ifsc_code": "TEST0000001",
+      "bank_name": "Test Bank Ltd",
+      "status": "active",
+      "total_collected": 15000,
+      "transaction_count": 3,
+      "customer_id": "cust_123",
+      "customer_name": "John Doe",
+      "expires_at": null,
+      "created_at": "2026-02-10T10:00:00Z"
+    }
+  ],
+  "pagination": {
+    "total": 45,
+    "limit": 20,
+    "offset": 0
+  }
+}
+```
+
+### Get VA with Transactions
+```
+GET /get-va-transactions?account_number=TB123456789012
+```
+
+### Response
+```json
+{
+  "success": true,
+  "virtual_account": {
+    "id": "va_abc123",
+    "account_number": "TB123456789012",
+    "ifsc_code": "TEST0000001",
+    "bank_name": "Test Bank Ltd",
+    "status": "active",
+    "total_collected": 15000,
+    "transaction_count": 3
+  },
+  "transactions": [
+    {
+      "id": "txn_xyz",
+      "amount": 5000,
+      "utr": "UTR123456",
+      "sender_name": "Alice Smith",
+      "status": "credited",
+      "fee_amount": 100,
+      "net_amount": 4900,
+      "credited_at": "2026-02-10T11:00:00Z",
+      "created_at": "2026-02-10T11:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 5.3 VA Webhook Events
+
+When a payment is received on a virtual account, we'll send a webhook:
+
+**Event:** `va.transaction.received`
+
+```json
+{
+  "event": "va.transaction.received",
+  "data": {
+    "transaction_id": "txn_xyz",
+    "virtual_account_id": "va_abc123",
+    "account_number": "TB123456789012",
+    "customer_id": "cust_123",
+    "amount": 5000,
+    "utr": "UTR123456",
+    "sender_name": "Alice Smith",
+    "status": "credited",
+    "created_at": "2026-02-10T11:00:00Z"
+  }
+}
+```
+
+**Signature Verification:**
+```javascript
+const crypto = require('crypto');
+
+function verifyWebhook(payload, signature, secret) {
+  const expected = 'v1=' + crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex');
+  return signature === expected;
+}
+
+// Usage
+const isValid = verifyWebhook(
+  rawBody,
+  req.headers['x-pay2x-signature'],
+  process.env.WEBHOOK_SECRET
+);
+```
+
+---
+
+### 5.4 Virtual Account Flow
+
+```
+1. Merchant calls generate-virtual-account API
+   → Returns unique VA number (e.g., TB123456789012)
+
+2. Merchant shows VA details to customer:
+   - Account Number: TB123456789012
+   - IFSC: TEST0000001
+   - Bank: Test Bank Ltd
+
+3. Customer transfers money via NEFT/IMPS/UPI
+
+4. Bank notifies Pay2X of deposit
+
+5. Pay2X:
+   - Records transaction
+   - Credits merchant balance (if auto_sweep)
+   - Sends webhook to merchant
+
+6. Merchant receives webhook, updates customer status
+```
+
+---
+
 ## Support
 
 - **Dashboard:** https://pay2x.io/admin

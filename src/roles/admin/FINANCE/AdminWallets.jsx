@@ -68,15 +68,29 @@ export default function AdminWallets() {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     
     try {
-      const [configRes, walletsRes, txRes, statsRes, tradersRes] = await Promise.all([
-        supabase.from('wallet_config').select('*').single(),
+      const [configRes, metaRes, walletsRes, txRes, statsRes, tradersRes] = await Promise.all([
+        supabase.from('tatum_config').select('*').eq('id', 'main').single(),
+        supabase.from('address_meta').select('last_index').eq('id', 'main').single(),
         supabase.from('v_trader_wallets').select('*'),
         supabase.from('v_wallet_transactions').select('*').limit(100),
         supabase.from('v_wallet_stats').select('*').single(),
         supabase.from('traders').select('id, name, phone').eq('is_active', true),
       ]);
       
-      if (configRes.data) setConfig(configRes.data);
+      // Map tatum_config fields to expected format
+      if (configRes.data) {
+        setConfig({
+          ...configRes.data,
+          xpub: configRes.data.master_xpub,
+          mnemonic_encrypted: configRes.data.master_mnemonic,
+          tatum_api_key_encrypted: configRes.data.tatum_api_key,
+          admin_wallet_address: configRes.data.admin_wallet,
+          network: 'tron',
+          token: 'USDT',
+          contract_address: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+          last_derivation_index: metaRes.data?.last_index || 0,
+        });
+      }
       if (walletsRes.data) setWallets(walletsRes.data);
       if (txRes.data) setTransactions(txRes.data);
       if (statsRes.data) setStats(statsRes.data);
@@ -706,42 +720,22 @@ function ConfigModal({ config, onClose, onSuccess }) {
   const handleSave = async () => {
     setLoading(true);
     try {
+      // Map to tatum_config column names
       const updates = {
-        network: 'tron',
-        token: 'USDT',
-        contract_address: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-        admin_wallet_address: adminWallet || null,
         updated_at: new Date().toISOString(),
       };
       
       // Only update these if provided (don't overwrite with empty)
-      if (tatumApiKey) updates.tatum_api_key_encrypted = tatumApiKey; // In production, encrypt this
-      if (mnemonic) updates.mnemonic_encrypted = mnemonic; // In production, encrypt this
-      if (xpub) updates.xpub = xpub;
+      if (tatumApiKey) updates.tatum_api_key = tatumApiKey;
+      if (mnemonic) updates.master_mnemonic = mnemonic;
+      if (xpub) updates.master_xpub = xpub;
+      if (adminWallet) updates.admin_wallet = adminWallet;
       
-      // Check if config exists
-      const { data: existing } = await supabase
-        .from('wallet_config')
-        .select('id')
-        .limit(1)
-        .single();
-      
-      let error;
-      
-      if (existing?.id) {
-        // Update existing config
-        const res = await supabase
-          .from('wallet_config')
-          .update(updates)
-          .eq('id', existing.id);
-        error = res.error;
-      } else {
-        // Insert new config
-        const res = await supabase
-          .from('wallet_config')
-          .insert(updates);
-        error = res.error;
-      }
+      // Update tatum_config (always exists with id='main')
+      const { error } = await supabase
+        .from('tatum_config')
+        .update(updates)
+        .eq('id', 'main');
       
       if (error) throw error;
       onSuccess();
@@ -874,29 +868,62 @@ function GenerateWalletModal({ traders, onClose, onSuccess }) {
     
     setLoading(true);
     try {
-      // Get next derivation index
-      const { data: indexData } = await supabase.rpc('get_next_derivation_index');
-      const derivationIndex = indexData || 0;
+      // Get tatum config
+      const { data: config, error: configError } = await supabase
+        .from('tatum_config')
+        .select('*')
+        .eq('id', 'main')
+        .single();
       
-      // In production, call Edge Function to derive address from xpub
-      // For now, simulating the response
-      const res = await supabase.functions.invoke('generate-trader-wallet', {
-        body: { traderId: selectedTrader, derivationIndex }
+      if (configError || !config?.master_xpub || !config?.tatum_api_key) {
+        throw new Error('Tatum not configured. Please set up API key and master wallet first.');
+      }
+      
+      // Get next derivation index manually
+      const { data: metaRow } = await supabase
+        .from('address_meta')
+        .select('last_index')
+        .eq('id', 'main')
+        .single();
+      
+      const derivationIndex = (metaRow?.last_index || 0) + 1;
+      
+      // Call Tatum API to derive address
+      const tatumRes = await fetch(
+        `https://api.tatum.io/v3/tron/address/${config.master_xpub}/${derivationIndex}`,
+        { headers: { 'x-api-key': config.tatum_api_key } }
+      );
+      
+      if (!tatumRes.ok) {
+        const err = await tatumRes.json();
+        throw new Error(err.message || 'Tatum API error');
+      }
+      
+      const addressData = await tatumRes.json();
+      
+      // Update trader with new address
+      await supabase.from('traders').update({
+        usdt_deposit_address: addressData.address,
+        derivation_index: derivationIndex,
+        address_generated_at: new Date().toISOString(),
+      }).eq('id', selectedTrader);
+      
+      // Create address mapping
+      await supabase.from('address_mapping').upsert({
+        address: addressData.address,
+        trader_id: selectedTrader,
+        derivation_index: derivationIndex,
       });
       
-      if (res.error) throw res.error;
+      // Update derivation index counter
+      await supabase.from('address_meta').update({
+        last_index: derivationIndex,
+        last_updated: new Date().toISOString(),
+      }).eq('id', 'main');
       
       setResult({
-        address: res.data?.address || 'T' + Math.random().toString(36).slice(2, 12).toUpperCase(),
+        address: addressData.address,
         derivationIndex,
-      });
-      
-      // Save to database
-      await supabase.rpc('create_trader_wallet', {
-        p_trader_id: selectedTrader,
-        p_address: res.data?.address || result?.address,
-        p_derivation_index: derivationIndex,
-        p_derivation_path: `m/44'/195'/0'/0/${derivationIndex}`,
       });
       
       onSuccess();

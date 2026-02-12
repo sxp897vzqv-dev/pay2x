@@ -1,10 +1,68 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { Link } from 'react-router-dom';
 import { supabase } from '../../../supabase';
 import {
   TrendingUp, TrendingDown, DollarSign, Wallet, Activity, RefreshCw,
-  Calendar, ArrowRight,
+  Calendar, ArrowRight, AlertTriangle, AlertCircle, XCircle, CheckCircle, Clock,
 } from 'lucide-react';
 import StatCard from '../../../components/admin/StatCard';
+
+/* ─── Alert Card ─── */
+const AlertCard = ({ alert }) => {
+  const typeStyles = {
+    critical: { bg: 'bg-red-50', border: 'border-red-200', icon: XCircle, iconColor: 'text-red-600' },
+    warning: { bg: 'bg-amber-50', border: 'border-amber-200', icon: AlertTriangle, iconColor: 'text-amber-600' },
+    info: { bg: 'bg-blue-50', border: 'border-blue-200', icon: AlertCircle, iconColor: 'text-blue-600' },
+    success: { bg: 'bg-green-50', border: 'border-green-200', icon: CheckCircle, iconColor: 'text-green-600' },
+  };
+  const style = typeStyles[alert.type] || typeStyles.info;
+  const Icon = style.icon;
+
+  return (
+    <Link to={alert.link || '#'} className={`${style.bg} ${style.border} border rounded-xl p-3 flex items-start gap-3 hover:shadow-sm transition-shadow`}>
+      <Icon className={`w-5 h-5 ${style.iconColor} flex-shrink-0 mt-0.5`} />
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-slate-900 text-sm">{alert.title}</p>
+        <p className="text-xs text-slate-600 mt-0.5 line-clamp-2">{alert.message}</p>
+      </div>
+    </Link>
+  );
+};
+
+/* ─── Recent Transaction ─── */
+function RecentTransaction({ tx }) {
+  const isPayin = tx.type === 'payin';
+  const statusColors = {
+    success: 'bg-green-100 text-green-700',
+    completed: 'bg-green-100 text-green-700',
+    pending: 'bg-yellow-100 text-yellow-700',
+    assigned: 'bg-blue-100 text-blue-700',
+    processing: 'bg-yellow-100 text-yellow-700',
+    failed: 'bg-red-100 text-red-700',
+    rejected: 'bg-red-100 text-red-700',
+    expired: 'bg-slate-100 text-slate-600',
+  };
+
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-slate-100 last:border-0">
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${isPayin ? 'bg-green-100' : 'bg-blue-100'}`}>
+        {isPayin ? <TrendingUp className="text-green-600" size={16} /> : <TrendingDown className="text-blue-600" size={16} />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-slate-900 text-sm">{isPayin ? 'Payin' : 'Payout'}</p>
+        <p className="text-xs text-slate-400 truncate">{tx.utr || tx.id?.slice(-8)}</p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className={`font-bold text-sm ${isPayin ? 'text-green-600' : 'text-blue-600'}`}>
+          {isPayin ? '+' : '−'}₹{Number(tx.amount || 0).toLocaleString()}
+        </p>
+        <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[tx.status] || statusColors.pending}`}>
+          {tx.status}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 /* ─── Date Presets ─── */
 const DATE_PRESETS = [
@@ -47,9 +105,11 @@ export default function TraderDashboard() {
   const [traderId, setTraderId] = useState(null);
   const [stats, setStats] = useState({
     payins: 0, payouts: 0, commission: 0,
-    overallCommission: 0, balance: 0,
-    pendingPayins: 0, pendingPayouts: 0,
+    overallCommission: 0, balance: 0, securityHold: 0,
+    pendingPayins: 0, pendingPayouts: 0, pendingDisputes: 0,
   });
+  const [alerts, setAlerts] = useState([]);
+  const [recentTx, setRecentTx] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -59,6 +119,65 @@ export default function TraderDashboard() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const fetchAlerts = useCallback(async (trader) => {
+    const alertsList = [];
+
+    try {
+      // Check for pending disputes
+      const { data: disputes, count: disputeCount } = await supabase
+        .from('disputes')
+        .select('*', { count: 'exact' })
+        .eq('trader_id', trader.id)
+        .in('status', ['pending', 'routed_to_trader'])
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (disputeCount > 0) {
+        alertsList.push({
+          id: 'disputes',
+          type: 'warning',
+          title: `${disputeCount} Dispute${disputeCount > 1 ? 's' : ''} Pending`,
+          message: 'You have disputes requiring your response',
+          link: '/trader/dispute',
+        });
+      }
+
+      // Low balance warning
+      const workingBalance = Number(trader.balance || 0) - Number(trader.security_hold || 0);
+      if (workingBalance < 5000) {
+        alertsList.push({
+          id: 'low-balance',
+          type: workingBalance < 1000 ? 'critical' : 'warning',
+          title: 'Low Balance Warning',
+          message: `Working balance is ₹${workingBalance.toLocaleString()}. Consider adding funds.`,
+          link: '/trader/balance',
+        });
+      }
+
+      // Check for assigned payouts awaiting action
+      const { count: assignedPayouts } = await supabase
+        .from('payouts')
+        .select('id', { count: 'exact', head: true })
+        .eq('trader_id', trader.id)
+        .eq('status', 'assigned');
+
+      if (assignedPayouts > 0) {
+        alertsList.push({
+          id: 'assigned-payouts',
+          type: 'info',
+          title: `${assignedPayouts} Payout${assignedPayouts > 1 ? 's' : ''} Assigned`,
+          message: 'New payouts assigned to you for processing',
+          link: '/trader/payout',
+        });
+      }
+
+    } catch (e) {
+      console.error('Error fetching alerts:', e);
+    }
+
+    setAlerts(alertsList);
+  }, []);
 
   const fetchStats = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -88,11 +207,14 @@ export default function TraderDashboard() {
         toDate = range.to;
       }
 
-      const [piCRes, piPRes, poCRes, poPRes] = await Promise.all([
+      const [piCRes, piPRes, poCRes, poPRes, disputesRes, recentPayins, recentPayouts] = await Promise.all([
         supabase.from('payins').select('amount,commission').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', fromDate).lte('completed_at', toDate),
         supabase.from('payins').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).eq('status', 'pending'),
         supabase.from('payouts').select('amount').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', fromDate).lte('completed_at', toDate),
-        supabase.from('payouts').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).eq('status', 'pending'),
+        supabase.from('payouts').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).in('status', ['pending', 'assigned']),
+        supabase.from('disputes').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).in('status', ['pending', 'routed_to_trader']),
+        supabase.from('payins').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(5),
+        supabase.from('payouts').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(5),
       ]);
 
       let payins = 0, commission = 0;
@@ -104,20 +226,31 @@ export default function TraderDashboard() {
       const rawBalance = Number(trader.balance || 0);
       const securityHold = Number(trader.security_hold || 0);
 
+      // Combine and sort recent transactions
+      const recent = [
+        ...(recentPayins.data || []).map(d => ({ ...d, type: 'payin' })),
+        ...(recentPayouts.data || []).map(d => ({ ...d, type: 'payout' })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
+
       setStats({
         payins, payouts, commission,
         overallCommission: Number(trader.overall_commission || 0),
         balance: rawBalance - securityHold,
+        securityHold,
         pendingPayins: piPRes.count || 0,
         pendingPayouts: poPRes.count || 0,
+        pendingDisputes: disputesRes.count || 0,
       });
+
+      setRecentTx(recent);
+      fetchAlerts(trader);
     } catch (e) {
       setError("Failed to load stats: " + e.message);
       console.error(e);
     }
     setLoading(false); 
     setRefreshing(false);
-  }, [datePreset, dateFrom, dateTo]);
+  }, [datePreset, dateFrom, dateTo, fetchAlerts]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -161,6 +294,21 @@ export default function TraderDashboard() {
         </div>
       )}
 
+      {/* Alerts Section */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            Requires Attention
+          </h3>
+          <div className="grid gap-2">
+            {alerts.map(alert => (
+              <AlertCard key={alert.id} alert={alert} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Date Range Selector */}
       <div className="bg-white border border-slate-200 rounded-xl p-3">
         <div className="flex items-center gap-2 mb-2">
@@ -201,7 +349,7 @@ export default function TraderDashboard() {
 
       {/* Hero summary strip */}
       <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-4 text-white shadow-md">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-green-200 text-xs font-semibold uppercase tracking-wide mb-0.5">Working Balance</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
@@ -213,6 +361,23 @@ export default function TraderDashboard() {
             <p className="text-lg font-bold">
               {loading ? '—' : `₹${(stats.payins - stats.payouts).toLocaleString()}`}
             </p>
+          </div>
+        </div>
+        {/* Balance breakdown */}
+        <div className="flex gap-3">
+          <div className="flex-1 bg-white/10 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <Clock className="w-3.5 h-3.5 text-yellow-300" />
+              <span className="text-xs text-green-200 font-medium">Security Hold</span>
+            </div>
+            <p className="text-base font-bold text-white">₹{stats.securityHold.toLocaleString()}</p>
+          </div>
+          <div className="flex-1 bg-white/10 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <AlertCircle className="w-3.5 h-3.5 text-orange-300" />
+              <span className="text-xs text-green-200 font-medium">Disputes</span>
+            </div>
+            <p className="text-base font-bold text-white">{stats.pendingDisputes}</p>
           </div>
         </div>
       </div>
@@ -245,7 +410,7 @@ export default function TraderDashboard() {
           ].map((item, i) => {
             const Icon = item.icon;
             return (
-              <a key={i} href={item.href}
+              <Link key={i} to={item.href}
                 className={`flex items-center gap-3 p-4 bg-gradient-to-br ${item.bg} hover:shadow-md active:scale-[0.98] transition-all border-b sm:border-b-0 sm:border-r border-slate-100 last:border-0`}>
                 <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center flex-shrink-0">
                   <Icon className="w-5 h-5" style={{ color: item.color }} />
@@ -255,9 +420,33 @@ export default function TraderDashboard() {
                   <p className="text-xs text-slate-500 truncate">{item.sub}</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
-              </a>
+              </Link>
             );
           })}
+        </div>
+      </div>
+
+      {/* Recent Transactions */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900">Recent Transactions</h3>
+          <Link to="/trader/payin" className="text-xs text-green-600 font-semibold hover:text-green-700 flex items-center gap-1">
+            View All <ArrowRight className="w-3 h-3" />
+          </Link>
+        </div>
+        <div className="px-4 py-1">
+          {loading ? (
+            <div className="py-8 text-center">
+              <div className="w-8 h-8 border-2 border-green-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            </div>
+          ) : recentTx.length > 0 ? (
+            recentTx.map(tx => <RecentTransaction key={tx.id} tx={tx} />)
+          ) : (
+            <div className="text-center py-10">
+              <Activity className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm font-medium">No recent transactions</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

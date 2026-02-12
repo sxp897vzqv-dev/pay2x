@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
+import { createAffiliate } from '../../supabaseAdmin';
 import { 
   Users, Plus, Search, Filter, MoreVertical, Eye, Edit2, 
   Ban, CheckCircle, TrendingUp, DollarSign, Calendar,
@@ -23,7 +24,6 @@ export default function AdminAffiliates() {
     bank_ifsc: '',
     bank_account_name: '',
     bank_name: '',
-    password: ''
   });
   const [settlements, setSettlements] = useState([]);
   const [pendingSettlements, setPendingSettlements] = useState([]);
@@ -45,12 +45,29 @@ export default function AdminAffiliates() {
 
   const fetchAffiliates = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // Try view first, fallback to table
+    let { data, error } = await supabase
       .from('affiliate_dashboard_view')
       .select('*')
       .order('created_at', { ascending: false });
     
-    if (!error) setAffiliates(data || []);
+    if (error) {
+      console.warn('View not found, falling back to affiliates table:', error.message);
+      // Fallback to direct table query
+      const result = await supabase
+        .from('affiliates')
+        .select('*')
+        .order('created_at', { ascending: false });
+      data = result.data;
+      error = result.error;
+    }
+    
+    if (error) {
+      console.error('Error fetching affiliates:', error);
+    }
+    
+    setAffiliates(data || []);
     setLoading(false);
   };
 
@@ -97,42 +114,32 @@ export default function AdminAffiliates() {
 
   const handleCreateAffiliate = async () => {
     try {
-      // 1. Create auth user
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: formData.email,
-        password: formData.password,
-        email_confirm: true
-      });
+      if (!formData.name.trim() || !formData.email.trim()) {
+        alert('Name and email are required');
+        return;
+      }
 
-      if (authError) throw authError;
-
-      // 2. Create profile
-      await supabase.from('profiles').insert({
-        id: authData.user.id,
-        email: formData.email,
-        role: 'affiliate'
-      });
-
-      // 3. Create affiliate record
-      const { error } = await supabase.from('affiliates').insert({
-        user_id: authData.user.id,
-        name: formData.name,
-        email: formData.email,
+      const result = await createAffiliate({
+        name: formData.name.trim(),
+        email: formData.email.trim(),
         phone: formData.phone,
         default_commission_rate: formData.default_commission_rate,
         bank_account_number: formData.bank_account_number,
         bank_ifsc: formData.bank_ifsc,
         bank_account_name: formData.bank_account_name,
         bank_name: formData.bank_name,
-        status: 'active'
       });
 
-      if (error) throw error;
+      if (!result.success) {
+        throw new Error('Failed to create affiliate');
+      }
 
       setShowModal(false);
       resetForm();
       fetchAffiliates();
       fetchStats();
+      
+      alert(`Affiliate created! Login credentials have been sent to ${formData.email.trim()}`);
     } catch (err) {
       alert('Error: ' + err.message);
     }
@@ -225,7 +232,6 @@ export default function AdminAffiliates() {
       bank_ifsc: '',
       bank_account_name: '',
       bank_name: '',
-      password: ''
     });
     setSelectedAffiliate(null);
   };
@@ -241,7 +247,6 @@ export default function AdminAffiliates() {
       bank_ifsc: affiliate.bank_ifsc || '',
       bank_account_name: affiliate.bank_account_name || '',
       bank_name: affiliate.bank_name || '',
-      password: ''
     });
     setModalMode('edit');
     setShowModal(true);
@@ -575,20 +580,13 @@ export default function AdminAffiliates() {
                   placeholder="email@example.com"
                   disabled={modalMode === 'edit'}
                 />
+                {modalMode === 'create' && (
+                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                    <Mail size={12} />
+                    Password will be auto-generated and emailed
+                  </p>
+                )}
               </div>
-
-              {modalMode === 'create' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({...formData, password: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2"
-                    placeholder="Login password"
-                  />
-                </div>
-              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>

@@ -152,10 +152,10 @@ serve(async (req: Request) => {
       return createErrorResponse(error, ctx);
     }
 
-    // 2. Validate API key and get merchant
+    // 2. Validate API key and get merchant  
     const { data: merchantData, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, name, business_name, is_active, plan, webhook_url, webhook_secret')
+      .select('id, name, business_name, is_active, webhook_url, webhook_secret')
       .eq('live_api_key', apiKey)
       .single();
 
@@ -165,7 +165,7 @@ serve(async (req: Request) => {
       errorMessage = error.message;
       responseStatus = error.httpStatus;
       
-      log('warn', 'Invalid API key', ctx, { keyPrefix: apiKey.slice(0, 10) });
+      log('warn', 'Invalid API key', ctx, { keyPrefix: apiKey.slice(0, 10), dbError: merchantError?.message });
       await logRequest(supabase, ctx, req, { status: error.httpStatus, errorCode, errorMessage });
       return createErrorResponse(error, ctx);
     }
@@ -372,11 +372,6 @@ serve(async (req: Request) => {
         timer: TIMER_SECONDS,
         expires_at: expiresAt.toISOString(),
         metadata: metadata || null,
-        description: description || null,
-        engine_version: '2.0',
-        selection_score: selection.score,
-        selection_attempts: selection.attempts,
-        trace_id: ctx.traceId,
       })
       .select('id')
       .single();

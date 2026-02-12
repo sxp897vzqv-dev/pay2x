@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, Link } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { 
-  Users, TrendingUp, DollarSign, CreditCard,
-  ArrowUpRight, ArrowDownRight, Calendar
+  Users, TrendingUp, DollarSign, Coins,
+  ArrowUpRight, ArrowDownRight, ChevronRight, Sparkles
 } from 'lucide-react';
 
 export default function AffiliateDashboard() {
@@ -39,13 +39,10 @@ export default function AffiliateDashboard() {
     // Fetch recent earnings
     const { data: earnings } = await supabase
       .from('affiliate_earnings')
-      .select(`
-        *,
-        trader:traders(name)
-      `)
+      .select(`*, trader:traders(name)`)
       .eq('affiliate_id', affiliate.id)
       .order('created_at', { ascending: false })
-      .limit(10);
+      .limit(5);
 
     // Calculate stats
     const now = new Date();
@@ -67,7 +64,6 @@ export default function AffiliateDashboard() {
     const earningsThisMonth = earningsData?.filter(e => new Date(e.created_at) >= thisMonth)
       .reduce((sum, e) => sum + Number(e.affiliate_earning), 0) || 0;
 
-    // Top traders by commission
     const sortedTraders = (traders || [])
       .sort((a, b) => b.total_commission_earned - a.total_commission_earned)
       .slice(0, 5);
@@ -90,114 +86,119 @@ export default function AffiliateDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Welcome */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
-        <h1 className="text-2xl font-bold">Welcome back, {affiliate?.name}!</h1>
-        <p className="text-blue-100 mt-1">Here's your affiliate performance overview</p>
+      {/* Welcome Banner */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-purple-600 via-violet-600 to-indigo-600 rounded-2xl p-6 text-white">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-5 h-5 text-purple-200" />
+            <span className="text-purple-200 text-sm font-medium">Welcome back</span>
+          </div>
+          <h1 className="text-2xl font-bold">{affiliate?.name}!</h1>
+          <p className="text-purple-100 mt-1">Your commission rate: <span className="font-bold text-white">{affiliate?.default_commission_rate}%</span></p>
+        </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-5 shadow-sm border">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200/60">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Total Traders</p>
-              <p className="text-2xl font-bold mt-1">{stats.totalTraders}</p>
-              <p className="text-sm text-green-600 mt-1">
-                {stats.activeTraders} active
-              </p>
+              <p className="text-xs md:text-sm text-slate-500 font-medium">Total Traders</p>
+              <p className="text-xl md:text-2xl font-bold text-slate-900 mt-1">{stats.totalTraders}</p>
+              <p className="text-xs text-green-600 font-medium mt-1">{stats.activeTraders} active</p>
             </div>
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <Users size={24} className="text-blue-600" />
+            <div className="p-2.5 md:p-3 bg-purple-100 rounded-xl">
+              <Users className="w-5 h-5 md:w-6 md:h-6 text-purple-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-5 shadow-sm border">
+        <div className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200/60">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">This Month</p>
-              <p className="text-2xl font-bold mt-1">₹{stats.earningsThisMonth.toLocaleString()}</p>
-              <p className="text-sm text-gray-500 mt-1">
-                30d: ₹{stats.earnings30d.toLocaleString()}
-              </p>
+              <p className="text-xs md:text-sm text-slate-500 font-medium">This Month</p>
+              <p className="text-xl md:text-2xl font-bold text-slate-900 mt-1">₹{stats.earningsThisMonth.toLocaleString()}</p>
+              <p className="text-xs text-slate-500 mt-1">30d: ₹{stats.earnings30d.toLocaleString()}</p>
             </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <TrendingUp size={24} className="text-green-600" />
+            <div className="p-2.5 md:p-3 bg-green-100 rounded-xl">
+              <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-green-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-5 shadow-sm border">
+        <div className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200/60">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Total Earned</p>
-              <p className="text-2xl font-bold mt-1">₹{stats.totalEarnings.toLocaleString()}</p>
-              <p className="text-sm text-gray-500 mt-1">
-                Lifetime earnings
-              </p>
+              <p className="text-xs md:text-sm text-slate-500 font-medium">Total Earned</p>
+              <p className="text-xl md:text-2xl font-bold text-slate-900 mt-1">₹{stats.totalEarnings.toLocaleString()}</p>
+              <p className="text-xs text-slate-500 mt-1">Lifetime</p>
             </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <DollarSign size={24} className="text-purple-600" />
+            <div className="p-2.5 md:p-3 bg-blue-100 rounded-xl">
+              <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-5 shadow-sm border">
+        <div className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-slate-200/60">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Pending Settlement</p>
-              <p className="text-2xl font-bold text-orange-600 mt-1">
-                ₹{stats.pendingSettlement.toLocaleString()}
-              </p>
-              <p className="text-sm text-gray-500 mt-1">
-                Settles on 2nd
-              </p>
+              <p className="text-xs md:text-sm text-slate-500 font-medium">Pending</p>
+              <p className="text-xl md:text-2xl font-bold text-orange-600 mt-1">₹{stats.pendingSettlement.toLocaleString()}</p>
+              <p className="text-xs text-slate-500 mt-1">USDT settlement</p>
             </div>
-            <div className="p-3 bg-orange-100 rounded-lg">
-              <CreditCard size={24} className="text-orange-600" />
+            <div className="p-2.5 md:p-3 bg-orange-100 rounded-xl">
+              <Coins className="w-5 h-5 md:w-6 md:h-6 text-orange-600" />
             </div>
           </div>
         </div>
       </div>
 
       {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Top Traders */}
-        <div className="bg-white rounded-xl shadow-sm border">
-          <div className="p-4 border-b">
-            <h2 className="font-semibold text-gray-900">Top Traders</h2>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">Top Traders</h2>
+            <Link to="/affiliate/traders" className="text-sm text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1">
+              View all <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
           <div className="p-4">
             {topTraders.length === 0 ? (
-              <p className="text-center text-gray-500 py-4">No traders yet</p>
+              <div className="text-center py-8">
+                <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">No traders yet</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {topTraders.map((trader, index) => (
-                  <div key={trader.id} className="flex items-center justify-between">
+                  <div key={trader.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-sm font-medium">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
+                        index === 0 ? 'bg-yellow-100 text-yellow-700' :
+                        index === 1 ? 'bg-slate-200 text-slate-600' :
+                        index === 2 ? 'bg-orange-100 text-orange-700' :
+                        'bg-slate-100 text-slate-500'
+                      }`}>
                         {index + 1}
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900">{trader.trader_name}</p>
-                        <p className="text-sm text-gray-500">{trader.commission_rate}% commission</p>
+                        <p className="font-medium text-slate-900 text-sm">{trader.trader_name}</p>
+                        <p className="text-xs text-slate-500">{trader.commission_rate}% rate</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium text-green-600">
-                        ₹{Number(trader.total_commission_earned).toLocaleString()}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {trader.total_transactions} txns
-                      </p>
+                      <p className="font-bold text-green-600 text-sm">₹{Number(trader.total_commission_earned).toLocaleString()}</p>
+                      <p className="text-xs text-slate-400">{trader.total_transactions} txns</p>
                     </div>
                   </div>
                 ))}
@@ -207,43 +208,43 @@ export default function AffiliateDashboard() {
         </div>
 
         {/* Recent Earnings */}
-        <div className="bg-white rounded-xl shadow-sm border">
-          <div className="p-4 border-b">
-            <h2 className="font-semibold text-gray-900">Recent Earnings</h2>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">Recent Earnings</h2>
+            <Link to="/affiliate/earnings" className="text-sm text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1">
+              View all <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
           <div className="p-4">
             {recentEarnings.length === 0 ? (
-              <p className="text-center text-gray-500 py-4">No earnings yet</p>
+              <div className="text-center py-8">
+                <TrendingUp className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">No earnings yet</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {recentEarnings.map((earning) => (
-                  <div key={earning.id} className="flex items-center justify-between">
+                  <div key={earning.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${
-                        earning.transaction_type === 'payin' 
-                          ? 'bg-green-100' 
-                          : 'bg-blue-100'
+                        earning.transaction_type === 'payin' ? 'bg-green-100' : 'bg-blue-100'
                       }`}>
                         {earning.transaction_type === 'payin' ? (
-                          <ArrowDownRight size={16} className="text-green-600" />
+                          <ArrowDownRight className="w-4 h-4 text-green-600" />
                         ) : (
-                          <ArrowUpRight size={16} className="text-blue-600" />
+                          <ArrowUpRight className="w-4 h-4 text-blue-600" />
                         )}
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900">
-                          {earning.trader?.name || 'Trader'}
-                        </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="font-medium text-slate-900 text-sm">{earning.trader?.name || 'Trader'}</p>
+                        <p className="text-xs text-slate-500">
                           {earning.transaction_type} • ₹{Number(earning.transaction_amount).toLocaleString()}
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium text-green-600">
-                        +₹{Number(earning.affiliate_earning).toLocaleString()}
-                      </p>
-                      <p className="text-xs text-gray-500">
+                      <p className="font-bold text-green-600 text-sm">+₹{Number(earning.affiliate_earning).toLocaleString()}</p>
+                      <p className="text-xs text-slate-400">
                         {new Date(earning.created_at).toLocaleDateString()}
                       </p>
                     </div>
@@ -255,15 +256,17 @@ export default function AffiliateDashboard() {
         </div>
       </div>
 
-      {/* Commission Info */}
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+      {/* USDT Settlement Info */}
+      <div className="bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-100 rounded-2xl p-4 md:p-5">
         <div className="flex items-start gap-3">
-          <Calendar size={20} className="text-blue-600 mt-0.5" />
+          <div className="p-2 bg-purple-100 rounded-lg">
+            <Coins className="w-5 h-5 text-purple-600" />
+          </div>
           <div>
-            <h3 className="font-medium text-blue-900">Settlement Schedule</h3>
-            <p className="text-sm text-blue-700 mt-1">
-              Your pending earnings are settled on the 2nd of every month. 
-              Your default commission rate is <strong>{affiliate?.default_commission_rate}%</strong> of trader earnings.
+            <h3 className="font-semibold text-purple-900">USDT Settlements</h3>
+            <p className="text-sm text-purple-700 mt-1">
+              Your earnings are settled in USDT on the 2nd of every month. 
+              Make sure to add your TRC20 wallet address in Settings.
             </p>
           </div>
         </div>

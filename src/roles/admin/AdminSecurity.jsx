@@ -19,8 +19,10 @@ import {
   ChevronRight,
   Eye,
   XCircle,
+  Smartphone,
 } from 'lucide-react';
 import { logAuditEvent } from '../../utils/auditLogger';
+import TwoFactorSetup from '../../components/TwoFactorSetup';
 
 const AdminSecurity = () => {
   const [activeTab, setActiveTab] = useState('attempts');
@@ -270,6 +272,7 @@ const AdminSecurity = () => {
               { id: 'attempts', label: 'Login Attempts', icon: Activity },
               { id: 'locked', label: 'Locked Accounts', icon: Lock },
               { id: 'settings', label: 'Security Settings', icon: Settings },
+              { id: '2fa', label: 'Two-Factor Auth', icon: Smartphone },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -512,6 +515,10 @@ const AdminSecurity = () => {
                     </div>
                   ))}
                 </div>
+              )}
+
+              {activeTab === '2fa' && (
+                <TwoFactorSetup />
               )}
             </>
           )}

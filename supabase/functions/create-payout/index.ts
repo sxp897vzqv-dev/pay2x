@@ -141,13 +141,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // 7. Check duplicate orderId
+    // 7. Check duplicate orderId (stored in metadata)
     if (orderId) {
       const { data: existing } = await supabase
         .from('payouts')
         .select('id')
         .eq('merchant_id', merchant.id)
-        .eq('order_id', orderId)
+        .contains('metadata', { order_id: orderId })
         .single();
 
       if (existing) {
@@ -183,16 +183,14 @@ serve(async (req: Request) => {
       .from('payouts')
       .insert({
         merchant_id: merchant.id,
-        order_id: orderId || null,
+        txn_id: `PO${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
         amount: amountNum,
-        fee: fee,
+        commission: fee,
         status: 'pending',
         account_number: accountNumber,
-        ifsc_code: ifscCode,
+        ifsc: ifscCode,
         account_name: accountName,
-        bank_name: bankName || null,
-        metadata: metadata || null,
-        description: description || null,
+        metadata: { ...metadata, order_id: orderId } || null,
       })
       .select('id')
       .single();

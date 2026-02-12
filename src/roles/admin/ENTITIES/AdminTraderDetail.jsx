@@ -16,6 +16,7 @@ import {
   logTraderDeactivated,
   logAuditEvent,
 } from '../../../utils/auditLogger';
+import ResetPasswordButton from './components/ResetPasswordButton';
 
 // Shared components
 import { Toast } from '../../../components/admin';
@@ -163,6 +164,15 @@ function ProfileTab({ trader, onUpdate, saving }) {
               </div>
             );
           })}
+        </div>
+        
+        {/* Password Reset Section */}
+        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Password</p>
+            <p className="text-xs text-slate-400">Reset trader's login password</p>
+          </div>
+          <ResetPasswordButton email={trader.email} name={trader.name} />
         </div>
       </div>
 

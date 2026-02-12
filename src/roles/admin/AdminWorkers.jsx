@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase';
+import { createWorker, deleteWorker } from '../../supabaseAdmin';
 import {
   Users, Plus, X, Shield, Check, Edit2, Trash2,
   ToggleLeft, ToggleRight, CheckSquare, Square,
-  Loader, AlertCircle, Search,
+  Loader, AlertCircle, Search, Mail,
 } from 'lucide-react';
-
-const API_BASE = 'https://us-central1-pay2x-4748c.cloudfunctions.net';
 
 const ALL_PERMISSIONS = [
   { key: 'traders', label: 'Traders', desc: 'View and manage traders' },
@@ -30,9 +29,9 @@ export default function AdminWorkers() {
   const [editingWorker, setEditingWorker] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Create form state
+  // Create form state (no password - auto-generated)
   const [createForm, setCreateForm] = useState({
-    name: '', email: '', password: '', permissions: [],
+    name: '', email: '', permissions: [],
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -61,34 +60,30 @@ export default function AdminWorkers() {
     e.preventDefault();
     setCreateError('');
 
-    if (!createForm.name.trim() || !createForm.email.trim() || !createForm.password.trim()) {
-      setCreateError('Name, email, and password are required');
-      return;
-    }
-    if (createForm.password.length < 6) {
-      setCreateError('Password must be at least 6 characters');
+    if (!createForm.name.trim() || !createForm.email.trim()) {
+      setCreateError('Name and email are required');
       return;
     }
 
     setCreating(true);
     try {
-      const res = await fetch(`${API_BASE}/createWorker`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: createForm.name.trim(),
-          email: createForm.email.trim(),
-          password: createForm.password,
-          permissions: createForm.permissions,
-        }),
+      const result = await createWorker({
+        name: createForm.name.trim(),
+        email: createForm.email.trim(),
+        permissions: createForm.permissions,
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to create worker');
+      
+      if (!result.success) {
+        throw new Error('Failed to create worker');
       }
+      
       // Reset form & close
-      setCreateForm({ name: '', email: '', password: '', permissions: [] });
+      setCreateForm({ name: '', email: '', permissions: [] });
       setShowCreate(false);
+      fetchWorkers();
+      
+      // Show success message
+      alert(`Worker created! Login credentials have been sent to ${createForm.email.trim()}`);
     } catch (err) {
       setCreateError(err.message);
     } finally {
@@ -125,18 +120,11 @@ export default function AdminWorkers() {
 
   /* ─── Delete Worker ─── */
   const handleDelete = async (worker) => {
-    if (!window.confirm(`Delete worker "${worker.name}"? This will remove their Firebase Auth account and Firestore record.`)) return;
+    if (!window.confirm(`Delete worker "${worker.name}"? This will remove their account and all records.`)) return;
     setDeletingId(worker.id);
     try {
-      const res = await fetch(`${API_BASE}/deleteWorker`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workerId: worker.id, uid: worker.uid }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete worker');
-      }
+      await deleteWorker(worker.id);
+      fetchWorkers();
     } catch (err) {
       console.error('Delete error:', err);
       alert('Failed to delete worker: ' + err.message);
@@ -363,19 +351,10 @@ export default function AdminWorkers() {
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
                   placeholder="worker@example.com"
                 />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-                <input
-                  type="text"
-                  required
-                  value={createForm.password}
-                  onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm font-mono"
-                  placeholder="Min 6 characters"
-                />
+                <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                  <Mail className="w-3 h-3" />
+                  Password will be auto-generated and emailed
+                </p>
               </div>
 
               {/* Permissions */}

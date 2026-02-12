@@ -4,8 +4,10 @@ import {
   BookOpen, TrendingUp, TrendingDown, DollarSign, Search, Filter,
   ChevronDown, ChevronRight, Calendar, Download, RefreshCw, Plus,
   ArrowUpRight, ArrowDownRight, Building2, User, Wallet, Eye,
-  FileText, PieChart, BarChart3, X, Check, AlertCircle,
+  FileText, PieChart, BarChart3, X, Check, AlertCircle, Shield,
 } from 'lucide-react';
+import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    TABS
@@ -45,6 +47,9 @@ export default function AdminBalanceBook() {
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   // Fetch data
   const fetchData = async (isRefresh = false) => {
@@ -171,10 +176,16 @@ export default function AdminBalanceBook() {
             <Download className="w-4 h-4" /> Export
           </button>
           <button
-            onClick={() => setShowAdjustmentModal(true)}
+            onClick={() => {
+              requireVerification(
+                'Balance Adjustment',
+                TwoFactorActions.BALANCE_ADJUSTMENT,
+                () => setShowAdjustmentModal(true)
+              );
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-semibold"
           >
-            <Plus className="w-4 h-4" /> Adjustment
+            <Shield className="w-4 h-4" /> Adjustment
           </button>
           <button
             onClick={() => fetchData(true)}
@@ -266,6 +277,9 @@ export default function AdminBalanceBook() {
           onSuccess={() => { setShowAdjustmentModal(false); fetchData(true); }}
         />
       )}
+
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

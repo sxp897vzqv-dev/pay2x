@@ -54,7 +54,6 @@ export default function TraderBalance() {
   const [transactions,     setTransactions]     = useState([]);
   const [pendingDeposits,  setPendingDeposits]  = useState([]);
   const [loading,          setLoading]          = useState(true);
-  const [generating,       setGenerating]       = useState(false);
   const [copied,           setCopied]           = useState(false);
   const [toast,            setToast]            = useState(null);
   const [balanceFlash,     setBalanceFlash]     = useState(false);
@@ -67,13 +66,16 @@ export default function TraderBalance() {
   const balanceRef = useRef(null);
   const qrRef = useRef(null);
 
-  /* USDT rate polling — kept as-is (Cloud Function) */
+  /* USDT rate from Supabase config */
   useEffect(() => {
     const fetchRate = async () => {
       try {
-        const r = await fetch('https://us-central1-pay2x-4748c.cloudfunctions.net/getUSDTBuyRate/getUSDTBuyRate');
-        const d = await r.json();
-        if (d.success && d.rate) setUsdtBuyRate(d.rate);
+        const { data } = await supabase
+          .from('tatum_config')
+          .select('default_usdt_rate')
+          .eq('id', 'main')
+          .single();
+        if (data?.default_usdt_rate) setUsdtBuyRate(data.default_usdt_rate);
       } catch (e) { console.error(e); }
     };
     fetchRate();
@@ -108,9 +110,9 @@ export default function TraderBalance() {
       setDerivationIndex(trader.derivation_index || null);
       balanceRef.current = total;
 
-      // Fetch transactions
+      // Fetch crypto transactions
       const { data: txData } = await supabase
-        .from('transactions')
+        .from('crypto_transactions')
         .select('*')
         .eq('trader_id', trader.id)
         .order('created_at', { ascending: false })
@@ -173,39 +175,6 @@ export default function TraderBalance() {
     setCopied(true);
     setToast({ msg: '✅ Address copied!', success: true });
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  /* Cloud Function call — kept as-is */
-  const generateAddress = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    
-    setGenerating(true);
-    try {
-      const response = await fetch(
-        'https://us-central1-pay2x-4748c.cloudfunctions.net/generateTraderUSDTAddress',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ traderId: user.id })
-        }
-      );
-
-      const data = await response.json();
-      
-      if (data.success) {
-        setUsdtDepositAddress(data.address);
-        setDerivationIndex(data.derivationIndex);
-        setToast({ msg: '✅ Deposit address generated!', success: true });
-      } else {
-        setToast({ msg: '❌ Failed: ' + data.error, success: false });
-      }
-    } catch (error) {
-      console.error('Error generating address:', error);
-      setToast({ msg: '❌ Error generating address', success: false });
-    } finally {
-      setGenerating(false);
-    }
   };
 
   const downloadQR = () => {
@@ -460,24 +429,8 @@ export default function TraderBalance() {
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
               <Wallet className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-600 font-medium mb-4">No deposit address yet</p>
-              <button
-                onClick={generateAddress}
-                disabled={generating}
-                className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors font-medium text-sm inline-flex items-center gap-2"
-              >
-                {generating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Wallet className="w-4 h-4" />
-                    Generate Deposit Address
-                  </>
-                )}
-              </button>
+              <p className="text-slate-600 font-medium mb-2">No deposit address assigned</p>
+              <p className="text-slate-400 text-sm">Contact admin to get your USDT deposit address</p>
             </div>
           )}
 

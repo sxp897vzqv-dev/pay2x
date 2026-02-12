@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { createMerchant } from '../../../supabaseAdmin';
 import { Link, useNavigate } from 'react-router-dom';
+import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 import {
   Store, Search, Filter, Plus, Eye, CheckCircle, AlertCircle,
   ToggleLeft, ToggleRight, Download, Globe, Key, RefreshCw, X,
@@ -64,6 +66,9 @@ export default function AdminMerchantList() {
   const [selectedMerchant, setSelectedMerchant] = useState(null);
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   const fetchMerchants = useCallback(async () => {
     const { data, error } = await supabase
@@ -126,9 +131,9 @@ export default function AdminMerchantList() {
 
         setToast({ msg: '✅ Merchant updated successfully!', success: true });
       } else {
+        // Password is auto-generated and emailed to merchant
         await createMerchant({
           email: formData.email,
-          password: formData.password,
           name: formData.name || formData.businessName,
           businessName: formData.businessName || formData.name,
           phone: formData.phone || '',
@@ -152,10 +157,8 @@ export default function AdminMerchantList() {
     }
   };
 
-  // Delete merchant
-  const handleDeleteMerchant = async (merchant) => {
-    if (!window.confirm(`Delete ${merchant.businessName || merchant.name}?\n\nThis cannot be undone.`)) return;
-
+  // Delete merchant (2FA protected)
+  const doDeleteMerchant = async (merchant) => {
     try {
       await supabase.from('merchants').delete().eq('id', merchant.id);
       
@@ -173,8 +176,13 @@ export default function AdminMerchantList() {
     }
   };
 
-  // Toggle status
-  const handleToggleStatus = async (merchant) => {
+  const handleDeleteMerchant = (merchant) => {
+    if (!window.confirm(`Delete ${merchant.businessName || merchant.name}?\n\nThis cannot be undone.`)) return;
+    requireVerification('Delete Merchant', TwoFactorActions.DELETE_ENTITY, () => doDeleteMerchant(merchant));
+  };
+
+  // Toggle status (2FA protected)
+  const doToggleStatus = async (merchant) => {
     const isActive = merchant.active || merchant.isActive || merchant.status === 'active';
     try {
       await supabase.from('merchants').update({
@@ -185,6 +193,10 @@ export default function AdminMerchantList() {
     } catch (error) {
       setToast({ msg: 'Error: ' + error.message, success: false });
     }
+  };
+
+  const handleToggleStatus = (merchant) => {
+    requireVerification('Deactivate Merchant', TwoFactorActions.DEACTIVATE_ENTITY, () => doToggleStatus(merchant));
   };
 
   // Export
@@ -332,6 +344,9 @@ export default function AdminMerchantList() {
           )}
         </div>
       )}
+      
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

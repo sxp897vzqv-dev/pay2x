@@ -5,7 +5,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const FROM_EMAIL = Deno.env.get('FROM_EMAIL') || 'Pay2X <noreply@pay2x.com>'
+const FROM_EMAIL = Deno.env.get('FROM_EMAIL') || 'Pay2X <noreply@pay2x.io>'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +14,111 @@ const corsHeaders = {
 
 // Email templates
 const templates: Record<string, (data: any) => { subject: string; html: string }> = {
+  welcome_credentials: (data) => ({
+    subject: data.type === 'merchant' 
+      ? 'Welcome to Pay2X - Your Merchant Account' 
+      : 'Welcome to Pay2X - Your Trader Account',
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #4F46E5; margin: 0;">Pay2X</h1>
+          <p style="color: #6B7280; margin: 5px 0 0;">Payment Gateway Platform</p>
+        </div>
+        
+        <h2 style="color: #111827;">Welcome, ${data.name}! 🎉</h2>
+        <p style="color: #374151; line-height: 1.6;">
+          Your ${data.type === 'merchant' ? 'merchant' : 'trader'} account has been created successfully. 
+          Here are your login credentials:
+        </p>
+        
+        <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); border-radius: 12px; padding: 24px; margin: 24px 0; color: white;">
+          <p style="margin: 0 0 12px; opacity: 0.9; font-size: 14px;">YOUR LOGIN CREDENTIALS</p>
+          <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.8;">Email</p>
+            <p style="margin: 0; font-size: 16px; font-weight: bold;">${data.email}</p>
+          </div>
+          <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 16px;">
+            <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.8;">Password</p>
+            <p style="margin: 0; font-size: 18px; font-weight: bold; font-family: monospace; letter-spacing: 1px;">${data.password}</p>
+          </div>
+        </div>
+        
+        ${data.apiKey ? `
+        <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 8px; padding: 16px; margin: 16px 0;">
+          <p style="margin: 0 0 8px; color: #166534; font-weight: bold;">🔑 Your API Key</p>
+          <code style="display: block; background: white; padding: 12px; border-radius: 6px; font-family: monospace; word-break: break-all; color: #15803D;">${data.apiKey}</code>
+          <p style="margin: 8px 0 0; font-size: 12px; color: #166534;">Keep this key secure. You'll need it for API integration.</p>
+        </div>
+        ` : ''}
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${data.loginUrl || 'https://pay2x.io/'}" 
+             style="display: inline-block; background: #4F46E5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+            Login to Dashboard →
+          </a>
+        </div>
+        
+        <div style="background: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 0 8px 8px 0; margin: 24px 0;">
+          <p style="margin: 0; color: #92400E; font-weight: bold;">⚠️ Security Reminder</p>
+          <ul style="margin: 8px 0 0; padding-left: 20px; color: #92400E;">
+            <li>Change your password after first login</li>
+            <li>Enable two-factor authentication</li>
+            <li>Never share your credentials with anyone</li>
+          </ul>
+        </div>
+        
+        <hr style="margin: 24px 0; border: none; border-top: 1px solid #E5E7EB;">
+        <p style="color: #9CA3AF; font-size: 12px; text-align: center;">
+          This email was sent by Pay2X. If you didn't request this account, please ignore this email or contact support.
+        </p>
+      </div>
+    `
+  }),
+
+  password_reset: (data) => ({
+    subject: 'Pay2X - Your Password Has Been Reset',
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #4F46E5; margin: 0;">Pay2X</h1>
+        </div>
+        
+        <h2 style="color: #111827;">Password Reset 🔐</h2>
+        <p style="color: #374151; line-height: 1.6;">
+          Hi ${data.name}, your password has been reset by an administrator.
+        </p>
+        
+        <div style="background: #EFF6FF; border: 1px solid #93C5FD; border-radius: 12px; padding: 24px; margin: 24px 0;">
+          <p style="margin: 0 0 12px; color: #1E40AF; font-size: 14px; font-weight: bold;">YOUR NEW CREDENTIALS</p>
+          <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+            <p style="margin: 0 0 4px; font-size: 12px; color: #6B7280;">Email</p>
+            <p style="margin: 0; font-size: 16px; font-weight: bold; color: #111827;">${data.email}</p>
+          </div>
+          <div style="background: white; border-radius: 8px; padding: 16px;">
+            <p style="margin: 0 0 4px; font-size: 12px; color: #6B7280;">New Password</p>
+            <p style="margin: 0; font-size: 18px; font-weight: bold; font-family: monospace; color: #1E40AF;">${data.password}</p>
+          </div>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${data.loginUrl || 'https://pay2x.io/'}" 
+             style="display: inline-block; background: #4F46E5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+            Login Now →
+          </a>
+        </div>
+        
+        <p style="color: #DC2626; font-size: 14px;">
+          <strong>Important:</strong> Please change your password immediately after logging in.
+        </p>
+        
+        <hr style="margin: 24px 0; border: none; border-top: 1px solid #E5E7EB;">
+        <p style="color: #9CA3AF; font-size: 12px; text-align: center;">
+          If you didn't request this password reset, please contact support immediately.
+        </p>
+      </div>
+    `
+  }),
+
   login_alert: (data) => ({
     subject: '🔐 New login to your Pay2X account',
     html: `
@@ -48,7 +153,7 @@ const templates: Record<string, (data: any) => { subject: string; html: string }
           <p><strong>Status:</strong> ${data.status}</p>
           <p><strong>Time:</strong> ${data.time}</p>
         </div>
-        <p>View details in your <a href="https://pay2x.com/merchant/payins" style="color: #4F46E5;">merchant dashboard</a>.</p>
+        <p>View details in your <a href="https://pay2x.io/merchant/payins" style="color: #4F46E5;">merchant dashboard</a>.</p>
       </div>
     `
   }),
@@ -95,7 +200,7 @@ const templates: Record<string, (data: any) => { subject: string; html: string }
             <p style="color: #6B7280; margin: 4px 0 0;">Failed</p>
           </div>
         </div>
-        <p><a href="https://pay2x.com/merchant/reports" style="color: #4F46E5;">View full report →</a></p>
+        <p><a href="https://pay2x.io/merchant/reports" style="color: #4F46E5;">View full report →</a></p>
       </div>
     `
   }),

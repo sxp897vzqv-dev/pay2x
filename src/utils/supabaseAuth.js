@@ -74,9 +74,9 @@ export async function getUserRole(userId) {
 }
 
 /**
- * Check if the entity (trader/merchant/worker) is active
+ * Check if the entity (trader/merchant/worker/affiliate) is active
  * Admins are always considered active.
- * @param {string} role - 'trader' | 'merchant' | 'worker' | 'admin'
+ * @param {string} role - 'trader' | 'merchant' | 'worker' | 'affiliate' | 'admin'
  * @param {string} profileId - UUID of the profile (= auth.users.id)
  * @returns {{ isActive: boolean, entity: object|null }}
  */
@@ -85,19 +85,29 @@ export async function checkEntityActive(role, profileId) {
     trader: 'traders',
     merchant: 'merchants',
     worker: 'workers',
+    affiliate: 'affiliates',
   };
 
   const tableName = tableMap[role];
   if (!tableName) return { isActive: true, entity: null }; // admin — always active
 
+  // Affiliates use user_id, others use profile_id
+  const idColumn = role === 'affiliate' ? 'user_id' : 'profile_id';
+  // Affiliates use 'status' field, others use 'is_active'
   const { data, error } = await supabase
     .from(tableName)
     .select('*')
-    .eq('profile_id', profileId)
+    .eq(idColumn, profileId)
     .single();
 
   if (error || !data) return { isActive: false, entity: null };
-  return { isActive: data.is_active === true, entity: data };
+  
+  // Affiliates have 'status' = 'active', others have is_active = true
+  const isActive = role === 'affiliate' 
+    ? data.status === 'active'
+    : data.is_active === true;
+  
+  return { isActive, entity: data };
 }
 
 /**
@@ -111,6 +121,7 @@ export function getRouteForRole(role) {
     worker: '/admin/dashboard',
     merchant: '/merchant/dashboard',
     trader: '/trader/dashboard',
+    affiliate: '/affiliate/dashboard',
   };
   return routes[role] || '/signin';
 }

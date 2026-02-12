@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../../supabase';
+import { supabase, SUPABASE_URL } from '../../supabase';
 import {
   Cpu, Activity, RefreshCw, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Clock, ArrowDownCircle, ArrowUpCircle,
   Users, Shield, Zap, Eye, MessageSquare, Settings
 } from 'lucide-react';
 import { Toast } from '../../components/admin';
+import TwoFactorModal, { useTwoFactorVerification } from '../../components/TwoFactorModal';
+import { TwoFactorActions } from '../../hooks/useTwoFactor';
 
 // Supabase Edge Functions URL
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
 const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 export default function AdminDisputeEngine() {
@@ -20,6 +21,10 @@ export default function AdminDisputeEngine() {
   const [resolving, setResolving] = useState(null);
   const [adminNote, setAdminNote] = useState('');
   const [toast, setToast] = useState(null);
+  
+  // 2FA
+  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
+  
   // Config tab state
   const [disputeConfig, setDisputeConfig] = useState(null);
   const [editingDisputeConfig, setEditingDisputeConfig] = useState(false);
@@ -112,10 +117,8 @@ export default function AdminDisputeEngine() {
     return groups;
   }, [disputes]);
 
-  // Admin resolve via Supabase Edge Function
-  const handleResolve = async (disputeId, decision) => {
-    if (!window.confirm(`${decision === 'approve' ? 'APPROVE' : 'REJECT'} this dispute? This will adjust balances.`)) return;
-
+  // Admin resolve via Supabase Edge Function (2FA protected)
+  const doResolve = async (disputeId, decision) => {
     setResolving(disputeId);
     try {
       const response = await fetch(`${FUNCTIONS_URL}/admin-resolve-dispute`, {
@@ -144,6 +147,17 @@ export default function AdminDisputeEngine() {
       setToast({ msg: err.message, success: false });
     }
     setResolving(null);
+  };
+
+  // Wrapper with 2FA verification
+  const handleResolve = (disputeId, decision) => {
+    if (!window.confirm(`${decision === 'approve' ? 'APPROVE' : 'REJECT'} this dispute? This will adjust balances.`)) return;
+    
+    requireVerification(
+      'Approve Dispute',
+      TwoFactorActions.APPROVE_DISPUTE,
+      () => doResolve(disputeId, decision)
+    );
   };
 
   const initEngine = async () => {
@@ -661,6 +675,9 @@ export default function AdminDisputeEngine() {
           </div>
         )}
       </div>
+      
+      {/* 2FA Modal */}
+      <TwoFactorModalComponent />
     </div>
   );
 }

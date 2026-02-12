@@ -113,8 +113,14 @@ serve(async (req: Request) => {
 
           // Credit merchant back (they paid but client didn't receive)
           if (dispute.merchant_id) {
+            const { data: merchantData } = await supabase
+              .from('merchants')
+              .select('available_balance')
+              .eq('id', dispute.merchant_id)
+              .single();
+            
             await supabase.from('merchants').update({
-              available_balance: supabase.raw(`COALESCE(available_balance, 0) + ${amount}`),
+              available_balance: (merchantData?.available_balance || 0) + amount,
             }).eq('id', dispute.merchant_id);
             console.log(`💰 Credited merchant ₹${amount} for payout refund`);
           }

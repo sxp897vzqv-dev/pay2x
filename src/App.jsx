@@ -44,6 +44,7 @@ const AdminCommission = React.lazy(() => import('./roles/admin/AUDIT/AdminCommis
 const AdminReviewQueue = React.lazy(() => import('./roles/admin/AUDIT/AdminReviewQueue'));
 const AdminPayinEngine = React.lazy(() => import('./roles/admin/AdminPayinEngine'));
 const AdminPayoutEngine = React.lazy(() => import('./roles/admin/AdminPayoutEngine'));
+const AdminPayoutVerification = React.lazy(() => import('./roles/admin/AdminPayoutVerification'));
 const AdminDisputeEngine = React.lazy(() => import('./roles/admin/AdminDisputeEngine'));
 const AdminWorkers = React.lazy(() => import('./roles/admin/AdminWorkers'));
 const AdminSecurity = React.lazy(() => import('./roles/admin/AdminSecurity'));
@@ -298,6 +299,7 @@ function App() {
           {/* Engine */}
           <Route path="payin-engine" element={<AdminPayinEngine />} />
           <Route path="payout-engine" element={<AdminPayoutEngine />} />
+          <Route path="payout-verification" element={<AdminPayoutVerification />} />
           <Route path="dispute-engine" element={<AdminDisputeEngine />} />
           <Route path="workers" element={<AdminWorkers />} />
           <Route path="security" element={<AdminSecurity />} />

@@ -9,7 +9,6 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
     name: '',
     businessName: '',
     email: '',
-    password: '',
     phone: '',
     website: '',
     callbackUrl: '',
@@ -33,8 +32,6 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
     // Validation
     if (!formData.name.trim() && !formData.businessName.trim()) { setError('Business name is required'); return; }
     if (!formData.email.trim()) { setError('Email is required'); return; }
-    if (!merchant && !formData.password) { setError('Password is required for new merchants'); return; }
-    if (!merchant && formData.password.length < 6) { setError('Password must be at least 6 characters'); return; }
     if (!/^\S+@\S+\.\S+$/.test(formData.email)) { setError('Invalid email format'); return; }
 
     setSaving(true);
@@ -114,18 +111,13 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
             </div>
 
             {!merchant && (
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <Key className="w-3.5 h-3.5 text-slate-400" /> Password *
-                </label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={e => handleChange('password', e.target.value)}
-                  placeholder="Min. 6 characters"
-                  minLength={6}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                />
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-blue-500" />
+                  <p className="text-sm text-blue-700">
+                    <strong>Password will be auto-generated</strong> and sent to the merchant's email address.
+                  </p>
+                </div>
               </div>
             )}
 
