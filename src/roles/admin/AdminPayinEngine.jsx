@@ -29,7 +29,7 @@ export default function AdminPayinEngine() {
       const { data: upiData, error: upiError } = await supabase
         .from('upi_pool')
         .select('*')
-        .order('today_volume', { ascending: false });
+        .order('daily_volume', { ascending: false });
 
       if (upiError) throw upiError;
       setUpis(upiData || []);
@@ -58,9 +58,9 @@ export default function AdminPayinEngine() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const activeUpis = (upiData || []).filter(u => u.is_active);
-      const todayVolume = (upiData || []).reduce((sum, u) => sum + (Number(u.today_volume) || 0), 0);
-      const todayTxns = (upiData || []).reduce((sum, u) => sum + (Number(u.today_count) || 0), 0);
+      const activeUpis = (upiData || []).filter(u => u.status === 'active');
+      const todayVolume = (upiData || []).reduce((sum, u) => sum + (Number(u.daily_volume) || 0), 0);
+      const todayTxns = (upiData || []).reduce((sum, u) => sum + (Number(u.daily_count) || 0), 0);
 
       setStats({
         totalUpisInPool: (upiData || []).length,
@@ -252,13 +252,13 @@ export default function AdminPayinEngine() {
                       <p className="font-mono text-sm font-medium">{upi.upi_id}</p>
                       <p className="text-xs text-slate-400">{upi.holder_name || upi.trader_id?.slice(0, 8)}</p>
                     </div>
-                    <span className={`w-2 h-2 rounded-full mt-1.5 ${upi.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className={`w-2 h-2 rounded-full mt-1.5 ${upi.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`} />
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2">
-                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.bank || 'Unknown'}</span>
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{upi.type || 'UPI'}</span>
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">₹{(upi.today_volume || 0).toLocaleString()}</span>
-                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.today_count || 0} txns</span>
+                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.bank_name || 'Unknown'}</span>
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{upi.amount_tier || 'medium'}</span>
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">₹{(upi.daily_volume || 0).toLocaleString()}</span>
+                    <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{upi.daily_count || 0} txns</span>
                     <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs">{upi.success_rate || 0}%</span>
                   </div>
                 </div>
