@@ -167,6 +167,7 @@ export default function TraderPayout() {
     if (hasAssignedPayouts) { setToast({ msg: `Complete ${assignedPayouts.length} assigned payout(s) first`, success: false }); return; }
     try {
       await cancelPayoutRequestByTrader(activeRequest.id);
+      setActiveRequest(null); // Clear immediately
       setToast({ msg: '✅ Request cancelled', success: true });
     } catch (e) { setToast({ msg: '❌ ' + e.message, success: false }); }
   };
