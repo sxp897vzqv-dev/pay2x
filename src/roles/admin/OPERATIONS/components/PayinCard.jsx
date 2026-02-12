@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 
 /* ─── Time Ago Helper ─── */
-function timeAgo(seconds) {
-  if (!seconds) return null;
-  const diff = Math.floor(Date.now() / 1000) - seconds;
+function timeAgo(dateStr) {
+  if (!dateStr) return null;
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
   if (diff < 60) return 'just now';
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -15,14 +15,14 @@ function timeAgo(seconds) {
 }
 
 /* ─── Pending Timer ─── */
-function PendingTimer({ requestedAt }) {
+function PendingTimer({ createdAt }) {
   const [elapsed, setElapsed] = useState('');
   
   useEffect(() => {
-    if (!requestedAt?.seconds) return;
+    if (!createdAt) return;
     
     const update = () => {
-      const diff = Math.floor(Date.now() / 1000) - requestedAt.seconds;
+      const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
       const mins = Math.floor(diff / 60);
       const hrs = Math.floor(mins / 60);
       if (hrs > 0) {
@@ -35,7 +35,7 @@ function PendingTimer({ requestedAt }) {
     update();
     const interval = setInterval(update, 60000);
     return () => clearInterval(interval);
-  }, [requestedAt]);
+  }, [createdAt]);
 
   if (!elapsed) return null;
   
@@ -61,6 +61,13 @@ export default function PayinCard({ payin, onExpand, expanded }) {
     navigator.clipboard.writeText(text);
   };
 
+  // Display transaction ID (prefer txn_id, fallback to id)
+  const displayTxnId = payin.txn_id || payin.id?.slice(0, 12) || '—';
+  const displayTraderId = payin.trader_id?.slice(0, 8) || '—';
+  const displayUpiId = payin.upi_id || payin.assigned_upi || '—';
+  const displayUtr = payin.utr || payin.utr_id || 'No UTR';
+  const displayMerchant = payin.merchant_id?.slice(0, 8) || '—';
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div className={`h-1 ${style.stripe}`} />
@@ -69,14 +76,14 @@ export default function PayinCard({ payin, onExpand, expanded }) {
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="font-mono text-xs text-slate-400">{payin.transactionId || payin.id?.slice(0, 12)}</p>
-              {payin.status === 'pending' && <PendingTimer requestedAt={payin.requestedAt} />}
+              <p className="font-mono text-xs text-slate-400">{displayTxnId}</p>
+              {payin.status === 'pending' && <PendingTimer createdAt={payin.created_at} />}
             </div>
             <p className={`text-lg font-bold ${style.amountColor}`}>₹{(Number(payin.amount) || 0).toLocaleString()}</p>
           </div>
           <div className="flex items-center gap-1">
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${style.bg} ${style.text}`}>
-              {payin.status?.toUpperCase()}
+              {payin.status?.toUpperCase() || 'PENDING'}
             </span>
             <button 
               onClick={() => onExpand(payin.id)}
@@ -91,19 +98,19 @@ export default function PayinCard({ payin, onExpand, expanded }) {
         <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
           <div className="flex items-center gap-1.5 text-slate-500">
             <User className="w-3 h-3" />
-            <span className="truncate">{payin.traderName || payin.traderId?.slice(0, 8) || '—'}</span>
+            <span className="truncate">{displayTraderId}</span>
           </div>
           <div className="flex items-center gap-1.5 text-slate-500">
             <CreditCard className="w-3 h-3" />
-            <span className="truncate">{payin.upiId || '—'}</span>
+            <span className="truncate">{displayUpiId}</span>
           </div>
           <div className="flex items-center gap-1.5 text-slate-500">
             <Hash className="w-3 h-3" />
-            <span className="truncate">{payin.utrId || 'No UTR'}</span>
+            <span className="truncate">{displayUtr}</span>
           </div>
           <div className="flex items-center gap-1.5 text-slate-500">
             <Clock className="w-3 h-3" />
-            <span>{timeAgo(payin.requestedAt?.seconds) || '—'}</span>
+            <span>{timeAgo(payin.created_at) || '—'}</span>
           </div>
         </div>
 
@@ -113,44 +120,54 @@ export default function PayinCard({ payin, onExpand, expanded }) {
             <div className="bg-slate-50 rounded-lg p-2 text-xs space-y-1">
               <div className="flex justify-between">
                 <span className="text-slate-500">Transaction ID</span>
-                <button onClick={() => copyToClipboard(payin.transactionId || payin.id)} className="font-mono text-slate-700 hover:text-indigo-600 flex items-center gap-1">
-                  {payin.transactionId || payin.id} <Copy className="w-3 h-3" />
+                <button onClick={() => copyToClipboard(payin.txn_id || payin.id)} className="font-mono text-slate-700 hover:text-indigo-600 flex items-center gap-1">
+                  {payin.txn_id || payin.id} <Copy className="w-3 h-3" />
                 </button>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Trader ID</span>
-                <span className="font-mono text-slate-700">{payin.traderId || '—'}</span>
+                <span className="font-mono text-slate-700">{payin.trader_id || '—'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Merchant</span>
-                <span className="text-slate-700">{payin.merchantName || payin.merchantId || '—'}</span>
+                <span className="text-slate-700">{payin.merchant_id || '—'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">UPI ID</span>
-                <span className="font-mono text-slate-700">{payin.upiId || '—'}</span>
+                <span className="font-mono text-slate-700">{displayUpiId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Holder Name</span>
+                <span className="text-slate-700">{payin.holder_name || '—'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">UTR</span>
-                <span className="font-mono text-slate-700">{payin.utrId || '—'}</span>
+                <span className="font-mono text-slate-700">{payin.utr || '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Requested</span>
+                <span className="text-slate-500">Created</span>
                 <span className="text-slate-700">
-                  {payin.requestedAt?.seconds ? new Date(payin.requestedAt.seconds * 1000).toLocaleString('en-IN') : '—'}
+                  {payin.created_at ? new Date(payin.created_at).toLocaleString('en-IN') : '—'}
                 </span>
               </div>
-              {payin.completedAt && (
+              {payin.completed_at && (
                 <div className="flex justify-between">
                   <span className="text-slate-500">Completed</span>
                   <span className="text-slate-700">
-                    {new Date(payin.completedAt.seconds * 1000).toLocaleString('en-IN')}
+                    {new Date(payin.completed_at).toLocaleString('en-IN')}
                   </span>
                 </div>
               )}
-              {payin.commission !== undefined && (
+              {payin.commission !== undefined && payin.commission !== null && (
                 <div className="flex justify-between">
                   <span className="text-slate-500">Commission</span>
                   <span className="text-green-600 font-semibold">₹{(Number(payin.commission) || 0).toLocaleString()}</span>
+                </div>
+              )}
+              {payin.order_id && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Order ID</span>
+                  <span className="font-mono text-slate-700">{payin.order_id}</span>
                 </div>
               )}
             </div>
@@ -159,12 +176,14 @@ export default function PayinCard({ payin, onExpand, expanded }) {
 
         {/* Actions */}
         <div className="flex gap-2 mt-2">
-          <Link to={`/admin/traders/${payin.traderId}`}
-            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-100">
-            <User className="w-3 h-3" /> Trader
-          </Link>
-          {payin.screenshotUrl && (
-            <a href={payin.screenshotUrl} target="_blank" rel="noopener noreferrer"
+          {payin.trader_id && (
+            <Link to={`/admin/traders/${payin.trader_id}`}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-100">
+              <User className="w-3 h-3" /> Trader
+            </Link>
+          )}
+          {payin.screenshot_url && (
+            <a href={payin.screenshot_url} target="_blank" rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-xs font-semibold hover:bg-blue-100">
               <Eye className="w-3 h-3" /> Proof
             </a>

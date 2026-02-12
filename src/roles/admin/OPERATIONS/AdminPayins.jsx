@@ -123,7 +123,7 @@ export default function AdminPayins() {
         p.txn_id?.toLowerCase().includes(s) || 
         p.utr?.toLowerCase().includes(s) || 
         p.trader_id?.toLowerCase().includes(s) ||
-        p.assigned_upi?.toLowerCase().includes(s) ||
+        p.upi_id?.toLowerCase().includes(s) ||
         p.merchant_id?.toLowerCase().includes(s)
       );
     }
@@ -222,10 +222,10 @@ export default function AdminPayins() {
     };
 
     const csv = [
-      ['ID', 'Transaction ID', 'Amount', 'Status', 'Trader ID', 'Assigned UPI', 'UTR', 'Merchant', 'Created At', 'Completed At'],
+      ['ID', 'Transaction ID', 'Amount', 'Status', 'Trader ID', 'UPI ID', 'UTR', 'Merchant', 'Created At', 'Completed At'],
       ...filtered.map(p => [
         p.id, p.txn_id || '', Number(p.amount) || 0, p.status || '', p.trader_id || '',
-        p.assigned_upi || '', p.utr || '', p.merchant_id || '',
+        p.upi_id || '', p.utr || '', p.merchant_id || '',
         p.created_at || '',
         p.completed_at || '',
       ].map(escapeCSV))
