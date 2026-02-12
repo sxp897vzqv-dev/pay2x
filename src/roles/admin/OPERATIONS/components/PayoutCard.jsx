@@ -14,15 +14,24 @@ export default function PayoutCard({ payout, onView, onRemove, onReassign, showA
     pending: { bg: 'bg-amber-100', text: 'text-amber-700', stripe: 'bg-amber-500' },
     cancelled: { bg: 'bg-red-100', text: 'text-red-700', stripe: 'bg-red-500' },
     cancelled_by_trader: { bg: 'bg-red-100', text: 'text-red-700', stripe: 'bg-red-500' },
+    failed: { bg: 'bg-red-100', text: 'text-red-700', stripe: 'bg-red-500' },
   };
   const style = statusStyles[payout.status] || statusStyles.pending;
   
-  // Calculate time elapsed - handle both assignedAt and createdAt
-  const timestamp = payout.assignedAt || payout.createdAt;
-  const timeElapsed = timestamp?.seconds
-    ? Math.floor((Date.now() - timestamp.seconds * 1000) / (1000 * 60))
+  // Calculate time elapsed from assigned_at or created_at (snake_case)
+  const timestamp = payout.assigned_at || payout.created_at;
+  const timeElapsed = timestamp
+    ? Math.floor((Date.now() - new Date(timestamp).getTime()) / (1000 * 60))
     : 0;
   const isOverdue = payout.status === 'assigned' && timeElapsed > 60;
+
+  // Use snake_case field names from Supabase
+  const traderId = payout.trader_id;
+  const upiId = payout.upi_id;
+  const accountNumber = payout.account_number;
+  const utr = payout.utr;
+  const cancelReason = payout.cancel_reason;
+  const proofUrl = payout.proof_url;
 
   return (
     <div className={`bg-white rounded-xl border shadow-sm overflow-hidden ${isOverdue ? 'border-orange-300' : 'border-slate-200'}`}>
@@ -30,12 +39,12 @@ export default function PayoutCard({ payout, onView, onRemove, onReassign, showA
       <div className="p-3">
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <p className="font-mono text-xs text-slate-400">{payout.id?.slice(0, 12)}...</p>
+            <p className="font-mono text-xs text-slate-400">{payout.txn_id || payout.id?.slice(0, 12)}...</p>
             <p className="text-lg font-bold text-blue-600">₹{(Number(payout.amount) || 0).toLocaleString()}</p>
           </div>
           <div className="flex items-center gap-1.5">
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${style.bg} ${style.text}`}>
-              {payout.status?.toUpperCase().replace('_', ' ')}
+              {payout.status?.toUpperCase().replace('_', ' ') || 'PENDING'}
             </span>
             {isOverdue && <span className="px-2 py-0.5 rounded-lg text-xs font-bold bg-orange-100 text-orange-700">OVERDUE</span>}
             {showActions && (
@@ -65,20 +74,42 @@ export default function PayoutCard({ payout, onView, onRemove, onReassign, showA
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-500"><User className="w-3 h-3" /><span className="truncate">{payout.traderId?.slice(0, 8) || payout.userId?.slice(0, 8) || '—'}</span></div>
-          <div className="flex items-center gap-1.5 text-slate-500">{payout.upiId ? <CreditCard className="w-3 h-3" /> : <Building className="w-3 h-3" />}<span className="truncate">{payout.upiId || payout.accountNumber || '—'}</span></div>
-          <div className="flex items-center gap-1.5 text-slate-500"><Hash className="w-3 h-3" /><span className="truncate">{payout.utrId || 'No UTR'}</span></div>
-          <div className="flex items-center gap-1.5 text-slate-500"><Clock className="w-3 h-3" /><span className={timeElapsed > 60 ? 'text-orange-600 font-bold' : ''}>{timeElapsed}m ago</span></div>
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <User className="w-3 h-3" />
+            <span className="truncate">{traderId?.slice(0, 8) || '—'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-slate-500">
+            {upiId ? <CreditCard className="w-3 h-3" /> : <Building className="w-3 h-3" />}
+            <span className="truncate">{upiId || accountNumber || '—'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <Hash className="w-3 h-3" />
+            <span className="truncate">{utr || 'No UTR'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <Clock className="w-3 h-3" />
+            <span className={timeElapsed > 60 ? 'text-orange-600 font-bold' : ''}>{timeElapsed}m ago</span>
+          </div>
         </div>
-        {payout.cancelReason && (
+        {cancelReason && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-2 mb-2">
-            <p className="text-xs text-red-700 line-clamp-2"><span className="font-bold">Reason:</span> {payout.cancelReason}</p>
+            <p className="text-xs text-red-700 line-clamp-2"><span className="font-bold">Reason:</span> {cancelReason}</p>
           </div>
         )}
         <div className="flex gap-2">
-          {payout.traderId && <Link to={`/admin/traders/${payout.traderId}`} className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-100"><Eye className="w-3 h-3" /> Trader</Link>}
-          {payout.proofUrl && <a href={payout.proofUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-xs font-semibold hover:bg-blue-100"><FileText className="w-3 h-3" /> Proof</a>}
-          <button onClick={() => onView(payout)} className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg text-xs font-semibold hover:bg-indigo-100"><Eye className="w-3 h-3" /> Details</button>
+          {traderId && (
+            <Link to={`/admin/traders/${traderId}`} className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-100">
+              <Eye className="w-3 h-3" /> Trader
+            </Link>
+          )}
+          {proofUrl && (
+            <a href={proofUrl} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-xs font-semibold hover:bg-blue-100">
+              <FileText className="w-3 h-3" /> Proof
+            </a>
+          )}
+          <button onClick={() => onView(payout)} className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg text-xs font-semibold hover:bg-indigo-100">
+            <Eye className="w-3 h-3" /> Details
+          </button>
         </div>
       </div>
     </div>
@@ -87,6 +118,15 @@ export default function PayoutCard({ payout, onView, onRemove, onReassign, showA
 
 /* ─── Waiting Request Card ─── */
 export function WaitingRequestCard({ request, onView }) {
+  // Use snake_case field names from Supabase
+  const traderId = request.trader_id;
+  const traderName = request.trader?.name;
+  const requestedAmount = request.requested_amount || request.amount || 0;
+  const assignedAmount = request.assigned_amount || 0;
+  const remainingAmount = request.remaining_amount || 0;
+  const assignedPayouts = request.assigned_payouts || [];
+  const createdAt = request.created_at;
+
   return (
     <div className="bg-white rounded-xl border-2 border-blue-200 shadow-sm overflow-hidden">
       <div className="h-1 bg-blue-500" />
@@ -100,32 +140,36 @@ export function WaitingRequestCard({ request, onView }) {
               {request.status === 'waiting' ? 'WAITING' : request.status?.toUpperCase().replace('_', ' ') || 'PARTIAL'}
             </span>
           </div>
-          <button onClick={() => onView(request)} className="p-1.5 hover:bg-slate-100 rounded-lg"><Eye className="w-4 h-4 text-slate-500" /></button>
+          <button onClick={() => onView(request)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+            <Eye className="w-4 h-4 text-slate-500" />
+          </button>
         </div>
         <div className="mb-2">
           <p className="text-xs text-slate-400">Trader</p>
-          <p className="text-sm font-bold text-slate-900 truncate">{request.trader?.name || request.traderId?.slice(0, 12) || '—'}</p>
+          <p className="text-sm font-bold text-slate-900 truncate">{traderName || traderId?.slice(0, 12) || '—'}</p>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center mb-2">
           <div className="bg-slate-50 rounded-lg p-2">
             <p className="text-xs text-slate-400">Requested</p>
-            <p className="text-sm font-bold text-slate-900">₹{(request.requestedAmount || 0).toLocaleString()}</p>
+            <p className="text-sm font-bold text-slate-900">₹{requestedAmount.toLocaleString()}</p>
           </div>
           <div className="bg-green-50 rounded-lg p-2">
             <p className="text-xs text-green-600">Assigned</p>
-            <p className="text-sm font-bold text-green-700">₹{(request.assignedAmount || 0).toLocaleString()}</p>
+            <p className="text-sm font-bold text-green-700">₹{assignedAmount.toLocaleString()}</p>
           </div>
           <div className="bg-orange-50 rounded-lg p-2">
             <p className="text-xs text-orange-600">Waiting</p>
-            <p className="text-sm font-bold text-orange-700">₹{(request.remainingAmount || 0).toLocaleString()}</p>
+            <p className="text-sm font-bold text-orange-700">₹{remainingAmount.toLocaleString()}</p>
           </div>
         </div>
         <div className="flex items-center justify-between text-xs text-slate-400">
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            {request.requestedAt?.seconds ? new Date(request.requestedAt.seconds * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+            {createdAt ? new Date(createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
           </span>
-          {request.assignedPayouts?.length > 0 && <span className="text-green-600 font-semibold">{request.assignedPayouts.length} assigned</span>}
+          {assignedPayouts.length > 0 && (
+            <span className="text-green-600 font-semibold">{assignedPayouts.length} assigned</span>
+          )}
         </div>
       </div>
     </div>
