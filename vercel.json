@@ -35,6 +35,10 @@
     {
       "source": "/api/v1/health",
       "destination": "https://jrzyndtowwwcydgcagcr.supabase.co/functions/v1/api-health"
+    },
+    {
+      "source": "/((?!api|v1|_next|assets|favicon).*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [
