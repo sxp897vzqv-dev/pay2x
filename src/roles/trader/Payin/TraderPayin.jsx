@@ -214,6 +214,7 @@ PayinCard.displayName = 'PayinCard';
 
 /* ─── Main ─── */
 export default function TraderPayin() {
+  const [traderId,     setTraderId]     = useState(null);
   const [payins,       setPayins]       = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [activeTab,    setActiveTab]    = useState("pending");
@@ -239,16 +240,17 @@ export default function TraderPayin() {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setTraderId(user.id); // Store for realtime filter
       // Fetch commission rate
       const { data: trader } = await supabase.from('traders').select('commission_rate').eq('id', user.id).single();
       if (trader) setCommissionRate(trader.commission_rate || 4);
-      // Fetch payins
+      // Fetch payins (limited to 100 for performance)
       const { data: rows } = await supabase
         .from('payins')
         .select('*')
         .eq('trader_id', user.id)
         .order('requested_at', { ascending: false })
-        .limit(200);
+        .limit(100);
       setPayins((rows || []).map(r => ({
         ...r,
         traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
@@ -263,12 +265,13 @@ export default function TraderPayin() {
     init();
   }, []);
 
-  // Realtime: refresh when payins change for this trader
+  // Realtime: filtered by trader_id for performance
   useRealtimeSubscription('payins', {
+    filter: traderId ? `trader_id=eq.${traderId}` : undefined,
+    enabled: !!traderId, // Only subscribe once we have traderId
     onChange: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', user.id).order('requested_at', { ascending: false }).limit(200);
+      if (!traderId) return;
+      const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('requested_at', { ascending: false }).limit(100);
       setPayins((rows || []).map(r => ({
         ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
         userId: r.merchant_id, transactionId: r.transaction_id,

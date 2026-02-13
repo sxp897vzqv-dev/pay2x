@@ -14,6 +14,7 @@ import {
 const TABS = [
   { key: 'traders', label: 'Trader Wallets', icon: User },
   { key: 'transactions', label: 'Transactions', icon: ArrowUpRight },
+  { key: 'rates', label: 'USDT Rates', icon: TrendingUp },
   { key: 'config', label: 'Configuration', icon: Settings },
 ];
 
@@ -320,6 +321,9 @@ export default function AdminWallets() {
           )}
           {activeTab === 'transactions' && (
             <TransactionsTab transactions={transactions} onCopy={copyToClipboard} />
+          )}
+          {activeTab === 'rates' && (
+            <RatesTab />
           )}
           {activeTab === 'config' && (
             <ConfigTab 
@@ -1060,6 +1064,264 @@ function WalletDetailModal({ wallet, onClose, onCopy }) {
           </a>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   RATES TAB - USDT Rate Tracking
+───────────────────────────────────────────────────────────────────────────── */
+
+function RatesTab() {
+  const [config, setConfig] = useState(null);
+  const [rateHistory, setRateHistory] = useState([]);
+  const [deposits, setDeposits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [stats, setStats] = useState({ totalProfit: 0, avgMargin: 0, depositCount: 0 });
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // Fetch current config
+      const { data: configData } = await supabase
+        .from('tatum_config')
+        .select('admin_usdt_rate, default_usdt_rate, rate_updated_at, rate_source, rate_offers')
+        .eq('id', 'main')
+        .single();
+      
+      if (configData) setConfig(configData);
+
+      // Fetch rate history
+      const { data: historyData } = await supabase
+        .from('usdt_rate_history')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (historyData) setRateHistory(historyData);
+
+      // Fetch deposits with profit tracking
+      const { data: depositData } = await supabase
+        .from('crypto_transactions')
+        .select('*')
+        .eq('type', 'deposit')
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      
+      if (depositData) {
+        setDeposits(depositData);
+        
+        // Calculate stats
+        const totalProfit = depositData.reduce((sum, d) => sum + (d.total_profit || 0), 0);
+        const avgMargin = depositData.length > 0 
+          ? depositData.reduce((sum, d) => sum + (d.profit_per_usdt || 0), 0) / depositData.length 
+          : 0;
+        setStats({ 
+          totalProfit: Math.round(totalProfit * 100) / 100, 
+          avgMargin: Math.round(avgMargin * 100) / 100,
+          depositCount: depositData.length 
+        });
+      }
+    } catch (e) {
+      console.error('Error fetching rate data:', e);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const refreshRate = async () => {
+    setRefreshing(true);
+    try {
+      // Use supabase client to invoke function
+      const { data, error } = await supabase.functions.invoke('update-usdt-rate', {
+        body: {}
+      });
+      
+      if (error) throw error;
+      if (data?.success) {
+        await fetchData();
+      } else {
+        alert('Failed to refresh rate: ' + (data?.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setRefreshing(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-8 h-8 text-orange-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Current Rates */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white">
+          <p className="text-green-100 text-xs font-semibold uppercase mb-1">Admin Rate (Binance P2P)</p>
+          <p className="text-3xl font-bold">₹{config?.admin_usdt_rate || '—'}</p>
+          <p className="text-green-200 text-xs mt-1">What we receive per USDT</p>
+        </div>
+        
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-4 text-white">
+          <p className="text-blue-100 text-xs font-semibold uppercase mb-1">Trader Rate</p>
+          <p className="text-3xl font-bold">₹{config?.default_usdt_rate || '—'}</p>
+          <p className="text-blue-200 text-xs mt-1">What traders get (Admin - ₹1)</p>
+        </div>
+        
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-4 text-white">
+          <p className="text-purple-100 text-xs font-semibold uppercase mb-1">Total Profit</p>
+          <p className="text-3xl font-bold">₹{stats.totalProfit.toLocaleString()}</p>
+          <p className="text-purple-200 text-xs mt-1">{stats.depositCount} deposits • Avg ₹{stats.avgMargin}/USDT</p>
+        </div>
+      </div>
+
+      {/* Rate Info & Refresh */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-600">
+            <span className="font-semibold">Source:</span> {config?.rate_source || 'binance_p2p'} • 
+            <span className="font-semibold ml-2">Last Update:</span> {config?.rate_updated_at 
+              ? new Date(config.rate_updated_at).toLocaleString('en-IN') 
+              : 'Never'}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Filters: UPI/IMPS payments, >₹2L liquidity, avg of top 5 offers
+          </p>
+        </div>
+        <button
+          onClick={refreshRate}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          Refresh Now
+        </button>
+      </div>
+
+      {/* Binance P2P Offers */}
+      {config?.rate_offers && config.rate_offers.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <h3 className="font-semibold text-slate-900">Top 5 Binance P2P Offers (UPI/IMPS)</h3>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {config.rate_offers.map((offer, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-xs font-bold text-slate-600">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-slate-900">{offer.nickName}</p>
+                    <p className="text-xs text-slate-500">{offer.surplusAmount?.toFixed(0)} USDT available</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-bold text-green-600">₹{offer.price}</p>
+                  <p className="text-xs text-slate-500">{offer.payTypes?.join(', ')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Deposit Profit Table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <h3 className="font-semibold text-slate-900">Deposit Profit Tracking</h3>
+          <span className="text-xs text-slate-500">{deposits.length} deposits</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="text-left py-2 px-3 font-semibold text-slate-600">Date</th>
+                <th className="text-left py-2 px-3 font-semibold text-slate-600">Trader</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600">USDT</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600">Admin Rate</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600">Trader Rate</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600">INR Credited</th>
+                <th className="text-right py-2 px-3 font-semibold text-slate-600 text-green-600">Profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-8 text-slate-400">No deposits yet</td>
+                </tr>
+              ) : (
+                deposits.map(deposit => (
+                  <tr key={deposit.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="py-2 px-3 text-slate-600">
+                      {new Date(deposit.created_at).toLocaleDateString('en-IN')}
+                    </td>
+                    <td className="py-2 px-3 font-medium text-slate-900">
+                      {deposit.trader_name || deposit.trader_id?.slice(0, 8)}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono">
+                      {deposit.usdt_amount?.toFixed(2)}
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-600">
+                      ₹{deposit.admin_rate || '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-600">
+                      ₹{deposit.trader_rate || '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-semibold text-blue-600">
+                      ₹{deposit.amount?.toLocaleString()}
+                    </td>
+                    <td className="py-2 px-3 text-right font-bold text-green-600">
+                      ₹{(deposit.total_profit || 0).toFixed(2)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Rate History */}
+      {rateHistory.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <h3 className="font-semibold text-slate-900">Rate History</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="text-left py-2 px-3 font-semibold text-slate-600">Time</th>
+                  <th className="text-right py-2 px-3 font-semibold text-slate-600">Admin Rate</th>
+                  <th className="text-right py-2 px-3 font-semibold text-slate-600">Trader Rate</th>
+                  <th className="text-right py-2 px-3 font-semibold text-slate-600">Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rateHistory.slice(0, 20).map(rate => (
+                  <tr key={rate.id} className="border-b border-slate-100">
+                    <td className="py-2 px-3 text-slate-600">
+                      {new Date(rate.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td className="py-2 px-3 text-right font-semibold text-green-600">₹{rate.admin_rate}</td>
+                    <td className="py-2 px-3 text-right font-semibold text-blue-600">₹{rate.trader_rate}</td>
+                    <td className="py-2 px-3 text-right text-slate-500">₹{rate.margin}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

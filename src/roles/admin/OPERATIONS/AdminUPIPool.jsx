@@ -8,8 +8,6 @@ import {
   Zap, AlertTriangle, Target, X, Shield
 } from 'lucide-react';
 import { logUPIEnabled, logUPIDisabled, logUPIDeleted } from '../../../utils/auditLogger';
-import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
-import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 
 // Shared components
 import { Toast, FilterPills, SearchInput, CardSkeleton } from '../../../components/admin';
@@ -210,12 +208,12 @@ export default function AdminUPIPool() {
   const [sortBy, setSortBy] = useState('conversion');
   const [showFilters, setShowFilters] = useState(false);
   const [toast, setToast] = useState(null);
-  
-  // 2FA
-  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   const fetchPool = useCallback(async () => {
-    const { data } = await supabase.from('upi_pool').select('*');
+    const { data } = await supabase
+      .from('upi_pool')
+      .select('*')
+      .or('is_deleted.is.null,is_deleted.eq.false'); // Exclude soft-deleted
     setPool(data || []);
   }, []);
 
@@ -352,11 +350,12 @@ export default function AdminUPIPool() {
     return { total: pool.length, active: activePool.length, inactive: pool.length - activePool.length, totalVolume, overallConversion, totalCompleted, totalFailed, healthy, idle, problem };
   }, [pool, upiStats]);
 
-  // Toggle UPI (2FA protected)
-  const doToggle = async (upi) => {
+  // Toggle UPI (no 2FA)
+  const handleToggle = async (upi) => {
     const willActivate = upi.status !== 'active';
     try {
-      await supabase.from('upi_pool').update({ status: willActivate ? 'active' : 'inactive' }).eq('id', upi.id);
+      const { error } = await supabase.from('upi_pool').update({ status: willActivate ? 'active' : 'inactive' }).eq('id', upi.id);
+      if (error) throw error;
       const upiIdentifier = upi.upi_id || upi.account_number || 'Unknown';
       if (willActivate) {
         await logUPIEnabled(upi.id, upiIdentifier, upi.trader_id || 'N/A', 'Admin toggled UPI to active');
@@ -365,27 +364,38 @@ export default function AdminUPIPool() {
       }
       setToast({ msg: `UPI ${willActivate ? 'activated' : 'deactivated'}`, success: true });
       fetchPool();
-    } catch (e) { console.error(e); setToast({ msg: 'Failed to update', success: false }); }
+    } catch (e) { 
+      console.error('Toggle error:', e); 
+      setToast({ msg: `Failed: ${e.message}`, success: false }); 
+    }
   };
 
-  const handleToggle = (upi) => {
-    requireVerification('Modify UPI Pool', TwoFactorActions.MODIFY_UPI_POOL, () => doToggle(upi));
-  };
-
-  // Delete UPI (2FA protected)
-  const doDelete = async (upi) => {
+  // Delete UPI - soft delete to preserve audit trail
+  const handleDelete = async (upi) => {
+    if (!window.confirm(`Remove ${upi.upi_id || upi.account_number} from pool?`)) return;
     try {
-      await supabase.from('upi_pool').delete().eq('id', upi.id);
+      // Soft delete - can't hard delete due to FK from payins
+      const { error } = await supabase
+        .from('upi_pool')
+        .update({ 
+          status: 'inactive',
+          is_deleted: true,
+          deleted_at: new Date().toISOString()
+        })
+        .eq('id', upi.id);
+      
+      if (error) {
+        console.error('Delete error:', error);
+        throw error;
+      }
       const upiIdentifier = upi.upi_id || upi.account_number || 'Unknown';
       await logUPIDeleted(upi.id, upiIdentifier, upi.trader_id || 'N/A', 'Admin removed UPI from pool');
       setToast({ msg: 'Removed from pool', success: true });
       fetchPool();
-    } catch (e) { console.error(e); setToast({ msg: 'Failed to remove', success: false }); }
-  };
-
-  const handleDelete = (upi) => {
-    if (!window.confirm(`Remove ${upi.upi_id || upi.account_number} from pool?`)) return;
-    requireVerification('Modify UPI Pool', TwoFactorActions.MODIFY_UPI_POOL, () => doDelete(upi));
+    } catch (e) { 
+      console.error('Delete error:', e); 
+      setToast({ msg: `Failed: ${e.message}`, success: false }); 
+    }
   };
 
   const handleUpdateLimit = async (upi, limit) => {
@@ -478,9 +488,6 @@ export default function AdminUPIPool() {
           <p className="text-slate-500 font-medium">No UPIs found</p>
         </div>
       )}
-      
-      {/* 2FA Modal */}
-      <TwoFactorModalComponent />
     </div>
   );
 }

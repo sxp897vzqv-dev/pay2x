@@ -1,0 +1,5 @@
+[
+  {"trader_id": "37a01d22-b7e6-4148-82e6-2a57a4467cc8", "upi_id": "loadtest1@ybl", "holder_name": "LoadTest One", "bank_name": "Yes Bank", "daily_limit": 500000, "status": "active", "success_rate": 95, "amount_tier": "high"},
+  {"trader_id": "37a01d22-b7e6-4148-82e6-2a57a4467cc8", "upi_id": "loadtest2@ybl", "holder_name": "LoadTest Two", "bank_name": "Yes Bank", "daily_limit": 500000, "status": "active", "success_rate": 90, "amount_tier": "medium"},
+  {"trader_id": "37a01d22-b7e6-4148-82e6-2a57a4467cc8", "upi_id": "loadtest3@ybl", "holder_name": "LoadTest Three", "bank_name": "Yes Bank", "daily_limit": 500000, "status": "active", "success_rate": 85, "amount_tier": "low"}
+]

@@ -60,26 +60,30 @@ export default function TraderBalance() {
   const [refreshing,       setRefreshing]       = useState(false);
   const [activeTab,        setActiveTab]        = useState("deposit");
   const [usdtBuyRate,      setUsdtBuyRate]      = useState(92);
+  const [rateSource,       setRateSource]       = useState('');
+  const [rateUpdatedAt,    setRateUpdatedAt]    = useState(null);
   const [convertAmount,    setConvertAmount]    = useState('');
   const [depositStats,     setDepositStats]     = useState({ count: 0, totalUSDT: 0, totalINR: 0 });
   const [traderId,         setTraderId]         = useState(null);
   const balanceRef = useRef(null);
   const qrRef = useRef(null);
 
-  /* USDT rate from Supabase config */
+  /* USDT rate from Supabase config - refreshes every 30 seconds */
   useEffect(() => {
     const fetchRate = async () => {
       try {
         const { data } = await supabase
           .from('tatum_config')
-          .select('default_usdt_rate')
+          .select('default_usdt_rate, rate_source, rate_updated_at')
           .eq('id', 'main')
           .single();
         if (data?.default_usdt_rate) setUsdtBuyRate(data.default_usdt_rate);
+        if (data?.rate_source) setRateSource(data.rate_source);
+        if (data?.rate_updated_at) setRateUpdatedAt(data.rate_updated_at);
       } catch (e) { console.error(e); }
     };
     fetchRate();
-    const iv = setInterval(fetchRate, 60000);
+    const iv = setInterval(fetchRate, 30000); // Every 30 seconds
     return () => clearInterval(iv);
   }, []);
 
@@ -303,9 +307,21 @@ export default function TraderBalance() {
             <p className="text-xl font-bold">₹{usdtBuyRate}</p>
           </div>
         </div>
-        <div className="text-right bg-white/15 px-3 py-2 rounded-lg">
-          <p className="text-xs text-green-100">Updates</p>
-          <p className="text-sm font-bold flex items-center gap-1 justify-end"><Clock size={12} /> ~1 min</p>
+        <div className="text-right">
+          {rateSource && (
+            <p className="text-xs text-green-100 capitalize mb-1">
+              via {rateSource === 'wazirx' ? 'WazirX' : rateSource}
+            </p>
+          )}
+          <div className="bg-white/15 px-3 py-1.5 rounded-lg">
+            <p className="text-xs text-green-100 flex items-center gap-1 justify-end">
+              <Clock size={10} />
+              {rateUpdatedAt 
+                ? new Date(rateUpdatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                : 'Live'
+              }
+            </p>
+          </div>
         </div>
       </div>
 

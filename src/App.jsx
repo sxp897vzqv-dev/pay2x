@@ -59,6 +59,7 @@ const AdminApiMonitoring = React.lazy(() => import('./roles/admin/AdminApiMonito
 const AdminPlatformEarnings = React.lazy(() => import('./roles/admin/AdminPlatformEarnings'));
 const AdminBalanceBook = React.lazy(() => import('./roles/admin/FINANCE/AdminBalanceBook'));
 const AdminWallets = React.lazy(() => import('./roles/admin/FINANCE/AdminWallets'));
+const AdminWalletRecovery = React.lazy(() => import('./roles/admin/AdminWalletRecovery'));
 const AdminAffiliates = React.lazy(() => import('./roles/admin/AdminAffiliates'));
 
 // Affiliate pages
@@ -315,6 +316,7 @@ function App() {
           <Route path="platform-earnings" element={<AdminPlatformEarnings />} />
           <Route path="balance-book" element={<AdminBalanceBook />} />
           <Route path="wallets" element={<AdminWallets />} />
+          <Route path="wallet-recovery" element={<AdminWalletRecovery />} />
           <Route path="affiliates" element={<AdminAffiliates />} />
         </Route>
 

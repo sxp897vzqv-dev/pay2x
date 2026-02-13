@@ -105,11 +105,15 @@ serve(async (req: Request) => {
       );
     }
 
-    // 5. Validate transaction belongs to merchant
+    // 5. Validate transaction belongs to merchant and get amount
+    let transactionAmount = amount;
+    let traderId: string | null = null;
+    let upiId: string | null = null;
+
     if (payinId) {
       const { data: payin, error: payinError } = await supabase
         .from('payins')
-        .select('id, merchant_id, amount, status')
+        .select('id, merchant_id, amount, status, trader_id, upi_id')
         .eq('id', payinId)
         .single();
 
@@ -126,12 +130,17 @@ serve(async (req: Request) => {
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      // Get amount and trader from payin
+      if (!transactionAmount) transactionAmount = payin.amount;
+      traderId = payin.trader_id;
+      upiId = payin.upi_id;
     }
 
     if (payoutId) {
       const { data: payout, error: payoutError } = await supabase
         .from('payouts')
-        .select('id, merchant_id, amount, status')
+        .select('id, merchant_id, amount, status, trader_id')
         .eq('id', payoutId)
         .single();
 
@@ -148,6 +157,10 @@ serve(async (req: Request) => {
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      // Get amount and trader from payout
+      if (!transactionAmount) transactionAmount = payout.amount;
+      traderId = payout.trader_id;
     }
 
     // 6. Check for existing open dispute
@@ -189,9 +202,13 @@ serve(async (req: Request) => {
         type,
         reason,
         transaction_id: utr || null,
-        amount: amount || null,
+        amount: transactionAmount,
         proof_url: proofUrl || null,
-        status: 'pending',
+        status: traderId ? 'routed_to_trader' : 'pending',
+        trader_id: traderId,
+        upi_id: upiId,
+        routed_at: traderId ? new Date().toISOString() : null,
+        route_reason: traderId ? 'auto_from_transaction' : null,
         description: metadata ? JSON.stringify(metadata) : null,
       })
       .select('id')
@@ -200,7 +217,15 @@ serve(async (req: Request) => {
     if (disputeError) {
       console.error('Dispute creation error:', disputeError);
       return new Response(
-        JSON.stringify({ success: false, error: { code: 'CREATE_ERROR', message: 'Failed to create dispute' } }),
+        JSON.stringify({ 
+          success: false, 
+          error: { 
+            code: 'CREATE_ERROR', 
+            message: 'Failed to create dispute',
+            detail: disputeError.message,
+            hint: disputeError.hint 
+          } 
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

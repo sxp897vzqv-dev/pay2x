@@ -17,7 +17,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
-import { PayinEngine } from '../_shared/payin-engine.ts';
+import { PayinEngineV4 } from '../_shared/payin-engine-v4.ts';
 import { 
   createError, 
   errorResponse, 
@@ -35,6 +35,7 @@ import {
   RequestContext 
 } from '../_shared/logger.ts';
 import { queueWebhook } from '../_shared/webhook-queue.ts';
+import { getLocationFromIP, getClientIP, GeoLocation } from '../_shared/geo.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -325,10 +326,19 @@ serve(async (req: Request) => {
       }
     }
 
-    // 9. Smart UPI selection via PayinEngine
-    log('info', 'Selecting UPI', ctx, { amount: amountNum });
-    const engine = new PayinEngine(supabase);
-    const selection = await engine.selectUpi(amountNum, merchant.id);
+    // 9. Get user location from IP
+    const clientIP = getClientIP(req);
+    let userGeo: GeoLocation = { city: null, state: null, country: null, lat: null, lon: null };
+    
+    if (clientIP) {
+      userGeo = await getLocationFromIP(clientIP);
+      log('info', 'User geo detected', ctx, { ip: clientIP, city: userGeo.city, state: userGeo.state });
+    }
+
+    // 10. Smart UPI selection via PayinEngine v4 (with geo)
+    log('info', 'Selecting UPI', ctx, { amount: amountNum, userId, userCity: userGeo.city });
+    const engine = new PayinEngineV4(supabase);
+    const selection = await engine.selectUpi(amountNum, merchant.id, userId, userGeo);
 
     if (!selection.success) {
       const error = createError('UPI_UNAVAILABLE', { 
@@ -346,16 +356,18 @@ serve(async (req: Request) => {
 
     log('info', 'UPI selected', ctx, { 
       upiId: selection.upiId, 
-      score: selection.score 
+      score: selection.score,
+      geoMatch: selection.geoMatch,
+      geoBoost: selection.geoBoost
     });
 
-    // 10. Generate transaction ID
+    // 11. Generate transaction ID
     const txnId = `TXN${Date.now()}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
-    // 11. Calculate expiry
+    // 12. Calculate expiry
     const expiresAt = new Date(Date.now() + TIMER_SECONDS * 1000);
 
-    // 12. Create payin record
+    // 13. Create payin record with fallback chain + geo
     const { data: payin, error: payinError } = await supabase
       .from('payins')
       .insert({
@@ -372,6 +384,17 @@ serve(async (req: Request) => {
         timer: TIMER_SECONDS,
         expires_at: expiresAt.toISOString(),
         metadata: metadata || null,
+        // Fallback chain fields
+        fallback_chain: selection.fallbackChain || [selection.upiPoolId],
+        current_attempt: 1,
+        max_attempts: selection.maxAttempts || 1,
+        attempt_history: [],
+        // User geo fields
+        user_ip: clientIP || null,
+        user_city: userGeo.city,
+        user_state: userGeo.state,
+        user_lat: userGeo.lat,
+        user_lon: userGeo.lon,
       })
       .select('id')
       .single();
@@ -401,6 +424,7 @@ serve(async (req: Request) => {
     });
 
     // 14. Build response
+    const hasMoreFallbacks = (selection.maxAttempts || 1) > 1;
     responseBody = {
       payment_id: payin.id,
       txn_id: txnId,
@@ -412,6 +436,10 @@ serve(async (req: Request) => {
       status: 'pending',
       timer: TIMER_SECONDS,
       expires_at: expiresAt.toISOString(),
+      // Fallback info
+      attempt_number: 1,
+      max_attempts: selection.maxAttempts || 1,
+      fallback_available: hasMoreFallbacks,
     };
     responseStatus = 200;
 

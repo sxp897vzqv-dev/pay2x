@@ -32,6 +32,7 @@ export default function AdminPayouts() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalType, setModalType] = useState('payout');
+  const [statusFilter, setStatusFilter] = useState('all');
   const traderFilter = searchParams.get('trader');
 
   // Get admin ID from Supabase auth
@@ -73,10 +74,11 @@ export default function AdminPayouts() {
     fetchPayouts();
   }, [fetchPayouts]);
 
-  // Realtime: auto-refresh on any payouts change
+  // Realtime: filter by status to reduce load
   useRealtimeSubscription('payouts', {
+    filter: statusFilter !== 'all' ? `status=eq.${statusFilter}` : undefined,
     onInsert: (newPayout) => {
-      setPayouts(prev => [newPayout, ...prev]);
+      setPayouts(prev => [newPayout, ...prev].slice(0, 100)); // Keep limited
       setToast({ type: 'info', message: `New payout: ₹${newPayout.amount}` });
     },
     onUpdate: (updated) => {
@@ -268,6 +270,51 @@ export default function AdminPayouts() {
     setProcessing(false);
   };
 
+  // Cancel a single waiting request
+  const handleCancelRequest = async (request) => {
+    if (!window.confirm(`Cancel waiting request?\n\nTrader: ${request.trader?.name || request.trader_id}\nAmount: ₹${request.amount?.toLocaleString()}\n\nLinked payouts will be unlinked but kept.`)) return;
+    setProcessing(true);
+    try {
+      // Step 1: Unlink any payouts that reference this request
+      await supabase.from('payouts').update({ payout_request_id: null }).eq('payout_request_id', request.id);
+      
+      // Step 2: Now delete the request
+      const { error: deleteError } = await supabase.from('payout_requests').delete().eq('id', request.id);
+      if (deleteError) throw deleteError;
+      
+      setToast({ msg: '✅ Request cancelled', success: true });
+      fetchWaitingRequests();
+    } catch (err) {
+      setToast({ msg: '❌ Error: ' + err.message, success: false });
+    }
+    setProcessing(false);
+  };
+
+  // Clear all waiting requests
+  const handleClearAllWaiting = async () => {
+    if (!window.confirm(`⚠️ Clear ALL waiting requests?\n\nThis will cancel ${waitingRequests.length} pending requests.\nLinked payouts will be unlinked but kept.\n\nThis cannot be undone.`)) return;
+    setProcessing(true);
+    try {
+      // Step 1: Get all request IDs
+      const requestIds = waitingRequests.map(r => r.id);
+      
+      // Step 2: Unlink all payouts that reference these requests
+      for (const id of requestIds) {
+        await supabase.from('payouts').update({ payout_request_id: null }).eq('payout_request_id', id);
+      }
+      
+      // Step 3: Delete all requests
+      const { error: deleteError } = await supabase.from('payout_requests').delete().in('id', requestIds);
+      if (deleteError) throw deleteError;
+      
+      setToast({ msg: `✅ Cleared ${waitingRequests.length} waiting requests`, success: true });
+      setWaitingRequests([]);
+    } catch (err) {
+      setToast({ msg: '❌ Error: ' + err.message, success: false });
+    }
+    setProcessing(false);
+  };
+
   const handleExport = () => {
     const escapeCSV = (val) => {
       const str = String(val ?? '');
@@ -444,12 +491,22 @@ export default function AdminPayouts() {
       ) : activeTab === 'waiting' ? (
         currentData.length > 0 ? (
           <div className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2.5">
-              <Loader className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5 animate-spin" />
-              <div className="text-xs text-blue-800"><span className="font-bold">Waiting List:</span> Traders waiting for payouts. They'll auto-receive when new payouts become available.</div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
+              <div className="flex items-start gap-2.5">
+                <Loader className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5 animate-spin" />
+                <div className="text-xs text-blue-800"><span className="font-bold">Waiting List:</span> Traders waiting for payouts. They'll auto-receive when new payouts become available.</div>
+              </div>
+              <button 
+                onClick={handleClearAllWaiting}
+                disabled={processing}
+                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 text-xs font-semibold disabled:opacity-50"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear All
+              </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {currentData.map(request => <WaitingRequestCard key={request.id} request={request} onView={(r) => handleViewDetails(r, 'request')} />)}
+              {currentData.map(request => <WaitingRequestCard key={request.id} request={request} onView={(r) => handleViewDetails(r, 'request')} onCancel={handleCancelRequest} />)}
             </div>
           </div>
         ) : (

@@ -58,6 +58,7 @@ export default function AdminTraderList() {
     const { data, error } = await supabase
       .from('traders')
       .select('*')
+      .or('is_deleted.is.null,is_deleted.eq.false') // Exclude soft-deleted
       .order('created_at', { ascending: false })
       .limit(100);
     if (error) { console.error(error); setLoading(false); return; }
@@ -257,18 +258,31 @@ export default function AdminTraderList() {
     }
   };
 
-  // Delete trader (2FA protected)
+  // Delete trader (2FA protected) - Soft delete to preserve audit trail
   const doDeleteTrader = async (trader) => {
     try {
-      await supabase.from('traders').delete().eq('id', trader.id);
+      // Soft delete: mark as deleted instead of hard delete
+      // Hard delete fails due to FK constraints (payins, payouts, disputes, etc.)
+      const { error } = await supabase
+        .from('traders')
+        .update({ 
+          is_active: false,
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', trader.id);
+      
+      if (error) {
+        console.error('Delete error:', error);
+        throw new Error(error.message || 'Failed to delete trader');
+      }
       
       await logDataDeleted(
         'trader',
         trader.id,
         trader.name || 'Unknown Trader',
-        trader.usdtDepositAddress 
-          ? 'Trader and associated USDT deposit address permanently deleted by admin'
-          : 'Trader permanently deleted by admin'
+        'Trader soft-deleted by admin (preserved for audit trail)'
       );
       
       setToast({ msg: '✅ Trader deleted', success: true });

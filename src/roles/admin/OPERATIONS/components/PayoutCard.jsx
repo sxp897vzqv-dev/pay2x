@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Eye, User, Clock, Hash, CreditCard, Building,
-  Trash2, RotateCcw, MoreVertical, FileText, Loader,
+  Trash2, RotateCcw, MoreVertical, FileText, Loader, X,
 } from 'lucide-react';
 
 /* ─── Payout Card ─── */
@@ -117,7 +117,7 @@ export default function PayoutCard({ payout, onView, onRemove, onReassign, showA
 }
 
 /* ─── Waiting Request Card ─── */
-export function WaitingRequestCard({ request, onView }) {
+export function WaitingRequestCard({ request, onView, onCancel }) {
   // Use snake_case field names from Supabase
   const traderId = request.trader_id;
   const traderName = request.trader?.name;
@@ -140,9 +140,16 @@ export function WaitingRequestCard({ request, onView }) {
               {request.status === 'waiting' ? 'WAITING' : request.status?.toUpperCase().replace('_', ' ') || 'PARTIAL'}
             </span>
           </div>
-          <button onClick={() => onView(request)} className="p-1.5 hover:bg-slate-100 rounded-lg">
-            <Eye className="w-4 h-4 text-slate-500" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => onView(request)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+              <Eye className="w-4 h-4 text-slate-500" />
+            </button>
+            {onCancel && (
+              <button onClick={() => onCancel(request)} className="p-1.5 hover:bg-red-100 rounded-lg" title="Cancel Request">
+                <X className="w-4 h-4 text-red-500" />
+              </button>
+            )}
+          </div>
         </div>
         <div className="mb-2">
           <p className="text-xs text-slate-400">Trader</p>

@@ -57,16 +57,29 @@ export default function AdminDisputes() {
 
   const filtered = useMemo(() => {
     let result = disputes;
-    if (statusFilter !== 'all') result = result.filter(d => d.status === statusFilter);
+    
+    // Status filter with proper grouping
+    if (statusFilter === 'pending') {
+      // Pending = not yet resolved by admin
+      result = result.filter(d => ['pending', 'routed_to_trader', 'trader_accepted', 'trader_rejected'].includes(d.status));
+    } else if (statusFilter === 'needs_action') {
+      // Needs immediate admin decision
+      result = result.filter(d => ['trader_accepted', 'trader_rejected'].includes(d.status));
+    } else if (statusFilter !== 'all') {
+      result = result.filter(d => d.status === statusFilter);
+    }
+    
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(d =>
         d.id?.toLowerCase().includes(s) ||
         d.dispute_id?.toLowerCase().includes(s) ||
         d.reason?.toLowerCase().includes(s) ||
+        d.upi_id?.toLowerCase().includes(s) ||
         d.utr?.toLowerCase().includes(s) ||
         d.trader_id?.toLowerCase().includes(s) ||
-        d.merchant_id?.toLowerCase().includes(s)
+        d.merchant_id?.toLowerCase().includes(s) ||
+        d.order_id?.toLowerCase().includes(s)
       );
     }
     // Date filters
@@ -77,28 +90,56 @@ export default function AdminDisputes() {
 
   const stats = useMemo(() => ({
     total: disputes.length,
-    pending: disputes.filter(d => d.status === 'pending' || d.status === 'routed_to_trader').length,
+    pending: disputes.filter(d => ['pending', 'routed_to_trader', 'trader_accepted', 'trader_rejected'].includes(d.status)).length,
+    needsAction: disputes.filter(d => ['trader_accepted', 'trader_rejected'].includes(d.status)).length,
     approved: disputes.filter(d => d.status === 'admin_approved').length,
     rejected: disputes.filter(d => d.status === 'admin_rejected').length,
   }), [disputes]);
 
   const handleResolve = async (dispute, decision) => {
-    if (!window.confirm(`${decision === 'approved' ? 'Approve' : 'Reject'} this dispute for ₹${dispute.amount?.toLocaleString()}?`)) return;
     try {
-      const statusMap = { approved: 'admin_approved', rejected: 'admin_rejected' };
-      const newStatus = statusMap[decision] || decision;
+      // Check if trader has responded - use Edge Function for balance adjustments
+      if (['trader_accepted', 'trader_rejected'].includes(dispute.status)) {
+        // Call Edge Function for proper balance handling
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-resolve-dispute`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ disputeId: dispute.id, decision }),
+          }
+        );
+        
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Failed to resolve dispute');
+        
+        setToast({ 
+          success: true, 
+          msg: result.balanceAdjusted 
+            ? `✅ Dispute ${decision}. Balance adjusted ₹${result.adjustmentAmount}` 
+            : `✅ Dispute ${decision}` 
+        });
+      } else {
+        // Direct DB update for pending disputes (no trader response yet)
+        const newStatus = decision === 'approved' ? 'admin_approved' : 'admin_rejected';
+        const { error } = await supabase.from('disputes').update({
+          status: newStatus,
+          admin_decision: decision,
+          admin_resolved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', dispute.id);
 
-      const { error } = await supabase.from('disputes').update({
-        status: newStatus,
-        admin_decision: decision,
-        resolved_at: new Date().toISOString(),
-      }).eq('id', dispute.id);
-
-      if (error) throw error;
-      setToast({ type: 'success', message: `Dispute ${decision}` });
+        if (error) throw error;
+        setToast({ success: true, msg: `✅ Dispute ${decision}` });
+      }
+      
       fetchDisputes(true);
     } catch (e) {
-      setToast({ type: 'error', message: 'Failed to update dispute' });
+      console.error('Resolve error:', e);
+      setToast({ success: false, msg: e.message || 'Failed to update dispute' });
     }
   };
 
@@ -154,6 +195,12 @@ export default function AdminDisputes() {
             <p className="text-amber-100 text-xs font-semibold">Pending Resolution</p>
             <p className="text-2xl font-bold">{stats.pending}</p>
           </div>
+          {stats.needsAction > 0 && (
+            <div className="text-center bg-white/20 rounded-lg px-3 py-1">
+              <p className="text-amber-100 text-xs">⚠️ Needs Action</p>
+              <p className="text-xl font-bold">{stats.needsAction}</p>
+            </div>
+          )}
           <div className="text-right">
             <p className="text-amber-100 text-xs">Total</p>
             <p className="text-lg font-bold">{stats.total}</p>
@@ -166,6 +213,7 @@ export default function AdminDisputes() {
         {[
           { label: 'All', value: stats.total, key: 'all', activeBg: 'bg-slate-200', activeText: 'text-slate-800' },
           { label: 'Pending', value: stats.pending, key: 'pending', activeBg: 'bg-amber-100', activeText: 'text-amber-700' },
+          { label: '⚠️ Needs Action', value: stats.needsAction, key: 'needs_action', activeBg: 'bg-orange-100', activeText: 'text-orange-700' },
           { label: 'Approved', value: stats.approved, key: 'admin_approved', activeBg: 'bg-green-100', activeText: 'text-green-700' },
           { label: 'Rejected', value: stats.rejected, key: 'admin_rejected', activeBg: 'bg-red-100', activeText: 'text-red-700' },
         ].map(pill => {

@@ -61,14 +61,19 @@ serve(async (req: Request) => {
       });
     }
 
-    if (!['trader_accepted', 'trader_rejected'].includes(dispute.status)) {
+    // Allow resolving disputes in any pending state (admin can override)
+    const allowedStatuses = ['pending', 'routed_to_trader', 'trader_accepted', 'trader_rejected'];
+    if (!allowedStatuses.includes(dispute.status)) {
       return new Response(JSON.stringify({ 
-        error: `Cannot resolve dispute in status: ${dispute.status}. Need trader response first.` 
+        error: `Cannot resolve dispute in status: ${dispute.status}. Already resolved.` 
       }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    
+    // Track if trader has responded for balance logic
+    const traderResponded = ['trader_accepted', 'trader_rejected'].includes(dispute.status);
 
     const ts = new Date().toISOString();
     const amount = Number(dispute.amount) || 0;
@@ -76,13 +81,12 @@ serve(async (req: Request) => {
     let adjustmentAmount = 0;
     let adjustmentType = '';
 
-    // Balance adjustments only happen when admin approves
-    if (decision === 'approved') {
+    // Balance adjustments only happen when admin approves AND trader has responded
+    if (decision === 'approved' && traderResponded) {
       if (dispute.type === 'payin') {
-        // Payin dispute approved = merchant was right, payment was made
-        // If trader_accepted: they confirm receipt → credit their balance
-        if (dispute.trader_response === 'accepted') {
-          // Trader already confirmed receipt, credit them
+        // Payin dispute approved = payment was actually made
+        // If trader_accepted (status): they confirm receipt → credit their balance
+        if (dispute.status === 'trader_accepted') {
           const traderRate = dispute.traders?.payout_rate || 4;
           const commission = Math.round((amount * traderRate) / 100);
           adjustmentAmount = amount - commission;
@@ -96,9 +100,9 @@ serve(async (req: Request) => {
           console.log(`💰 Credited trader ₹${adjustmentAmount} for approved payin dispute`);
         }
       } else if (dispute.type === 'payout') {
-        // Payout dispute approved = client was right, payout was not received
+        // Payout dispute approved = payout was NOT received by customer
         // If trader_rejected (claimed they sent but actually didn't): deduct from trader
-        if (dispute.trader_response === 'rejected') {
+        if (dispute.status === 'trader_rejected') {
           const traderRate = dispute.traders?.payout_rate || 1;
           const commission = Math.round((amount * traderRate) / 100);
           adjustmentAmount = amount + commission;

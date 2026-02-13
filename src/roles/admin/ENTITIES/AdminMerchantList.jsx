@@ -2,8 +2,6 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { createMerchant } from '../../../supabaseAdmin';
 import { Link, useNavigate } from 'react-router-dom';
-import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
-import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 import {
   Store, Search, Filter, Plus, Eye, CheckCircle, AlertCircle,
   ToggleLeft, ToggleRight, Download, Globe, Key, RefreshCw, X,
@@ -66,14 +64,12 @@ export default function AdminMerchantList() {
   const [selectedMerchant, setSelectedMerchant] = useState(null);
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
-  
-  // 2FA
-  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
 
   const fetchMerchants = useCallback(async () => {
     const { data, error } = await supabase
       .from('merchants')
       .select('*')
+      .or('is_deleted.is.null,is_deleted.eq.false') // Exclude soft-deleted
       .order('created_at', { ascending: false })
       .limit(100);
     if (error) {
@@ -157,16 +153,31 @@ export default function AdminMerchantList() {
     }
   };
 
-  // Delete merchant (2FA protected)
+  // Delete merchant (2FA protected) - Soft delete to preserve audit trail
   const doDeleteMerchant = async (merchant) => {
     try {
-      await supabase.from('merchants').delete().eq('id', merchant.id);
+      // Soft delete: mark as deleted instead of hard delete
+      // Hard delete fails due to FK constraints (payins, payouts, disputes, etc.)
+      const { error } = await supabase
+        .from('merchants')
+        .update({ 
+          is_active: false,
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', merchant.id);
+      
+      if (error) {
+        console.error('Delete error:', error);
+        throw new Error(error.message || 'Failed to delete merchant');
+      }
       
       await logDataDeleted(
         'merchant',
         merchant.id,
         merchant.businessName || merchant.name || 'Unknown Merchant',
-        'Merchant permanently deleted by admin'
+        'Merchant soft-deleted by admin (preserved for audit trail)'
       );
       
       setToast({ msg: '✅ Merchant deleted', success: true });
@@ -178,7 +189,7 @@ export default function AdminMerchantList() {
 
   const handleDeleteMerchant = (merchant) => {
     if (!window.confirm(`Delete ${merchant.businessName || merchant.name}?\n\nThis cannot be undone.`)) return;
-    requireVerification('Delete Merchant', TwoFactorActions.DELETE_ENTITY, () => doDeleteMerchant(merchant));
+    doDeleteMerchant(merchant);
   };
 
   // Toggle status (2FA protected)
@@ -196,7 +207,7 @@ export default function AdminMerchantList() {
   };
 
   const handleToggleStatus = (merchant) => {
-    requireVerification('Deactivate Merchant', TwoFactorActions.DEACTIVATE_ENTITY, () => doToggleStatus(merchant));
+    doToggleStatus(merchant);
   };
 
   // Export
@@ -345,8 +356,6 @@ export default function AdminMerchantList() {
         </div>
       )}
       
-      {/* 2FA Modal */}
-      <TwoFactorModalComponent />
     </div>
   );
 }

@@ -70,10 +70,11 @@ export default function AdminPayins() {
     fetchPayins();
   }, [fetchPayins]);
 
-  // Realtime: auto-refresh on any payins change
+  // Realtime: filter to only active payins (pending, assigned) to reduce load
   useRealtimeSubscription('payins', {
+    filter: statusFilter !== 'all' ? `status=eq.${statusFilter}` : undefined,
     onInsert: (newPayin) => {
-      setPayins(prev => [newPayin, ...prev]);
+      setPayins(prev => [newPayin, ...prev].slice(0, BATCH_SIZE)); // Keep limited
       setToast({ type: 'info', message: `New payin: ₹${newPayin.amount}` });
     },
     onUpdate: (updated) => {

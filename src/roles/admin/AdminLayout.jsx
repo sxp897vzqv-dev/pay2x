@@ -77,6 +77,7 @@ const ROUTE_PERMISSIONS = {
   '/admin/platform-earnings': 'admin_only',
   '/admin/balance-book': 'admin_only',
   '/admin/wallets': 'admin_only',
+  '/admin/wallet-recovery': 'admin_only',
   '/admin/affiliates': 'admin_only',
 };
 
@@ -103,7 +104,7 @@ const navGroups = [
       { to: '/admin/payouts',      icon: TrendingDown, label: 'Payouts',      shortLabel: 'Payouts' },
       { to: '/admin/disputes',     icon: AlertCircle,  label: 'Disputes',     shortLabel: 'Disputes' },
       { to: '/admin/upi-pool',     icon: Database,     label: 'UPI Pool',     shortLabel: 'Pool' },
-      { to: '/admin/payin-engine', icon: Cpu,          label: 'Payin Engine', shortLabel: 'Payin E.' },
+      { to: '/admin/payin-engine', icon: Cpu,          label: 'Payin Engine', shortLabel: 'Engine' },
       { to: '/admin/payout-engine', icon: Cpu,        label: 'Payout Engine', shortLabel: 'Payout E.' },
       { to: '/admin/payout-verification', icon: Shield, label: 'Payout Verify', shortLabel: 'Verify' },
       { to: '/admin/dispute-engine', icon: Cpu,       label: 'Dispute Engine', shortLabel: 'Dispute E.' },
@@ -114,6 +115,7 @@ const navGroups = [
     items: [
       { to: '/admin/balance-book', icon: BookOpen,   label: 'Balance Book', shortLabel: 'Ledger' },
       { to: '/admin/wallets',      icon: Bitcoin,    label: 'HD Wallets',   shortLabel: 'Wallets' },
+      { to: '/admin/wallet-recovery', icon: Shield, label: 'Wallet Recovery', shortLabel: 'Recovery' },
       { to: '/admin/settlements',  icon: Wallet,     label: 'Settlements',  shortLabel: 'Settle' },
       { to: '/admin/refunds',      icon: RefreshCw,  label: 'Refunds',      shortLabel: 'Refunds' },
       { to: '/admin/commission',   icon: DollarSign, label: 'Commission',   shortLabel: 'Comm.' },

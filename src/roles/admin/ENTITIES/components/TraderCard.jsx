@@ -37,8 +37,8 @@ export default function TraderCard({ trader, onEdit, onDelete, onToggleStatus, o
         <div className="p-3">
           {/* Header */}
           <div className="flex items-start justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                 {trader.name?.charAt(0).toUpperCase() || 'T'}
               </div>
               <div className="flex-1 min-w-0">
@@ -46,7 +46,7 @@ export default function TraderCard({ trader, onEdit, onDelete, onToggleStatus, o
                 <p className="text-xs text-slate-400 truncate">{trader.email}</p>
               </div>
             </div>
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 hover:bg-slate-100 rounded-lg">
                 <MoreVertical className="w-4 h-4 text-slate-500" />
               </button>
