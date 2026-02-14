@@ -241,9 +241,9 @@ export default function TraderPayin() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setTraderId(user.id); // Store for realtime filter
-      // Fetch commission rate
-      const { data: trader } = await supabase.from('traders').select('commission_rate').eq('id', user.id).single();
-      if (trader) setCommissionRate(trader.commission_rate || 4);
+      // Fetch commission rate (payin_commission column)
+      const { data: trader } = await supabase.from('traders').select('payin_commission').eq('id', user.id).single();
+      if (trader) setCommissionRate(trader.payin_commission || 4);
       // Fetch payins (limited to 100 for performance)
       const { data: rows } = await supabase
         .from('payins')
