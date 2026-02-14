@@ -33,7 +33,7 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'slate' }) {
   );
 }
 
-function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
+function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading }) {
   const [showXpub, setShowXpub] = useState(false);
   const [showAddresses, setShowAddresses] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -105,6 +105,26 @@ function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
           </button>
         </div>
       </div>
+
+      {/* Admin Wallet (Sweep Destination) */}
+      {adminWallet && (
+        <div className="mb-3">
+          <p className="text-xs font-semibold text-slate-500 mb-1">Admin Wallet (Sweep To)</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs bg-purple-50 border border-purple-200 px-2 py-1.5 rounded-lg font-mono truncate text-purple-700">
+              {adminWallet}
+            </code>
+            <a 
+              href={`https://tronscan.org/#/address/${adminWallet}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 hover:bg-purple-100 rounded-lg text-purple-500"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Derived Addresses (expandable) */}
       {wallet.derived_addresses?.length > 0 && (
@@ -568,6 +588,7 @@ export default function AdminWalletRecovery() {
                   <WalletCard
                     key={wallet.id}
                     wallet={wallet}
+                    adminWallet={globalAdminWallet}
                     onSetCurrent={handleSetCurrent}
                     onArchive={handleArchive}
                     isLoading={actionLoading}
