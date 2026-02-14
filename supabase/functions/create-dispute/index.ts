@@ -140,7 +140,9 @@ serve(async (req: Request) => {
       }
     }
 
-    if (!payinId && !payoutId) {
+    // Allow dispute creation even without matching transaction (manual routing)
+    const hasReference = payinId || payoutId || lookupUpiId || orderId;
+    if (!hasReference) {
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -153,7 +155,7 @@ serve(async (req: Request) => {
     // 6. Validate transaction belongs to merchant and get amount
     let transactionAmount = amount;
     let traderId: string | null = null;
-    let upiId: string | null = null;
+    let upiId: string | null = lookupUpiId || null;
 
     if (payinId) {
       const { data: payin, error: payinError } = await supabase
@@ -208,33 +210,35 @@ serve(async (req: Request) => {
       traderId = payout.trader_id;
     }
 
-    // 7. Check for existing open dispute
-    const existingQuery = supabase
-      .from('disputes')
-      .select('id, status')
-      .eq('merchant_id', merchant.id)
-      .in('status', ['pending', 'routed_to_trader', 'trader_accepted']);
+    // 7. Check for existing open dispute (only if we have a specific transaction)
+    if (payinId || payoutId) {
+      const existingQuery = supabase
+        .from('disputes')
+        .select('id, status')
+        .eq('merchant_id', merchant.id)
+        .in('status', ['pending', 'routed_to_trader', 'trader_accepted']);
 
-    if (payinId) {
-      existingQuery.eq('payin_id', payinId);
-    } else {
-      existingQuery.eq('payout_id', payoutId);
-    }
+      if (payinId) {
+        existingQuery.eq('payin_id', payinId);
+      } else {
+        existingQuery.eq('payout_id', payoutId);
+      }
 
-    const { data: existingDispute } = await existingQuery.single();
+      const { data: existingDispute } = await existingQuery.single();
 
-    if (existingDispute) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { 
-            code: 'DISPUTE_EXISTS', 
-            message: 'An open dispute already exists for this transaction',
-            dispute_id: existingDispute.id 
-          } 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (existingDispute) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: { 
+              code: 'DISPUTE_EXISTS', 
+              message: 'An open dispute already exists for this transaction',
+              dispute_id: existingDispute.id 
+            } 
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // 8. Create dispute record
