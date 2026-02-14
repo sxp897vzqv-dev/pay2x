@@ -125,7 +125,6 @@ export default function AdminDisputeEngine() {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
         },
         body: JSON.stringify({
           disputeId,
@@ -133,7 +132,13 @@ export default function AdminDisputeEngine() {
           note: adminNote || '',
         }),
       });
-      const data = await response.json();
+      
+      // Handle empty response
+      const text = await response.text();
+      if (!text) {
+        throw new Error('Empty response from server');
+      }
+      const data = JSON.parse(text);
       if (data.success) {
         setToast({ msg: `Dispute ${decision}d! ${data.message}`, success: true });
         setAdminNote('');
