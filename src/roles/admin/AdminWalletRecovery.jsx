@@ -8,26 +8,36 @@ import {
 import Toast from '../../components/admin/Toast';
 
 // ═══════════════════════════════════════════════════════════════════
-// TATUM API - Derive addresses directly from XPUB
+// Derive addresses via Edge Function (avoids CORS)
 // ═══════════════════════════════════════════════════════════════════
-const TATUM_API = 'https://api.tatum.io/v3';
+const FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
 
-async function deriveAddressFromXpub(xpub, index, apiKey) {
-  const res = await fetch(`${TATUM_API}/tron/address/${xpub}/${index}`, {
-    headers: { 'x-api-key': apiKey }
+async function deriveAddressFromXpub(xpub, index) {
+  const res = await fetch(`${FUNCTIONS_URL}/derive-address`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ xpub, index })
   });
-  if (!res.ok) throw new Error(`Tatum API error: ${res.status}`);
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `API error: ${res.status}`);
+  }
   const data = await res.json();
   return data.address;
 }
 
-async function deriveMultipleAddresses(xpub, fromIndex, toIndex, apiKey) {
-  const addresses = [];
-  for (let i = fromIndex; i <= toIndex; i++) {
-    const address = await deriveAddressFromXpub(xpub, i, apiKey);
-    addresses.push({ index: i, address });
+async function deriveMultipleAddresses(xpub, fromIndex, toIndex) {
+  const res = await fetch(`${FUNCTIONS_URL}/derive-address`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ xpub, fromIndex, toIndex })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || `API error: ${res.status}`);
   }
-  return addresses;
+  const data = await res.json();
+  return data.addresses;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -56,7 +66,7 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'slate' }) {
   );
 }
 
-function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive, isLoading, onToast }) {
+function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, onToast }) {
   const [showXpub, setShowXpub] = useState(false);
   const [showAddresses, setShowAddresses] = useState(false);
   const [derivedAddresses, setDerivedAddresses] = useState([]);
@@ -69,14 +79,14 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
 
   // Auto-derive master address (index 0) on load
   useEffect(() => {
-    if (wallet.master_xpub && tatumApiKey && !masterAddress) {
+    if (wallet.master_xpub && !masterAddress) {
       setLoadingMaster(true);
-      deriveAddressFromXpub(wallet.master_xpub, 0, tatumApiKey)
+      deriveAddressFromXpub(wallet.master_xpub, 0)
         .then(addr => setMasterAddress(addr))
         .catch(e => console.error('Failed to derive master:', e))
         .finally(() => setLoadingMaster(false));
     }
-  }, [wallet.master_xpub, tatumApiKey]);
+  }, [wallet.master_xpub]);
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -84,10 +94,10 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Derive addresses from XPUB using Tatum API
+  // Derive addresses from XPUB via Edge Function
   const handleDeriveAddresses = async () => {
-    if (!wallet.master_xpub || !tatumApiKey) {
-      onToast?.({ msg: 'Missing XPUB or API key', success: false });
+    if (!wallet.master_xpub) {
+      onToast?.({ msg: 'Missing XPUB', success: false });
       return;
     }
     setDeriving(true);
@@ -95,8 +105,7 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
       const addresses = await deriveMultipleAddresses(
         wallet.master_xpub, 
         parseInt(deriveFrom), 
-        parseInt(deriveTo), 
-        tatumApiKey
+        parseInt(deriveTo)
       );
       setDerivedAddresses(addresses);
       setShowAddresses(true);
@@ -196,7 +205,7 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
               </a>
             </>
           ) : (
-            <span className="text-xs text-slate-400">Configure API key to derive</span>
+            <span className="text-xs text-slate-400">No XPUB configured</span>
           )}
         </div>
       </div>
@@ -244,7 +253,7 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
           />
           <button
             onClick={handleDeriveAddresses}
-            disabled={deriving || !tatumApiKey}
+            disabled={deriving || !wallet.master_xpub}
             className="flex-1 px-2 py-1 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1"
           >
             {deriving ? <Loader className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
@@ -402,7 +411,6 @@ export default function AdminWalletRecovery() {
   const [orphanAddresses, setOrphanAddresses] = useState([]);
   const [recentDeposits, setRecentDeposits] = useState([]);
   const [globalAdminWallet, setGlobalAdminWallet] = useState(''); // From tatum_config
-  const [tatumApiKey, setTatumApiKey] = useState(''); // For deriving addresses
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -422,14 +430,11 @@ export default function AdminWalletRecovery() {
       // Fetch global config from tatum_config (source of truth)
       const { data: configData } = await supabase
         .from('tatum_config')
-        .select('admin_wallet, master_xpub, tatum_api_key')
+        .select('admin_wallet, master_xpub')
         .eq('id', 'main')
         .single();
       if (configData?.admin_wallet) {
         setGlobalAdminWallet(configData.admin_wallet);
-      }
-      if (configData?.tatum_api_key) {
-        setTatumApiKey(configData.tatum_api_key);
       }
 
       // Fetch address_meta for last index
@@ -712,7 +717,6 @@ export default function AdminWalletRecovery() {
                     key={wallet.id}
                     wallet={wallet}
                     adminWallet={globalAdminWallet}
-                    tatumApiKey={tatumApiKey}
                     onSetCurrent={handleSetCurrent}
                     onArchive={handleArchive}
                     onToast={setToast}
