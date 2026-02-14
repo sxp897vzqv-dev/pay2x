@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase, SUPABASE_URL } from '../../supabase';
+import { supabase } from '../../supabase';
 import {
   Wallet, Shield, RefreshCw, AlertTriangle, CheckCircle, XCircle,
   Plus, ArrowRight, Copy, ExternalLink, Clock, DollarSign,
@@ -8,37 +8,9 @@ import {
 import Toast from '../../components/admin/Toast';
 
 // ═══════════════════════════════════════════════════════════════════
-// Derive addresses via Edge Function (avoids CORS)
+// Derive addresses client-side (no API needed!)
 // ═══════════════════════════════════════════════════════════════════
-const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
-
-async function deriveAddressFromXpub(xpub, index) {
-  const res = await fetch(`${FUNCTIONS_URL}/derive-address`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ xpub, index })
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  const data = await res.json();
-  return data.address;
-}
-
-async function deriveMultipleAddresses(xpub, fromIndex, toIndex) {
-  const res = await fetch(`${FUNCTIONS_URL}/derive-address`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ xpub, fromIndex, toIndex })
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  const data = await res.json();
-  return data.addresses;
-}
+import { deriveAddressFromXpub, deriveMultipleAddresses } from '../../utils/tronDerivation';
 
 // ═══════════════════════════════════════════════════════════════════
 // COMPONENTS
@@ -77,19 +49,18 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, o
   const [deriveTo, setDeriveTo] = useState(10);
   const [copied, setCopied] = useState(false);
 
-  // Auto-derive master address (index 0) on load
+  // Auto-derive master address (index 0) on load - CLIENT SIDE, no API!
   useEffect(() => {
     if (wallet.master_xpub && !masterAddress) {
       setLoadingMaster(true);
-      deriveAddressFromXpub(wallet.master_xpub, 0)
-        .then(addr => setMasterAddress(addr))
-        .catch(e => {
-          console.error('Failed to derive master:', e);
-          if (e.message?.includes('401') || e.message?.includes('API')) {
-            setMasterAddress('API_ERROR');
-          }
-        })
-        .finally(() => setLoadingMaster(false));
+      try {
+        const addr = deriveAddressFromXpub(wallet.master_xpub, 0);
+        setMasterAddress(addr);
+      } catch (e) {
+        console.error('Failed to derive master:', e);
+        setMasterAddress('DERIVE_ERROR');
+      }
+      setLoadingMaster(false);
     }
   }, [wallet.master_xpub]);
 
@@ -99,15 +70,15 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, o
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Derive addresses from XPUB via Edge Function
-  const handleDeriveAddresses = async () => {
+  // Derive addresses from XPUB - CLIENT SIDE, no API!
+  const handleDeriveAddresses = () => {
     if (!wallet.master_xpub) {
       onToast?.({ msg: 'Missing XPUB', success: false });
       return;
     }
     setDeriving(true);
     try {
-      const addresses = await deriveMultipleAddresses(
+      const addresses = deriveMultipleAddresses(
         wallet.master_xpub, 
         parseInt(deriveFrom), 
         parseInt(deriveTo)
@@ -192,9 +163,9 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, o
               <Loader className="w-3 h-3 animate-spin text-slate-400" />
               <span className="text-xs text-slate-400">Deriving from XPUB...</span>
             </div>
-          ) : masterAddress === 'API_ERROR' ? (
+          ) : masterAddress === 'DERIVE_ERROR' ? (
             <div className="flex-1 bg-red-50 border border-red-200 px-2 py-1.5 rounded-lg">
-              <span className="text-xs text-red-600">⚠️ Tatum API key invalid/expired. Update in HD Wallets → Config</span>
+              <span className="text-xs text-red-600">⚠️ Invalid XPUB format</span>
             </div>
           ) : masterAddress ? (
             <>
