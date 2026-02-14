@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../supabase';
+import { supabase, SUPABASE_URL } from '../../supabase';
 import {
   Wallet, Shield, RefreshCw, AlertTriangle, CheckCircle, XCircle,
   Plus, ArrowRight, Copy, ExternalLink, Clock, DollarSign,
@@ -10,7 +10,7 @@ import Toast from '../../components/admin/Toast';
 // ═══════════════════════════════════════════════════════════════════
 // Derive addresses via Edge Function (avoids CORS)
 // ═══════════════════════════════════════════════════════════════════
-const FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
+const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
 async function deriveAddressFromXpub(xpub, index) {
   const res = await fetch(`${FUNCTIONS_URL}/derive-address`, {
