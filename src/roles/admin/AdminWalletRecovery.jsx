@@ -233,6 +233,7 @@ export default function AdminWalletRecovery() {
   const [wallets, setWallets] = useState([]);
   const [orphanAddresses, setOrphanAddresses] = useState([]);
   const [recentDeposits, setRecentDeposits] = useState([]);
+  const [globalAdminWallet, setGlobalAdminWallet] = useState(''); // From tatum_config
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -249,6 +250,16 @@ export default function AdminWalletRecovery() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // Fetch global admin wallet from tatum_config (source of truth)
+      const { data: configData } = await supabase
+        .from('tatum_config')
+        .select('admin_wallet')
+        .eq('id', 'main')
+        .single();
+      if (configData?.admin_wallet) {
+        setGlobalAdminWallet(configData.admin_wallet);
+      }
+
       // Fetch wallets
       const { data: walletData } = await supabase
         .from('wallet_configs')
@@ -311,7 +322,11 @@ export default function AdminWalletRecovery() {
   };
 
   const handleSweep = async (address) => {
-    if (!window.confirm(`Sweep ${address.last_balance} USDT from ${address.address.slice(0, 12)}... to admin wallet?`)) return;
+    if (!globalAdminWallet) {
+      setToast({ msg: 'Admin wallet not configured! Set it in HD Wallets page.', success: false });
+      return;
+    }
+    if (!window.confirm(`Sweep ${address.last_balance} USDT from ${address.address.slice(0, 12)}... to ${globalAdminWallet.slice(0, 10)}...?`)) return;
     
     setActionLoading(true);
     try {
@@ -457,7 +472,33 @@ export default function AdminWalletRecovery() {
         <>
           {/* Wallets Tab */}
           {activeTab === 'wallets' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-4">
+              {/* Global Admin Wallet Banner */}
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center">
+                    <Wallet className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-purple-600">SWEEP DESTINATION</p>
+                    <p className="font-mono text-sm text-purple-900">
+                      {globalAdminWallet || 'Not configured - set in HD Wallets'}
+                    </p>
+                  </div>
+                </div>
+                {globalAdminWallet && (
+                  <a 
+                    href={`https://tronscan.org/#/address/${globalAdminWallet}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-600 hover:text-purple-700"
+                  >
+                    <ExternalLink className="w-5 h-5" />
+                  </a>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {wallets.length === 0 ? (
                 <div className="col-span-full text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
                   <Wallet className="w-12 h-12 text-slate-300 mx-auto mb-3" />
@@ -475,6 +516,7 @@ export default function AdminWalletRecovery() {
                   />
                 ))
               )}
+              </div>
             </div>
           )}
 
