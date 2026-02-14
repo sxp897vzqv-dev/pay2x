@@ -35,6 +35,7 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'slate' }) {
 
 function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
   const [showXpub, setShowXpub] = useState(false);
+  const [showAddresses, setShowAddresses] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = (text) => {
@@ -56,7 +57,7 @@ function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Wallet className="w-5 h-5 text-purple-600" />
-            <h3 className="font-bold text-slate-900">{wallet.name}</h3>
+            <h3 className="font-bold text-slate-900">{wallet.name || 'HD Wallet'}</h3>
             {wallet.is_current && (
               <span className="px-2 py-0.5 bg-purple-600 text-white text-xs font-bold rounded-full">
                 CURRENT
@@ -65,8 +66,8 @@ function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
           </div>
           <p className="text-xs text-slate-500">{wallet.id}</p>
         </div>
-        <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${statusColors[wallet.status]}`}>
-          {wallet.status.toUpperCase()}
+        <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${statusColors[wallet.status] || statusColors.active}`}>
+          {(wallet.status || 'active').toUpperCase()}
         </span>
       </div>
 
@@ -97,13 +98,51 @@ function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
         </div>
         <div className="flex items-center gap-2">
           <code className="flex-1 text-xs bg-slate-100 px-2 py-1.5 rounded-lg font-mono truncate">
-            {showXpub ? wallet.master_xpub : '••••••••••••••••••••' + wallet.master_xpub?.slice(-8)}
+            {showXpub ? wallet.master_xpub : '••••••••••••••••••••' + (wallet.master_xpub?.slice(-8) || '')}
           </code>
           <button onClick={() => handleCopy(wallet.master_xpub)} className="p-1.5 hover:bg-slate-100 rounded-lg">
             {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-slate-400" />}
           </button>
         </div>
       </div>
+
+      {/* Derived Addresses (expandable) */}
+      {wallet.derived_addresses?.length > 0 && (
+        <div className="mb-3">
+          <button 
+            onClick={() => setShowAddresses(!showAddresses)}
+            className="w-full flex items-center justify-between text-xs font-semibold text-slate-500 hover:text-slate-700 mb-1"
+          >
+            <span>Derived Addresses ({wallet.derived_addresses.length})</span>
+            <span className="text-purple-600">{showAddresses ? '▲ Hide' : '▼ Show'}</span>
+          </button>
+          {showAddresses && (
+            <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-50 rounded-lg p-2">
+              {wallet.derived_addresses.map((addr, idx) => (
+                <div key={addr.id} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 w-6">#{addr.derivation_index}</span>
+                    <code className="font-mono text-slate-600">
+                      {addr.usdt_deposit_address?.slice(0, 8)}...{addr.usdt_deposit_address?.slice(-6)}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-500">{addr.name}</span>
+                    <a 
+                      href={`https://tronscan.org/#/address/${addr.usdt_deposit_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-500 hover:text-purple-700"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-slate-100">
@@ -240,23 +279,52 @@ export default function AdminWalletRecovery() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch global admin wallet from tatum_config (source of truth)
+      // Fetch global config from tatum_config (source of truth)
       const { data: configData } = await supabase
         .from('tatum_config')
-        .select('admin_wallet')
+        .select('admin_wallet, master_xpub')
         .eq('id', 'main')
         .single();
       if (configData?.admin_wallet) {
         setGlobalAdminWallet(configData.admin_wallet);
       }
 
-      // Fetch wallets
+      // Fetch address_meta for last index
+      const { data: metaData } = await supabase
+        .from('address_meta')
+        .select('last_index')
+        .eq('id', 'main')
+        .single();
+
+      // Fetch traders with their deposit addresses
+      const { data: traderAddresses } = await supabase
+        .from('traders')
+        .select('id, name, usdt_deposit_address, derivation_index')
+        .not('usdt_deposit_address', 'is', null)
+        .order('derivation_index', { ascending: true });
+
+      // Fetch wallets and enrich with address data
       const { data: walletData } = await supabase
         .from('wallet_configs')
         .select('*')
         .order('is_current', { ascending: false })
         .order('created_at', { ascending: false });
-      setWallets(walletData || []);
+      
+      // Enrich wallets with derived address info
+      const enrichedWallets = (walletData || []).map(w => {
+        // For current wallet, use data from tatum_config + traders
+        if (w.is_current && configData) {
+          return {
+            ...w,
+            master_xpub: w.master_xpub || configData.master_xpub,
+            total_addresses: traderAddresses?.length || 0,
+            last_derivation_index: metaData?.last_index || 0,
+            derived_addresses: traderAddresses || [],
+          };
+        }
+        return w;
+      });
+      setWallets(enrichedWallets);
 
       // Fetch orphan addresses
       const { data: orphanData } = await supabase
