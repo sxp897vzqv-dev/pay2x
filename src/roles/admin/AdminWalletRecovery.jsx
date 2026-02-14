@@ -60,10 +60,23 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
   const [showXpub, setShowXpub] = useState(false);
   const [showAddresses, setShowAddresses] = useState(false);
   const [derivedAddresses, setDerivedAddresses] = useState([]);
+  const [masterAddress, setMasterAddress] = useState('');
+  const [loadingMaster, setLoadingMaster] = useState(false);
   const [deriving, setDeriving] = useState(false);
   const [deriveFrom, setDeriveFrom] = useState(0);
   const [deriveTo, setDeriveTo] = useState(10);
   const [copied, setCopied] = useState(false);
+
+  // Auto-derive master address (index 0) on load
+  useEffect(() => {
+    if (wallet.master_xpub && tatumApiKey && !masterAddress) {
+      setLoadingMaster(true);
+      deriveAddressFromXpub(wallet.master_xpub, 0, tatumApiKey)
+        .then(addr => setMasterAddress(addr))
+        .catch(e => console.error('Failed to derive master:', e))
+        .finally(() => setLoadingMaster(false));
+    }
+  }, [wallet.master_xpub, tatumApiKey]);
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -153,6 +166,38 @@ function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive,
           <button onClick={() => handleCopy(wallet.master_xpub)} className="p-1.5 hover:bg-slate-100 rounded-lg">
             {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-slate-400" />}
           </button>
+        </div>
+      </div>
+
+      {/* Master Wallet Address (Index 0) */}
+      <div className="mb-3">
+        <p className="text-xs font-semibold text-slate-500 mb-1">Master Wallet (Index #0)</p>
+        <div className="flex items-center gap-2">
+          {loadingMaster ? (
+            <div className="flex-1 bg-slate-100 px-2 py-1.5 rounded-lg flex items-center gap-2">
+              <Loader className="w-3 h-3 animate-spin text-slate-400" />
+              <span className="text-xs text-slate-400">Deriving from XPUB...</span>
+            </div>
+          ) : masterAddress ? (
+            <>
+              <code className="flex-1 text-xs bg-blue-50 border border-blue-200 px-2 py-1.5 rounded-lg font-mono truncate text-blue-700">
+                {masterAddress}
+              </code>
+              <button onClick={() => handleCopy(masterAddress)} className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-500">
+                <Copy className="w-4 h-4" />
+              </button>
+              <a 
+                href={`https://tronscan.org/#/address/${masterAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-500"
+              >
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400">Configure API key to derive</span>
+          )}
         </div>
       </div>
 
