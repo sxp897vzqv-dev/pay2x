@@ -328,59 +328,55 @@ export default function TraderPayin() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // 1. Update payin status to completed
-      const { error: payinError } = await supabase
-        .from('payins')
-        .update({ 
-          status: 'completed', 
-          completed_at: ts, 
-          commission: traderComm 
-        })
-        .eq('id', payin.id);
-      
-      if (payinError) throw new Error('Failed to update payin: ' + payinError.message);
-
-      // 2. Update trader balance (deduct amount, add commission)
-      // Using RPC for atomic update
-      const { error: balanceError } = await supabase.rpc('update_trader_balance_on_payin', {
-        p_trader_id: user.id,
-        p_amount: amount,
-        p_commission: traderComm
+      // Try RPC first (handles all balance updates atomically)
+      const { data: result, error: rpcError } = await supabase.rpc('complete_payin', {
+        p_payin_id: payin.id,
+        p_trader_id: user.id
       });
       
-      if (balanceError) {
-        console.warn('Balance RPC failed:', balanceError.message);
-        // Fallback: direct update (try both id and profile_id)
-        const { data: td, error: fetchError } = await supabase
+      if (rpcError) {
+        console.warn('RPC failed, using fallback:', rpcError.message);
+        
+        // Fallback: manual updates
+        // 1. Update payin status
+        const { error: payinError } = await supabase
+          .from('payins')
+          .update({ status: 'completed', completed_at: ts, commission: traderComm })
+          .eq('id', payin.id);
+        if (payinError) throw new Error('Failed to update payin: ' + payinError.message);
+
+        // 2. Update trader balance (deduct amount, add commission)
+        const { data: td } = await supabase
           .from('traders')
           .select('id, balance, overall_commission')
           .or(`id.eq.${user.id},profile_id.eq.${user.id}`)
           .single();
         
-        if (fetchError) {
-          console.error('Failed to fetch trader:', fetchError.message);
-        } else if (td) {
+        if (td) {
           const newBalance = (Number(td.balance) || 0) - amount + traderComm;
-          const newCommission = (Number(td.overall_commission) || 0) + traderComm;
-          console.log('📊 Balance update:', { 
-            traderId: td.id, 
-            oldBalance: td.balance, 
-            newBalance, 
-            deduction: amount - traderComm 
-          });
-          
-          const { error: updateError } = await supabase
-            .from('traders')
-            .update({
-              balance: newBalance,
-              overall_commission: newCommission,
-            })
-            .eq('id', td.id);
-          
-          if (updateError) {
-            console.error('Failed to update trader balance:', updateError.message);
-          }
+          await supabase.from('traders').update({
+            balance: newBalance,
+            overall_commission: (Number(td.overall_commission) || 0) + traderComm,
+          }).eq('id', td.id);
         }
+
+        // 3. Credit merchant balance
+        const { data: merchant } = await supabase
+          .from('merchants')
+          .select('id, available_balance, payin_commission, payin_commission_rate')
+          .eq('id', payin.merchant_id || payin.userId)
+          .single();
+        
+        if (merchant) {
+          const merchantRate = merchant.payin_commission || merchant.payin_commission_rate || 6;
+          const merchantFee = Math.round((amount * merchantRate) / 100);
+          const merchantCredit = amount - merchantFee;
+          await supabase.from('merchants').update({
+            available_balance: (Number(merchant.available_balance) || 0) + merchantCredit,
+          }).eq('id', merchant.id);
+        }
+      } else if (!result?.success) {
+        throw new Error(result?.error || 'Failed to complete payin');
       }
       
       console.log('✅ Payin accepted:', { payinId: payin.id, amount, traderComm });
