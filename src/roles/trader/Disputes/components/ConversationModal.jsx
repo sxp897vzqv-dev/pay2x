@@ -13,7 +13,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
   const [finalNote, setFinalNote] = useState('');
   const [showFinalDecision, setShowFinalDecision] = useState(false);
   const isPayin = dispute.type === 'payin';
-  const canRespond = dispute.status === 'pending';
+  const canRespond = dispute.status === 'pending' || dispute.status === 'routed_to_trader';
 
   // Load messages
   useEffect(() => {

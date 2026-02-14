@@ -10,17 +10,17 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       {/* status stripe */}
-      <div className={`h-1 ${dispute.status === 'pending' ? 'bg-amber-400' : dispute.status === 'approved' ? 'bg-green-500' : 'bg-red-500'}`} />
+      <div className={`h-1 ${(dispute.status === 'pending' || dispute.status === 'routed_to_trader') ? 'bg-amber-400' : (dispute.status === 'approved' || dispute.status === 'trader_accepted' || dispute.status === 'admin_approved') ? 'bg-green-500' : 'bg-red-500'}`} />
       <div className="p-3">
 
         {/* Header badges row */}
         <div className="flex items-start justify-between mb-2.5">
           <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${
-              dispute.status === 'pending'  ? 'bg-amber-100 text-amber-700' :
-              dispute.status === 'approved' ? 'bg-green-100 text-green-700' :
+              (dispute.status === 'pending' || dispute.status === 'routed_to_trader') ? 'bg-amber-100 text-amber-700' :
+              (dispute.status === 'approved' || dispute.status === 'trader_accepted' || dispute.status === 'admin_approved') ? 'bg-green-100 text-green-700' :
               'bg-red-100 text-red-700'
-            }`}>{dispute.status?.toUpperCase()}</span>
+            }`}>{dispute.status === 'routed_to_trader' ? 'PENDING ACTION' : dispute.status?.toUpperCase()}</span>
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1 ${
               isPayin ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
             }`}>
@@ -34,8 +34,8 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
               </span>
             )}
           </div>
-          {dispute.status === 'pending' && (
-            <span className="text-xs text-amber-600 font-bold animate-pulse flex-shrink-0">ACTION</span>
+          {(dispute.status === 'pending' || dispute.status === 'routed_to_trader') && (
+            <span className="text-xs text-amber-600 font-bold animate-pulse flex-shrink-0">ACTION NEEDED</span>
           )}
         </div>
 
