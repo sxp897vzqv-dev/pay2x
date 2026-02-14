@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
   AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
   ChevronDown, ChevronRight, Settings, Bell, Cpu, Search, Wallet, 
-  RefreshCw, BarChart3, FileCheck, Activity, BookOpen, Bitcoin,
+  RefreshCw, BarChart3, FileCheck, Activity, BookOpen, Bitcoin, History,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -126,6 +126,7 @@ const navGroups = [
     items: [
       { to: '/admin/kyc',     icon: FileCheck, label: 'KYC',     shortLabel: 'KYC' },
       { to: '/admin/logs',    icon: FileText,  label: 'Logs',    shortLabel: 'Logs' },
+      { to: '/admin/balance-history', icon: History, label: 'Balance History', shortLabel: 'Balance' },
       { to: '/admin/reports', icon: BarChart3, label: 'Reports', shortLabel: 'Reports' },
     ],
   },
