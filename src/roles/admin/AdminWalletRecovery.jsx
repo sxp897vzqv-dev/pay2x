@@ -83,7 +83,12 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, o
       setLoadingMaster(true);
       deriveAddressFromXpub(wallet.master_xpub, 0)
         .then(addr => setMasterAddress(addr))
-        .catch(e => console.error('Failed to derive master:', e))
+        .catch(e => {
+          console.error('Failed to derive master:', e);
+          if (e.message?.includes('401') || e.message?.includes('API')) {
+            setMasterAddress('API_ERROR');
+          }
+        })
         .finally(() => setLoadingMaster(false));
     }
   }, [wallet.master_xpub]);
@@ -186,6 +191,10 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, o
             <div className="flex-1 bg-slate-100 px-2 py-1.5 rounded-lg flex items-center gap-2">
               <Loader className="w-3 h-3 animate-spin text-slate-400" />
               <span className="text-xs text-slate-400">Deriving from XPUB...</span>
+            </div>
+          ) : masterAddress === 'API_ERROR' ? (
+            <div className="flex-1 bg-red-50 border border-red-200 px-2 py-1.5 rounded-lg">
+              <span className="text-xs text-red-600">⚠️ Tatum API key invalid/expired. Update in HD Wallets → Config</span>
             </div>
           ) : masterAddress ? (
             <>
