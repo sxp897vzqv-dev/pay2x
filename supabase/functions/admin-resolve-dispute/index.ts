@@ -84,20 +84,42 @@ serve(async (req: Request) => {
     // Balance adjustments only happen when admin approves AND trader has responded
     if (decision === 'approved' && traderResponded) {
       if (dispute.type === 'payin') {
-        // Payin dispute approved = payment was actually made
-        // If trader_accepted (status): they confirm receipt → credit their balance
+        // Payin dispute approved = payment was actually made but not processed
+        // If trader_accepted: they confirm receipt → process like normal payin
+        // Trader: deduct amount (got cash), add commission
+        // Merchant: credit (amount - merchant_fee)
         if (dispute.status === 'trader_accepted') {
-          const traderRate = dispute.traders?.payout_rate || 4;
+          const traderRate = dispute.traders?.payin_commission || 4;
           const commission = Math.round((amount * traderRate) / 100);
-          adjustmentAmount = amount - commission;
           
+          // Deduct amount, add commission (same as payin flow)
+          adjustmentAmount = amount - commission; // Net deduction from trader
           await supabase.from('traders').update({
-            balance: (Number(dispute.traders?.balance) || 0) + adjustmentAmount,
+            balance: (Number(dispute.traders?.balance) || 0) - amount + commission,
+            overall_commission: (Number(dispute.traders?.overall_commission) || 0) + commission,
           }).eq('id', dispute.trader_id);
           
+          // Credit merchant
+          if (dispute.merchant_id) {
+            const { data: merchantData } = await supabase
+              .from('merchants')
+              .select('available_balance, payin_commission, payin_commission_rate')
+              .eq('id', dispute.merchant_id)
+              .single();
+            
+            const merchantRate = merchantData?.payin_commission || merchantData?.payin_commission_rate || 6;
+            const merchantFee = Math.round((amount * merchantRate) / 100);
+            const merchantCredit = amount - merchantFee;
+            
+            await supabase.from('merchants').update({
+              available_balance: (merchantData?.available_balance || 0) + merchantCredit,
+            }).eq('id', dispute.merchant_id);
+            console.log(`💰 Credited merchant ₹${merchantCredit} for payin dispute`);
+          }
+          
           balanceAdjusted = true;
-          adjustmentType = 'credit_trader';
-          console.log(`💰 Credited trader ₹${adjustmentAmount} for approved payin dispute`);
+          adjustmentType = 'debit_trader_credit_merchant';
+          console.log(`💸 Processed payin dispute: Trader -₹${amount} +₹${commission} commission`);
         }
       } else if (dispute.type === 'payout') {
         // Payout dispute approved = payout was NOT received by customer
