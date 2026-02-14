@@ -3,9 +3,32 @@ import { supabase } from '../../supabase';
 import {
   Wallet, Shield, RefreshCw, AlertTriangle, CheckCircle, XCircle,
   Plus, ArrowRight, Copy, ExternalLink, Clock, DollarSign,
-  Archive, Trash2, Eye, EyeOff, Key, Lock, Unlock, Search
+  Archive, Trash2, Eye, EyeOff, Key, Lock, Unlock, Search, Loader, List
 } from 'lucide-react';
 import Toast from '../../components/admin/Toast';
+
+// ═══════════════════════════════════════════════════════════════════
+// TATUM API - Derive addresses directly from XPUB
+// ═══════════════════════════════════════════════════════════════════
+const TATUM_API = 'https://api.tatum.io/v3';
+
+async function deriveAddressFromXpub(xpub, index, apiKey) {
+  const res = await fetch(`${TATUM_API}/tron/address/${xpub}/${index}`, {
+    headers: { 'x-api-key': apiKey }
+  });
+  if (!res.ok) throw new Error(`Tatum API error: ${res.status}`);
+  const data = await res.json();
+  return data.address;
+}
+
+async function deriveMultipleAddresses(xpub, fromIndex, toIndex, apiKey) {
+  const addresses = [];
+  for (let i = fromIndex; i <= toIndex; i++) {
+    const address = await deriveAddressFromXpub(xpub, i, apiKey);
+    addresses.push({ index: i, address });
+  }
+  return addresses;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // COMPONENTS
@@ -33,15 +56,42 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'slate' }) {
   );
 }
 
-function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading }) {
+function WalletCard({ wallet, adminWallet, tatumApiKey, onSetCurrent, onArchive, isLoading, onToast }) {
   const [showXpub, setShowXpub] = useState(false);
   const [showAddresses, setShowAddresses] = useState(false);
+  const [derivedAddresses, setDerivedAddresses] = useState([]);
+  const [deriving, setDeriving] = useState(false);
+  const [deriveFrom, setDeriveFrom] = useState(0);
+  const [deriveTo, setDeriveTo] = useState(10);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  // Derive addresses from XPUB using Tatum API
+  const handleDeriveAddresses = async () => {
+    if (!wallet.master_xpub || !tatumApiKey) {
+      onToast?.({ msg: 'Missing XPUB or API key', success: false });
+      return;
+    }
+    setDeriving(true);
+    try {
+      const addresses = await deriveMultipleAddresses(
+        wallet.master_xpub, 
+        parseInt(deriveFrom), 
+        parseInt(deriveTo), 
+        tatumApiKey
+      );
+      setDerivedAddresses(addresses);
+      setShowAddresses(true);
+      onToast?.({ msg: `Derived ${addresses.length} addresses from XPUB`, success: true });
+    } catch (e) {
+      onToast?.({ msg: e.message, success: false });
+    }
+    setDeriving(false);
   };
 
   const statusColors = {
@@ -126,43 +176,67 @@ function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading })
         </div>
       )}
 
-      {/* Derived Addresses (expandable) */}
-      {wallet.derived_addresses?.length > 0 && (
-        <div className="mb-3">
-          <button 
-            onClick={() => setShowAddresses(!showAddresses)}
-            className="w-full flex items-center justify-between text-xs font-semibold text-slate-500 hover:text-slate-700 mb-1"
+      {/* Derive Addresses from XPUB (source of truth) */}
+      <div className="mb-3 border-t border-slate-100 pt-3">
+        <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
+          <List className="w-3 h-3" /> Derive from XPUB
+        </p>
+        <div className="flex gap-2 mb-2">
+          <input
+            type="number"
+            value={deriveFrom}
+            onChange={e => setDeriveFrom(e.target.value)}
+            placeholder="From"
+            className="w-16 px-2 py-1 text-xs border rounded-lg"
+          />
+          <span className="text-slate-400 self-center">to</span>
+          <input
+            type="number"
+            value={deriveTo}
+            onChange={e => setDeriveTo(e.target.value)}
+            placeholder="To"
+            className="w-16 px-2 py-1 text-xs border rounded-lg"
+          />
+          <button
+            onClick={handleDeriveAddresses}
+            disabled={deriving || !tatumApiKey}
+            className="flex-1 px-2 py-1 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1"
           >
-            <span>Derived Addresses ({wallet.derived_addresses.length})</span>
-            <span className="text-purple-600">{showAddresses ? '▲ Hide' : '▼ Show'}</span>
+            {deriving ? <Loader className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
+            Derive
           </button>
-          {showAddresses && (
-            <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-50 rounded-lg p-2">
-              {wallet.derived_addresses.map((addr, idx) => (
-                <div key={addr.id} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 w-6">#{addr.derivation_index}</span>
-                    <code className="font-mono text-slate-600">
-                      {addr.usdt_deposit_address?.slice(0, 8)}...{addr.usdt_deposit_address?.slice(-6)}
-                    </code>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-slate-500">{addr.name}</span>
-                    <a 
-                      href={`https://tronscan.org/#/address/${addr.usdt_deposit_address}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-purple-500 hover:text-purple-700"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      )}
+        
+        {/* Show derived addresses from API */}
+        {derivedAddresses.length > 0 && showAddresses && (
+          <div className="max-h-48 overflow-y-auto space-y-1 bg-green-50 border border-green-200 rounded-lg p-2">
+            <p className="text-xs font-semibold text-green-700 mb-1">✓ From XPUB Source:</p>
+            {derivedAddresses.map((addr) => (
+              <div key={addr.index} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-green-600 font-bold w-6">#{addr.index}</span>
+                  <code className="font-mono text-slate-700">
+                    {addr.address}
+                  </code>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => handleCopy(addr.address)} className="text-slate-400 hover:text-slate-600">
+                    <Copy className="w-3 h-3" />
+                  </button>
+                  <a 
+                    href={`https://tronscan.org/#/address/${addr.address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-500 hover:text-purple-700"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-slate-100">
@@ -283,6 +357,7 @@ export default function AdminWalletRecovery() {
   const [orphanAddresses, setOrphanAddresses] = useState([]);
   const [recentDeposits, setRecentDeposits] = useState([]);
   const [globalAdminWallet, setGlobalAdminWallet] = useState(''); // From tatum_config
+  const [tatumApiKey, setTatumApiKey] = useState(''); // For deriving addresses
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState(null);
@@ -302,11 +377,14 @@ export default function AdminWalletRecovery() {
       // Fetch global config from tatum_config (source of truth)
       const { data: configData } = await supabase
         .from('tatum_config')
-        .select('admin_wallet, master_xpub')
+        .select('admin_wallet, master_xpub, tatum_api_key')
         .eq('id', 'main')
         .single();
       if (configData?.admin_wallet) {
         setGlobalAdminWallet(configData.admin_wallet);
+      }
+      if (configData?.tatum_api_key) {
+        setTatumApiKey(configData.tatum_api_key);
       }
 
       // Fetch address_meta for last index
@@ -589,8 +667,10 @@ export default function AdminWalletRecovery() {
                     key={wallet.id}
                     wallet={wallet}
                     adminWallet={globalAdminWallet}
+                    tatumApiKey={tatumApiKey}
                     onSetCurrent={handleSetCurrent}
                     onArchive={handleArchive}
+                    onToast={setToast}
                     isLoading={actionLoading}
                   />
                 ))
