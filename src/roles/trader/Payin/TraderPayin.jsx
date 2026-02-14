@@ -265,11 +265,13 @@ export default function TraderPayin() {
     init();
   }, []);
 
-  // Realtime: filtered by trader_id for performance
+  // Realtime: listen for all changes and filter client-side
   useRealtimeSubscription('payins', {
-    filter: traderId ? `trader_id=eq.${traderId}` : undefined,
-    enabled: !!traderId, // Only subscribe once we have traderId
-    onChange: async () => {
+    // No filter - listen to all payins changes, filter client-side
+    enabled: !!traderId,
+    onChange: async (eventType, payload) => {
+      console.log('📡 Payin realtime event:', eventType, payload?.new?.id);
+      
       if (!traderId) return;
       const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('requested_at', { ascending: false }).limit(100);
       setPayins((rows || []).map(r => ({
@@ -326,87 +328,64 @@ export default function TraderPayin() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Get merchant info for commission calculation
-      const { data: merchant } = await supabase
-        .from('merchants')
-        .select('id, payin_rate, webhook_url, webhook_secret')
-        .eq('id', payin.merchant_id)
-        .single();
+      // 1. Update payin status to completed
+      const { error: payinError } = await supabase
+        .from('payins')
+        .update({ 
+          status: 'completed', 
+          completed_at: ts, 
+          commission: traderComm 
+        })
+        .eq('id', payin.id);
       
-      const merchantRate = merchant?.payin_rate || 6; // Default 6%
-      
-      // Update payin status
-      await supabase.from('payins').update({ 
-        status: 'completed', 
-        completed_at: ts, 
-        commission: traderComm 
-      }).eq('id', payin.id);
-      
-      // Update trader balance (deduct amount, add commission)
-      const { data: td } = await supabase
-        .from('traders')
-        .select('balance, overall_commission')
-        .eq('id', user.id)
-        .single();
-      
-      if (td) {
-        await supabase.from('traders').update({
-          balance: (Number(td.balance) || 0) - amount + traderComm,
-          overall_commission: (Number(td.overall_commission) || 0) + traderComm,
-        }).eq('id', user.id);
-      }
-      
-      // Credit merchant balance & record platform profit
-      const { data: profitResult } = await supabase.rpc('credit_merchant_on_payin', {
-        p_payin_id: payin.id,
-        p_merchant_id: payin.merchant_id,
+      if (payinError) throw new Error('Failed to update payin: ' + payinError.message);
+
+      // 2. Update trader balance (deduct amount, add commission)
+      // Using RPC for atomic update
+      const { error: balanceError } = await supabase.rpc('update_trader_balance_on_payin', {
         p_trader_id: user.id,
         p_amount: amount,
-        p_merchant_rate: merchantRate,
-        p_trader_rate: commissionRate
+        p_commission: traderComm
       });
       
-      console.log('💰 Payin complete:', { 
-        amount, 
-        traderComm, 
-        merchantCredit: profitResult?.merchant_credit,
-        platformProfit: profitResult?.platform_profit 
-      });
-
-      // Credit affiliate if trader has one
-      const { data: affiliateResult } = await supabase.rpc('credit_affiliate_on_trader_transaction', {
-        p_trader_id: user.id,
-        p_transaction_type: 'payin',
-        p_transaction_id: payin.id,
-        p_transaction_amount: amount,
-        p_trader_earning: traderComm
-      });
-      
-      if (affiliateResult?.credited) {
-        console.log('👥 Affiliate credited:', affiliateResult);
+      if (balanceError) {
+        console.warn('Balance RPC failed:', balanceError.message);
+        // Fallback: direct update (try both id and profile_id)
+        const { data: td, error: fetchError } = await supabase
+          .from('traders')
+          .select('id, balance, overall_commission')
+          .or(`id.eq.${user.id},profile_id.eq.${user.id}`)
+          .single();
+        
+        if (fetchError) {
+          console.error('Failed to fetch trader:', fetchError.message);
+        } else if (td) {
+          const newBalance = (Number(td.balance) || 0) - amount + traderComm;
+          const newCommission = (Number(td.overall_commission) || 0) + traderComm;
+          console.log('📊 Balance update:', { 
+            traderId: td.id, 
+            oldBalance: td.balance, 
+            newBalance, 
+            deduction: amount - traderComm 
+          });
+          
+          const { error: updateError } = await supabase
+            .from('traders')
+            .update({
+              balance: newBalance,
+              overall_commission: newCommission,
+            })
+            .eq('id', td.id);
+          
+          if (updateError) {
+            console.error('Failed to update trader balance:', updateError.message);
+          }
+        }
       }
       
-      // Queue webhook for merchant
-      if (merchant?.webhook_url) {
-        await supabase.from('payin_webhook_queue').insert({
-          payin_id: payin.id,
-          merchant_id: payin.merchant_id,
-          webhook_url: merchant.webhook_url,
-          webhook_secret: merchant.webhook_secret,
-          event_type: 'payment.completed',
-          payload: {
-            event: 'payment.completed',
-            payment_id: payin.id,
-            txn_id: payin.txn_id || payin.transactionId,
-            order_id: payin.order_id,
-            amount: amount,
-            status: 'completed',
-            utr: payin.utrId || payin.utr,
-            completed_at: ts,
-          },
-        });
-      }
+      console.log('✅ Payin accepted:', { payinId: payin.id, amount, traderComm });
       
+      // Update local state
       setPayins(prev => prev.map(x => x.id === payin.id ? { ...x, status: 'completed', commission: traderComm } : x));
     } catch(e) { 
       console.error('❌ Accept error:', e); 

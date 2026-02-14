@@ -140,13 +140,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // 12. Update payin with UTR
+    // 12. Update payin with UTR (keep status as pending for trader to verify)
     const { error: updateError } = await supabase
       .from('payins')
       .update({
         utr: utrTrimmed,
         utr_submitted_at: new Date().toISOString(),
-        status: 'assigned', // Move to assigned status for trader verification
+        // Status stays 'pending' - trader will see UTR and can accept/reject
         updated_at: new Date().toISOString(),
       })
       .eq('id', payinId);
@@ -167,7 +167,7 @@ serve(async (req: Request) => {
         success: true,
         message: 'UTR submitted successfully. Payment is being verified.',
         payinId: payinId,
-        status: 'assigned',
+        status: 'pending',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

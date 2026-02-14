@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
-  DollarSign, CreditCard, TrendingDown, FileText, Upload, CheckCircle2,
+  DollarSign, CreditCard, TrendingDown, FileText, Upload, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import {
   immediateAutoAssignPayouts,
@@ -55,8 +55,10 @@ export default function TraderPayout() {
   const canCancelRequest   = hasActiveRequest && !hasAssignedPayouts && !hasPendingVerification;
   
   // Show verification button when: has active request + no more assigned + has completed pending verification
+  const hasRejectedPayouts = pendingVerification.some(p => p.verificationStatus === 'rejected') || 
+    activeRequest?.verificationStatus === 'rejected';
   const canSubmitVerification = hasActiveRequest && !hasAssignedPayouts && hasPendingVerification && 
-    activeRequest.status !== 'pending_verification' && activeRequest.status !== 'verified';
+    (activeRequest.status !== 'pending_verification' || hasRejectedPayouts) && activeRequest.status !== 'verified';
 
   // Map request row for display (snake_case → camelCase)
   const mapRequest = (r) => ({
@@ -68,6 +70,8 @@ export default function TraderPayout() {
     fullyAssigned: r.fully_assigned,
     inWaitingList: r.in_waiting_list,
     verificationStatus: r.verification_status,
+    rejectionReason: r.rejection_reason,
+    rejectionCount: r.rejection_count,
     createdAt: r.created_at ? { seconds: new Date(r.created_at).getTime() / 1000 } : null,
   });
 
@@ -124,13 +128,13 @@ export default function TraderPayout() {
         .limit(100);
       setAssignedPayouts((assigned || []).map(mapPayout).sort((a, b) => (a.assignedAt?.seconds || 0) - (b.assignedAt?.seconds || 0)));
 
-      // Completed payouts pending verification (completed but request not yet verified)
+      // Completed payouts pending verification (including rejected - needs re-upload)
       const { data: pendingVer } = await supabase
         .from('payouts')
         .select('*')
         .eq('trader_id', traderId)
         .eq('status', 'completed')
-        .or('verification_status.is.null,verification_status.eq.pending,verification_status.eq.pending_review')
+        .or('verification_status.is.null,verification_status.eq.pending,verification_status.eq.pending_review,verification_status.eq.rejected,verification_status.eq.pending_proof')
         .limit(100);
       setPendingVerification((pendingVer || []).map(mapPayout));
 
@@ -352,8 +356,37 @@ export default function TraderPayout() {
         </div>
       )}
 
+      {/* Rejected verification - needs re-upload */}
+      {(pendingVerification.some(p => p.verificationStatus === 'rejected') || activeRequest?.verificationStatus === 'rejected') && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-red-900">⚠️ Verification Rejected</h3>
+              <p className="text-sm text-red-700 mt-0.5">
+                Your verification was rejected. Please re-upload proof.
+              </p>
+              {(activeRequest?.rejection_reason || activeRequest?.rejectionReason) && (
+                <p className="text-sm text-red-600 mt-2 bg-red-100 px-3 py-2 rounded-lg">
+                  <strong>Reason:</strong> {activeRequest.rejection_reason || activeRequest.rejectionReason}
+                </p>
+              )}
+              <button
+                onClick={() => setShowBatchVerification(true)}
+                className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 active:scale-[0.97] flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                Re-upload Verification
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pending verification info (when verification already submitted) */}
-      {activeRequest?.status === 'pending_verification' && (
+      {activeRequest?.status === 'pending_verification' && !pendingVerification.some(p => p.verificationStatus === 'rejected') && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
           <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center flex-shrink-0">
             <CheckCircle2 className="w-5 h-5 text-white" />
