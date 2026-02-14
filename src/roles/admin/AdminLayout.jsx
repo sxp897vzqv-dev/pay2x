@@ -104,10 +104,7 @@ const navGroups = [
       { to: '/admin/payouts',      icon: TrendingDown, label: 'Payouts',      shortLabel: 'Payouts' },
       { to: '/admin/disputes',     icon: AlertCircle,  label: 'Disputes',     shortLabel: 'Disputes' },
       { to: '/admin/upi-pool',     icon: Database,     label: 'UPI Pool',     shortLabel: 'Pool' },
-      { to: '/admin/payin-engine', icon: Cpu,          label: 'Payin Engine', shortLabel: 'Engine' },
-      { to: '/admin/payout-engine', icon: Cpu,        label: 'Payout Engine', shortLabel: 'Payout E.' },
       { to: '/admin/payout-verification', icon: Shield, label: 'Payout Verify', shortLabel: 'Verify' },
-      { to: '/admin/dispute-engine', icon: Cpu,       label: 'Dispute Engine', shortLabel: 'Dispute E.' },
     ],
   },
   {

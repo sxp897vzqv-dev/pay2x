@@ -106,6 +106,7 @@ export default function TraderDashboard() {
   const [stats, setStats] = useState({
     payins: 0, payouts: 0, commission: 0,
     overallCommission: 0, balance: 0, securityHold: 0,
+    commissionBalance: 0, lifetimeEarnings: 0, // New fields
     pendingPayins: 0, pendingPayouts: 0, pendingDisputes: 0,
   });
   const [alerts, setAlerts] = useState([]);
@@ -237,6 +238,8 @@ export default function TraderDashboard() {
         overallCommission: Number(trader.overall_commission || 0),
         balance: rawBalance - securityHold,
         securityHold,
+        commissionBalance: Number(trader.commission_balance || 0),
+        lifetimeEarnings: Number(trader.lifetime_earnings || trader.overall_commission || 0),
         pendingPayins: piPRes.count || 0,
         pendingPayouts: poPRes.count || 0,
         pendingDisputes: disputesRes.count || 0,
@@ -347,38 +350,68 @@ export default function TraderDashboard() {
         )}
       </div>
 
-      {/* Hero summary strip */}
-      <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-4 text-white shadow-md">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-green-200 text-xs font-semibold uppercase tracking-wide mb-0.5">Working Balance</p>
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              {loading ? <span className="inline-block w-28 h-7 bg-white/20 animate-pulse rounded" /> : `₹${stats.balance.toLocaleString()}`}
-            </h2>
+      {/* Hero: Balance + Commission + Earnings */}
+      <div className="grid grid-cols-3 gap-3">
+        {/* Balance */}
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+              <Wallet className="w-4 h-4" />
+            </div>
+            <span className="text-blue-200 text-xs font-semibold uppercase tracking-wide">Balance</span>
           </div>
-          <div className="text-right">
-            <p className="text-green-200 text-xs">{periodLabel} Net</p>
-            <p className="text-lg font-bold">
-              {loading ? '—' : `₹${(stats.payins - stats.payouts).toLocaleString()}`}
-            </p>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.balance.toLocaleString()}`}
+          </h2>
+          <p className="text-blue-200 text-xs mt-1">Working capital</p>
+        </div>
+        
+        {/* Commission */}
+        <div className="bg-gradient-to-br from-emerald-600 to-green-700 rounded-2xl p-4 text-white shadow-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+              <DollarSign className="w-4 h-4" />
+            </div>
+            <span className="text-green-200 text-xs font-semibold uppercase tracking-wide">Commission</span>
+          </div>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.commissionBalance.toLocaleString()}`}
+          </h2>
+          <p className="text-green-200 text-xs mt-1">Earned (withdrawable)</p>
+        </div>
+        
+        {/* Earnings */}
+        <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-4 text-white shadow-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <span className="text-purple-200 text-xs font-semibold uppercase tracking-wide">Earnings</span>
+          </div>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
+            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.lifetimeEarnings.toLocaleString()}`}
+          </h2>
+          <p className="text-purple-200 text-xs mt-1">Lifetime total</p>
+        </div>
+      </div>
+
+      {/* Secondary info strip */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-yellow-600" />
+            <span className="text-xs text-slate-600">Hold: <span className="font-semibold text-slate-900">₹{stats.securityHold.toLocaleString()}</span></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 text-orange-500" />
+            <span className="text-xs text-slate-600">Disputes: <span className="font-semibold text-slate-900">{stats.pendingDisputes}</span></span>
           </div>
         </div>
-        {/* Balance breakdown */}
-        <div className="flex gap-3">
-          <div className="flex-1 bg-white/10 rounded-xl p-2.5">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <Clock className="w-3.5 h-3.5 text-yellow-300" />
-              <span className="text-xs text-green-200 font-medium">Security Hold</span>
-            </div>
-            <p className="text-base font-bold text-white">₹{stats.securityHold.toLocaleString()}</p>
-          </div>
-          <div className="flex-1 bg-white/10 rounded-xl p-2.5">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <AlertCircle className="w-3.5 h-3.5 text-orange-300" />
-              <span className="text-xs text-green-200 font-medium">Disputes</span>
-            </div>
-            <p className="text-base font-bold text-white">{stats.pendingDisputes}</p>
-          </div>
+        <div className="text-right">
+          <span className="text-xs text-slate-500">{periodLabel} Net: </span>
+          <span className={`text-sm font-bold ${stats.payins - stats.payouts >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {loading ? '—' : `₹${(stats.payins - stats.payouts).toLocaleString()}`}
+          </span>
         </div>
       </div>
 
@@ -389,12 +422,10 @@ export default function TraderDashboard() {
         <StatCard title={`${periodLabel} Commission`} value={`₹${stats.commission.toLocaleString()}`} icon={DollarSign} color="emerald" loading={loading} className="col-span-2 sm:col-span-1" />
       </div>
 
-      {/* Secondary stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard title="Overall Commission" value={`₹${stats.overallCommission.toLocaleString()}`} icon={DollarSign} color="purple" loading={loading} />
-        <StatCard title="Wallet Balance" value={`₹${stats.balance.toLocaleString()}`} icon={Wallet} color="orange" loading={loading} />
-        <StatCard title="Pending Payins" value={stats.pendingPayins.toString()} icon={Activity} color="yellow" loading={loading} subtitle="Awaiting action" />
-        <StatCard title="Pending Payouts" value={stats.pendingPayouts.toString()} icon={Activity} color="red" loading={loading} subtitle="Awaiting action" />
+      {/* Pending items */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+        <StatCard title="Pending Payins" value={stats.pendingPayins.toString()} icon={TrendingUp} color="yellow" loading={loading} subtitle="Awaiting action" />
+        <StatCard title="Pending Payouts" value={stats.pendingPayouts.toString()} icon={TrendingDown} color="red" loading={loading} subtitle="Awaiting action" />
       </div>
 
       {/* Quick Actions */}

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
-import { useSearchParams } from 'react-router-dom';
-import { AlertCircle, Search, RefreshCw, Filter, Calendar, X, Download } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { AlertCircle, Search, RefreshCw, Filter, Calendar, X, Download, Cpu, ChevronRight } from 'lucide-react';
 
 // Shared components
 import { Toast, FilterPills, SearchInput, CardSkeleton } from '../../../components/admin';
@@ -182,10 +182,16 @@ export default function AdminDisputes() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Resolve merchant disputes</p>
         </div>
-        <button onClick={() => fetchDisputes(true)} disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 text-sm font-semibold disabled:opacity-50">
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <Link to="/admin/dispute-engine"
+            className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+            <Cpu className="w-4 h-4" /> Engine <ChevronRight className="w-3 h-3" />
+          </Link>
+          <button onClick={() => fetchDisputes(true)} disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 text-sm font-semibold disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary card */}
