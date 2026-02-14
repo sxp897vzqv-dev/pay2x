@@ -49,8 +49,6 @@ export default function TraderBalance() {
   const [balance,          setBalance]          = useState(0);
   const [securityHold,     setSecurityHold]     = useState(0);
   const [workingBalance,   setWorkingBalance]   = useState(0);
-  const [commissionBalance, setCommissionBalance] = useState(0);
-  const [lifetimeEarnings, setLifetimeEarnings] = useState(0);
   const [usdtDepositAddress, setUsdtDepositAddress] = useState('');
   const [derivationIndex,  setDerivationIndex]  = useState(null);
   const [transactions,     setTransactions]     = useState([]);
@@ -112,8 +110,6 @@ export default function TraderBalance() {
       setBalance(total);
       setSecurityHold(security);
       setWorkingBalance(total - security);
-      setCommissionBalance(Number(trader.commission_balance) || 0);
-      setLifetimeEarnings(Number(trader.lifetime_earnings || trader.overall_commission) || 0);
       setUsdtDepositAddress(trader.usdt_deposit_address || '');
       setDerivationIndex(trader.derivation_index || null);
       balanceRef.current = total;
@@ -166,8 +162,6 @@ export default function TraderBalance() {
           setBalance(newTotal);
           setSecurityHold(sec);
           setWorkingBalance(newTotal - sec);
-          setCommissionBalance(Number(d.commission_balance) || 0);
-          setLifetimeEarnings(Number(d.lifetime_earnings || d.overall_commission) || 0);
           setUsdtDepositAddress(d.usdt_deposit_address || '');
           setDerivationIndex(d.derivation_index || null);
           balanceRef.current = newTotal;
@@ -271,60 +265,38 @@ export default function TraderBalance() {
     <div className="space-y-4 max-w-4xl mx-auto">
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
 
-      {/* ── Hero: Balance + Commission + Earnings ── */}
-      <div className={`grid grid-cols-3 gap-3 transition-all duration-300 ${balanceFlash ? 'scale-[1.01]' : ''}`}>
-        {/* Balance */}
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-                <Wallet className="w-4 h-4" />
-              </div>
-              <span className="text-blue-200 text-xs font-semibold uppercase">Balance</span>
-            </div>
-            <button onClick={refreshBalance} disabled={refreshing} className="p-1 hover:bg-white/15 rounded-lg">
-              <RefreshCw className={`w-3.5 h-3.5 text-blue-200 ${refreshing ? 'animate-spin' : ''}`} />
-            </button>
+      {/* ── Hero Balance Card ── */}
+      <div className={`bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-300 ${balanceFlash ? 'ring-2 ring-green-400 scale-[1.01]' : ''}`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Wallet className="w-5 h-5 text-purple-200" />
+            <span className="text-purple-200 text-sm font-medium">Total Balance</span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">₹{workingBalance.toLocaleString()}</h2>
-          <p className="text-blue-200 text-xs mt-1">Working capital</p>
+          <button onClick={refreshBalance} disabled={refreshing} className="p-1.5 hover:bg-white/15 rounded-lg transition-colors disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 text-purple-200 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
         </div>
-        
-        {/* Commission */}
-        <div className="bg-gradient-to-br from-emerald-600 to-green-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
+        <h2 className="text-3xl sm:text-4xl font-bold mb-3 tracking-tight" style={{ fontFamily: 'var(--font-ui)' }}>
+          ₹{balance.toLocaleString()}
+        </h2>
+
+        <div className="flex gap-3">
+          <div className="flex-1 bg-white/10 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <CheckCircle className="w-3.5 h-3.5 text-green-300" />
+              <span className="text-xs text-purple-200 font-medium">Working</span>
             </div>
-            <span className="text-green-200 text-xs font-semibold uppercase">Commission</span>
+            <p className="text-lg font-bold text-white">₹{workingBalance.toLocaleString()}</p>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">₹{commissionBalance.toLocaleString()}</h2>
-          <p className="text-green-200 text-xs mt-1">Withdrawable</p>
-        </div>
-        
-        {/* Earnings */}
-        <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-4 h-4" />
+          <div className="flex-1 bg-white/10 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Lock className="w-3.5 h-3.5 text-orange-300" />
+              <span className="text-xs text-purple-200 font-medium">Security Hold</span>
             </div>
-            <span className="text-purple-200 text-xs font-semibold uppercase">Earnings</span>
+            <p className="text-lg font-bold text-white">₹{securityHold.toLocaleString()}</p>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">₹{lifetimeEarnings.toLocaleString()}</h2>
-          <p className="text-purple-200 text-xs mt-1">Lifetime total</p>
         </div>
       </div>
-
-      {/* Security Hold Banner */}
-      {securityHold > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
-          <Lock className="w-4.5 h-4.5 text-amber-600 flex-shrink-0" />
-          <div>
-            <p className="font-semibold text-amber-800 text-sm">Security Hold: ₹{securityHold.toLocaleString()}</p>
-            <p className="text-xs text-amber-600 mt-0.5">This amount is held for security and will be released after verification period</p>
-          </div>
-        </div>
-      )}
 
       {/* ── USDT Rate Strip ── */}
       <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl p-3 sm:p-4 text-white shadow-md flex items-center justify-between">
