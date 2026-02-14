@@ -16,6 +16,8 @@ const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 interface CreateDisputeRequest {
   payinId?: string;
   payoutId?: string;
+  upiId?: string;  // Can lookup by UPI ID
+  orderId?: string; // Can lookup by order ID
   type: 'payment_not_received' | 'wrong_amount' | 'duplicate_payment' | 'refund_request' | 'payout_not_received' | 'other';
   reason: string;
   utr?: string;
@@ -82,7 +84,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const { payinId, payoutId, type, reason, utr, amount, proofUrl, metadata } = body;
+    let { payinId, payoutId, upiId: lookupUpiId, orderId, type, reason, utr, amount, proofUrl, metadata } = body;
 
     // 4. Validate required fields
     if (!type || !reason) {
@@ -95,17 +97,60 @@ serve(async (req: Request) => {
       );
     }
 
+    // 5. Lookup by UPI ID or Order ID if no direct ID provided
+    if (!payinId && !payoutId && lookupUpiId) {
+      // Find most recent payin with this UPI for this merchant
+      const { data: foundPayin } = await supabase
+        .from('payins')
+        .select('id')
+        .eq('merchant_id', merchant.id)
+        .eq('upi_id', lookupUpiId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (foundPayin) {
+        payinId = foundPayin.id;
+      }
+    }
+
+    if (!payinId && !payoutId && orderId) {
+      // Find payin by order_id
+      const { data: foundPayin } = await supabase
+        .from('payins')
+        .select('id')
+        .eq('merchant_id', merchant.id)
+        .eq('order_id', orderId)
+        .single();
+      
+      if (foundPayin) {
+        payinId = foundPayin.id;
+      } else {
+        // Try payout by order_id in metadata
+        const { data: foundPayout } = await supabase
+          .from('payouts')
+          .select('id')
+          .eq('merchant_id', merchant.id)
+          .contains('metadata', { order_id: orderId })
+          .single();
+        
+        if (foundPayout) {
+          payoutId = foundPayout.id;
+        }
+      }
+    }
+
     if (!payinId && !payoutId) {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: { code: 'MISSING_REFERENCE', message: 'Either payinId or payoutId is required' } 
+          error: { code: 'MISSING_REFERENCE', message: 'Provide payinId, payoutId, upiId, or orderId' } 
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 5. Validate transaction belongs to merchant and get amount
+    // 6. Validate transaction belongs to merchant and get amount
     let transactionAmount = amount;
     let traderId: string | null = null;
     let upiId: string | null = null;
@@ -163,7 +208,7 @@ serve(async (req: Request) => {
       traderId = payout.trader_id;
     }
 
-    // 6. Check for existing open dispute
+    // 7. Check for existing open dispute
     const existingQuery = supabase
       .from('disputes')
       .select('id, status')
@@ -192,7 +237,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // 7. Create dispute record
+    // 8. Create dispute record
     const { data: dispute, error: disputeError } = await supabase
       .from('disputes')
       .insert({
@@ -230,7 +275,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // 8. Try to auto-route dispute to trader
+    // 9. Try to auto-route dispute to trader
     try {
       const routeResponse = await fetch(`${SUPABASE_URL}/functions/v1/route-dispute`, {
         method: 'POST',
@@ -261,7 +306,7 @@ serve(async (req: Request) => {
       // Continue - dispute is created, will be manually routed
     }
 
-    // 9. Return success
+    // 10. Return success
     return new Response(
       JSON.stringify({
         success: true,
