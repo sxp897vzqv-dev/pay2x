@@ -105,16 +105,6 @@ function WalletCard({ wallet, onSetCurrent, onArchive, isLoading }) {
         </div>
       </div>
 
-      {/* Admin Wallet */}
-      {wallet.admin_wallet && (
-        <div className="mb-3">
-          <p className="text-xs font-semibold text-slate-500 mb-1">Sweep To</p>
-          <code className="text-xs bg-slate-100 px-2 py-1.5 rounded-lg font-mono block truncate">
-            {wallet.admin_wallet}
-          </code>
-        </div>
-      )}
-
       {/* Actions */}
       <div className="flex gap-2 pt-2 border-t border-slate-100">
         {!wallet.is_current && wallet.status === 'active' && (
