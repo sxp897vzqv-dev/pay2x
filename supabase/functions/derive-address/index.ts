@@ -20,20 +20,28 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { data: config } = await supabase
+    const { data: config, error: configError } = await supabase
       .from('tatum_config')
       .select('tatum_api_key')
       .eq('id', 'main')
       .single()
 
+    if (configError) {
+      return new Response(
+        JSON.stringify({ error: `DB error: ${configError.message}` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     if (!config?.tatum_api_key) {
       return new Response(
-        JSON.stringify({ error: 'Tatum API key not configured' }),
+        JSON.stringify({ error: 'Tatum API key not configured in tatum_config table. Add it in HD Wallets → Configuration.' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     const apiKey = config.tatum_api_key
+    console.log('Using API key:', apiKey?.substring(0, 8) + '...')
 
     // Single address derivation
     if (index !== undefined) {
