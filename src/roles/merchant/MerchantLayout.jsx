@@ -5,7 +5,7 @@ import TestModeBanner from './components/TestModeBanner';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
   AlertCircle, Settings, LogOut, Menu, X, Shield, Users, ChevronDown, ChevronRight,
-  Webhook, FileText, ShieldCheck, RotateCcw, Link as LinkIcon, CreditCard,
+  Webhook, FileText, ShieldCheck, RotateCcw, CreditCard,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -65,8 +65,7 @@ const navGroups = [
   {
     label: 'Finance',
     items: [
-      { to: '/merchant/balance',       icon: Wallet,   label: 'Balance',       shortLabel: 'Balance' },
-      { to: '/merchant/payment-links', icon: LinkIcon, label: 'Payment Links', shortLabel: 'Links' },
+      { to: '/merchant/balance', icon: Wallet, label: 'Balance', shortLabel: 'Balance' },
     ],
   },
   {
