@@ -1,398 +1,312 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
-import { getSettlements, createSettlement, processSettlement, getSettlementSettings, updateSettlementSettings } from '../../utils/enterprise';
-import { Search, Filter, Download, CheckCircle, Clock, XCircle, AlertCircle, Settings, Plus, RefreshCw, Shield } from 'lucide-react';
-import TwoFactorModal, { useTwoFactorVerification } from '../../components/TwoFactorModal';
-import { TwoFactorActions } from '../../hooks/useTwoFactor';
+import { Search, CheckCircle, Clock, XCircle, RefreshCw, Wallet, User, Building, Copy } from 'lucide-react';
 
 const STATUS_CONFIG = {
-  pending: { color: 'yellow', icon: Clock, label: 'Pending' },
-  processing: { color: 'blue', icon: RefreshCw, label: 'Processing' },
-  completed: { color: 'green', icon: CheckCircle, label: 'Completed' },
-  failed: { color: 'red', icon: XCircle, label: 'Failed' },
-  cancelled: { color: 'gray', icon: XCircle, label: 'Cancelled' },
+  pending: { color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Clock, label: 'Pending' },
+  processing: { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: RefreshCw, label: 'Processing' },
+  completed: { color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle, label: 'Completed' },
+  failed: { color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle, label: 'Failed' },
+  rejected: { color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle, label: 'Rejected' },
 };
 
 export default function AdminSettlements() {
   const [settlements, setSettlements] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('settlements');
-  const [filters, setFilters] = useState({ type: '', status: '' });
-  const [settings, setSettings] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showProcessModal, setShowProcessModal] = useState(null);
-
-  useEffect(() => { fetchData(); }, [filters]);
+  const [statusFilter, setStatusFilter] = useState('pending');
+  const [search, setSearch] = useState('');
+  const [processing, setProcessing] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [settlementsData, settingsData] = await Promise.all([
-        getSettlements(filters),
-        getSettlementSettings('global')
-      ]);
-      setSettlements(settlementsData);
-      setSettings(settingsData);
+      const { data, error } = await supabase
+        .from('merchant_settlements')
+        .select('*, merchants(id, name, email, business_name)')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setSettlements(data || []);
     } catch (e) {
-      console.error(e);
+      console.error('Error fetching settlements:', e);
     }
     setLoading(false);
   };
 
-  const stats = useMemo(() => {
-    const pending = settlements.filter(s => s.status === 'pending');
-    const completed = settlements.filter(s => s.status === 'completed');
-    return {
-      pendingCount: pending.length,
-      pendingAmount: pending.reduce((sum, s) => sum + Number(s.net_amount || 0), 0),
-      completedCount: completed.length,
-      completedAmount: completed.reduce((sum, s) => sum + Number(s.net_amount || 0), 0),
-    };
-  }, [settlements]);
+  useEffect(() => { fetchData(); }, []);
 
-  const formatCurrency = (amount) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount || 0);
-  const formatDate = (date) => new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const filtered = useMemo(() => {
+    let result = settlements;
+    if (statusFilter !== 'all') {
+      result = result.filter(s => s.status === statusFilter);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(s => 
+        s.merchants?.name?.toLowerCase().includes(q) ||
+        s.merchants?.email?.toLowerCase().includes(q) ||
+        s.usdt_address?.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [settlements, statusFilter, search]);
+
+  const stats = useMemo(() => ({
+    total: settlements.length,
+    pending: settlements.filter(s => s.status === 'pending').length,
+    completed: settlements.filter(s => s.status === 'completed').length,
+    rejected: settlements.filter(s => s.status === 'rejected' || s.status === 'failed').length,
+    pendingAmount: settlements.filter(s => s.status === 'pending').reduce((sum, s) => sum + Number(s.amount || 0), 0),
+  }), [settlements]);
+
+  const handleApprove = async (settlement) => {
+    if (!confirm(`Approve settlement of ₹${settlement.amount.toLocaleString()} to ${settlement.usdt_address}?`)) return;
+    
+    setProcessing(settlement.id);
+    try {
+      // Update settlement status
+      const { error } = await supabase
+        .from('merchant_settlements')
+        .update({ 
+          status: 'completed',
+          processed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', settlement.id);
+      
+      if (error) throw error;
+      
+      // Clear pending_settlement on merchant (already deducted from available_balance)
+      await supabase
+        .from('merchants')
+        .update({ 
+          pending_settlement: 0,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', settlement.merchant_id);
+      
+      fetchData();
+      alert('Settlement approved!');
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setProcessing(null);
+  };
+
+  const handleReject = async (settlement) => {
+    const reason = prompt('Rejection reason:');
+    if (!reason) return;
+    
+    setProcessing(settlement.id);
+    try {
+      // Update settlement status
+      const { error } = await supabase
+        .from('merchant_settlements')
+        .update({ 
+          status: 'rejected',
+          rejection_reason: reason,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', settlement.id);
+      
+      if (error) throw error;
+      
+      // Refund the amount back to merchant
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('available_balance, pending_settlement')
+        .eq('id', settlement.merchant_id)
+        .single();
+      
+      if (merchant) {
+        await supabase
+          .from('merchants')
+          .update({ 
+            available_balance: (merchant.available_balance || 0) + Number(settlement.amount),
+            pending_settlement: 0,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', settlement.merchant_id);
+      }
+      
+      fetchData();
+      alert('Settlement rejected. Amount refunded to merchant.');
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setProcessing(null);
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    alert('Copied!');
+  };
+
+  const formatDate = (date) => date ? new Date(date).toLocaleString('en-IN', { 
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+  }) : '-';
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Settlements</h1>
-          <p className="text-gray-400 text-sm mt-1">Manage merchant and trader settlements</p>
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <Wallet className="w-6 h-6 text-indigo-600" />
+            Merchant Settlements
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">Approve or reject merchant withdrawal requests</p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Create Settlement
+        <button onClick={fetchData} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200">
+          <RefreshCw className="w-5 h-5 text-slate-600" />
         </button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-[#1a1a2e] rounded-xl p-4 border border-white/5">
-          <p className="text-gray-400 text-sm">Pending</p>
-          <p className="text-2xl font-bold text-yellow-400">{stats.pendingCount}</p>
-          <p className="text-sm text-gray-500">{formatCurrency(stats.pendingAmount)}</p>
+        <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+          <p className="text-slate-500 text-sm">Total Requests</p>
+          <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
         </div>
-        <div className="bg-[#1a1a2e] rounded-xl p-4 border border-white/5">
-          <p className="text-gray-400 text-sm">Completed</p>
-          <p className="text-2xl font-bold text-green-400">{stats.completedCount}</p>
-          <p className="text-sm text-gray-500">{formatCurrency(stats.completedAmount)}</p>
+        <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
+          <p className="text-yellow-700 text-sm">Pending</p>
+          <p className="text-2xl font-bold text-yellow-800">{stats.pending}</p>
+          <p className="text-sm text-yellow-600">₹{stats.pendingAmount.toLocaleString()}</p>
         </div>
-        <div className="bg-[#1a1a2e] rounded-xl p-4 border border-white/5">
-          <p className="text-gray-400 text-sm">Frequency</p>
-          <p className="text-xl font-bold text-white capitalize">{settings?.frequency || 'Daily'}</p>
+        <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+          <p className="text-green-700 text-sm">Completed</p>
+          <p className="text-2xl font-bold text-green-800">{stats.completed}</p>
         </div>
-        <div className="bg-[#1a1a2e] rounded-xl p-4 border border-white/5">
-          <p className="text-gray-400 text-sm">Hold Period</p>
-          <p className="text-xl font-bold text-white">{settings?.hold_days || 0} days</p>
+        <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+          <p className="text-red-700 text-sm">Rejected</p>
+          <p className="text-2xl font-bold text-red-800">{stats.rejected}</p>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-white/10">
-        {['settlements', 'settings'].map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
-              activeTab === tab
-                ? 'text-indigo-400 border-b-2 border-indigo-400'
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'settlements' ? (
-        <>
-          {/* Filters */}
-          <div className="flex gap-3 flex-wrap">
-            <select
-              value={filters.type}
-              onChange={(e) => setFilters(f => ({ ...f, type: e.target.value }))}
-              className="bg-[#1a1a2e] border border-white/10 rounded-lg px-3 py-2 text-white text-sm"
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Search merchant or address..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-400"
+          />
+        </div>
+        <div className="flex gap-2">
+          {['pending', 'completed', 'rejected', 'all'].map(status => (
+            <button
+              key={status}
+              onClick={() => setStatusFilter(status)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition ${
+                statusFilter === status 
+                  ? 'bg-indigo-600 text-white' 
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
             >
-              <option value="">All Types</option>
-              <option value="merchant">Merchant</option>
-              <option value="trader">Trader</option>
-            </select>
-            <select
-              value={filters.status}
-              onChange={(e) => setFilters(f => ({ ...f, status: e.target.value }))}
-              className="bg-[#1a1a2e] border border-white/10 rounded-lg px-3 py-2 text-white text-sm"
-            >
-              <option value="">All Status</option>
-              {Object.keys(STATUS_CONFIG).map(s => (
-                <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
-              ))}
-            </select>
-            <button onClick={fetchData} className="p-2 bg-[#1a1a2e] rounded-lg hover:bg-white/10">
-              <RefreshCw className="w-4 h-4 text-gray-400" />
+              {status}
             </button>
-          </div>
-
-          {/* Table */}
-          <div className="bg-[#1a1a2e] rounded-xl border border-white/5 overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-black/20">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Entity</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Period</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Gross</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Fee</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Net</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
-                ) : settlements.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No settlements found</td></tr>
-                ) : settlements.map(s => {
-                  const StatusIcon = STATUS_CONFIG[s.status]?.icon || Clock;
-                  const statusColor = STATUS_CONFIG[s.status]?.color || 'gray';
-                  return (
-                    <tr key={s.id} className="hover:bg-white/5">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 text-xs rounded ${s.settlement_type === 'merchant' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                            {s.settlement_type}
-                          </span>
-                          <span className="text-white">{s.merchants?.name || s.traders?.name || '-'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">
-                        {formatDate(s.period_start)} - {formatDate(s.period_end)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-white">{formatCurrency(s.gross_amount)}</td>
-                      <td className="px-4 py-3 text-right text-red-400">-{formatCurrency(s.fee_amount)}</td>
-                      <td className="px-4 py-3 text-right text-green-400 font-medium">{formatCurrency(s.net_amount)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-center">
-                          <span className={`flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-${statusColor}-500/20 text-${statusColor}-400`}>
-                            <StatusIcon className="w-3 h-3" />
-                            {STATUS_CONFIG[s.status]?.label}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {s.status === 'pending' && (
-                          <button
-                            onClick={() => setShowProcessModal(s)}
-                            className="text-xs px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded"
-                          >
-                            Process
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : (
-        <SettingsTab settings={settings} onUpdate={fetchData} />
-      )}
-
-      {/* Process Modal */}
-      {showProcessModal && (
-        <ProcessModal
-          settlement={showProcessModal}
-          onClose={() => setShowProcessModal(null)}
-          onSuccess={fetchData}
-        />
-      )}
-    </div>
-  );
-}
-
-function SettingsTab({ settings, onUpdate }) {
-  const [form, setForm] = useState(settings || {});
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { if (settings) setForm(settings); }, [settings]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await updateSettlementSettings('global', null, form);
-      onUpdate();
-    } catch (e) {
-      console.error(e);
-    }
-    setSaving(false);
-  };
-
-  return (
-    <div className="bg-[#1a1a2e] rounded-xl border border-white/5 p-6 max-w-2xl">
-      <h2 className="text-lg font-semibold text-white mb-4">Global Settlement Settings</h2>
-      
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Frequency</label>
-          <select
-            value={form.frequency || 'daily'}
-            onChange={(e) => setForm(f => ({ ...f, frequency: e.target.value }))}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-          >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="biweekly">Bi-weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="manual">Manual</option>
-          </select>
+          ))}
         </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Settlement Hour (0-23)</label>
-          <input
-            type="number"
-            min="0"
-            max="23"
-            value={form.settlement_hour || 10}
-            onChange={(e) => setForm(f => ({ ...f, settlement_hour: parseInt(e.target.value) }))}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Minimum Settlement Amount (₹)</label>
-          <input
-            type="number"
-            value={form.min_settlement_amount || 1000}
-            onChange={(e) => setForm(f => ({ ...f, min_settlement_amount: parseFloat(e.target.value) }))}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Hold Percentage (%)</label>
-          <input
-            type="number"
-            step="0.1"
-            value={form.hold_percentage || 0}
-            onChange={(e) => setForm(f => ({ ...f, hold_percentage: parseFloat(e.target.value) }))}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Hold Days</label>
-          <input
-            type="number"
-            value={form.hold_days || 0}
-            onChange={(e) => setForm(f => ({ ...f, hold_days: parseInt(e.target.value) }))}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="auto_settle"
-            checked={form.auto_settle !== false}
-            onChange={(e) => setForm(f => ({ ...f, auto_settle: e.target.checked }))}
-            className="rounded border-white/20 bg-black/30"
-          />
-          <label htmlFor="auto_settle" className="text-sm text-white">Enable auto-settlement</label>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
       </div>
-    </div>
-  );
-}
 
-function ProcessModal({ settlement, onClose, onSuccess }) {
-  const [transactionRef, setTransactionRef] = useState('');
-  const [processing, setProcessing] = useState(false);
-  
-  // 2FA
-  const { requireVerification, TwoFactorModal: TwoFactorModalComponent } = useTwoFactorVerification();
-
-  const doProcess = async () => {
-    setProcessing(true);
-    try {
-      await processSettlement(settlement.id, transactionRef);
-      onSuccess();
-      onClose();
-    } catch (e) {
-      console.error(e);
-      alert('Failed to process settlement');
-    }
-    setProcessing(false);
-  };
-
-  const handleProcess = () => {
-    if (!transactionRef.trim()) return;
-    requireVerification('Process Settlement', TwoFactorActions.PROCESS_SETTLEMENT, doProcess);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#1a1a2e] rounded-xl p-6 w-full max-w-md border border-white/10">
-        <h2 className="text-lg font-semibold text-white mb-4">Process Settlement</h2>
-        
-        <div className="space-y-4">
-          <div className="bg-black/30 rounded-lg p-3">
-            <p className="text-sm text-gray-400">Entity</p>
-            <p className="text-white">{settlement.merchants?.name || settlement.traders?.name}</p>
-          </div>
-          
-          <div className="bg-black/30 rounded-lg p-3">
-            <p className="text-sm text-gray-400">Net Amount</p>
-            <p className="text-xl font-bold text-green-400">
-              ₹{Number(settlement.net_amount).toLocaleString('en-IN')}
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Bank Transaction Reference</label>
-            <input
-              type="text"
-              value={transactionRef}
-              onChange={(e) => setTransactionRef(e.target.value)}
-              placeholder="Enter UTR/Reference number"
-              className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white"
-            />
-          </div>
-        </div>
-
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2 border border-white/10 text-white rounded-lg hover:bg-white/5"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleProcess}
-            disabled={processing || !transactionRef.trim()}
-            className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <Shield className="w-4 h-4" />
-            {processing ? 'Processing...' : 'Mark as Completed'}
-          </button>
-        </div>
-        
-        {/* 2FA Modal */}
-        <TwoFactorModalComponent />
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase">Merchant</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase">Amount</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase">USDT Address</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 uppercase">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase">Requested</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No settlements found</td></tr>
+            ) : filtered.map(s => {
+              const StatusIcon = STATUS_CONFIG[s.status]?.icon || Clock;
+              return (
+                <tr key={s.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
+                        <Building className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-900">{s.merchants?.name || s.merchants?.business_name || '-'}</p>
+                        <p className="text-xs text-slate-500">{s.merchants?.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <p className="font-bold text-slate-900">₹{Number(s.amount).toLocaleString()}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <code className="text-xs bg-slate-100 px-2 py-1 rounded font-mono">
+                        {s.usdt_address?.slice(0, 8)}...{s.usdt_address?.slice(-6)}
+                      </code>
+                      <button onClick={() => copyToClipboard(s.usdt_address)} className="p-1 hover:bg-slate-100 rounded">
+                        <Copy className="w-3 h-3 text-slate-400" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">{s.network || 'TRC20'}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-center">
+                      <span className={`flex items-center gap-1 px-2 py-1 text-xs rounded-full border ${STATUS_CONFIG[s.status]?.color || 'bg-slate-100 text-slate-600'}`}>
+                        <StatusIcon className="w-3 h-3" />
+                        {STATUS_CONFIG[s.status]?.label || s.status}
+                      </span>
+                    </div>
+                    {s.rejection_reason && (
+                      <p className="text-xs text-red-500 text-center mt-1">{s.rejection_reason}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {formatDate(s.created_at)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {s.status === 'pending' && (
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => handleApprove(s)}
+                          disabled={processing === s.id}
+                          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg disabled:opacity-50"
+                        >
+                          {processing === s.id ? '...' : 'Approve'}
+                        </button>
+                        <button
+                          onClick={() => handleReject(s)}
+                          disabled={processing === s.id}
+                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded-lg disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                    {s.status === 'completed' && (
+                      <span className="text-xs text-green-600">Processed {formatDate(s.processed_at)}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

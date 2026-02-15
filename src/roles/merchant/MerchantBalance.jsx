@@ -222,18 +222,69 @@ export default function MerchantBalance() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     
-    // Get merchant ID from profile_id
-    const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+    // Get merchant ID and current balance
+    const { data: merchant } = await supabase
+      .from('merchants')
+      .select('id, available_balance')
+      .eq('profile_id', user.id)
+      .single();
     if (!merchant) return;
     
-    await supabase.from('merchant_settlements').insert({
+    const amount = Number(data.amount);
+    
+    // Check balance
+    if (amount > (merchant.available_balance || 0)) {
+      alert('Insufficient balance');
+      return;
+    }
+    
+    // Create settlement request
+    const { error: insertError } = await supabase.from('merchant_settlements').insert({
       merchant_id: merchant.id,
-      amount: data.amount,
+      amount: amount,
       usdt_address: data.usdtAddress,
       network: 'TRC20',
       status: 'pending',
     });
+    
+    if (insertError) {
+      alert('Error: ' + insertError.message);
+      return;
+    }
+    
+    // Deduct from available balance (reserve the amount)
+    const newBalance = (merchant.available_balance || 0) - amount;
+    await supabase
+      .from('merchants')
+      .update({ 
+        available_balance: newBalance,
+        pending_settlement: (balance.pending || 0) + amount,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', merchant.id);
+    
+    // Update local state
+    setBalance(prev => ({
+      ...prev,
+      netBalance: newBalance,
+      pending: (prev.pending || 0) + amount,
+    }));
+    
+    // Refresh settlements list
+    const { data: settData } = await supabase
+      .from('merchant_settlements')
+      .select('*')
+      .eq('merchant_id', merchant.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setSettlements((settData || []).map(s => ({ 
+      ...s, 
+      createdAt: s.created_at ? { seconds: new Date(s.created_at).getTime() / 1000 } : null,
+      usdtAddress: s.usdt_address 
+    })));
+    
     setShowModal(false);
+    alert('Settlement request submitted! Amount reserved from balance.');
   };
 
   if (loading) {
