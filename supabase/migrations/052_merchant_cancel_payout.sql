@@ -22,8 +22,9 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Invalid payout ID format');
   END;
 
-  -- 1. Get payout and merchant info
-  SELECT p.*, m.profile_id, m.available_balance as merchant_balance
+  -- 1. Get payout and merchant info (select specific columns to avoid missing column errors)
+  SELECT p.id, p.amount, p.commission, p.status, p.merchant_id, 
+         m.profile_id, m.available_balance as merchant_balance
   INTO v_payout
   FROM payouts p
   JOIN merchants m ON m.id = p.merchant_id
@@ -43,8 +44,8 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Cannot cancel - status is ' || v_payout.status::TEXT);
   END IF;
   
-  -- 4. Calculate refund (amount + fee)
-  v_refund_amount := COALESCE(v_payout.amount, 0) + COALESCE(v_payout.merchant_fee, v_payout.commission, 0);
+  -- 4. Calculate refund (amount + commission)
+  v_refund_amount := COALESCE(v_payout.amount, 0) + COALESCE(v_payout.commission, 0);
   v_new_balance := COALESCE(v_payout.merchant_balance, 0) + v_refund_amount;
   
   -- 5. Update payout status
