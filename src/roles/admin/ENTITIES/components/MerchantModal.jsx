@@ -13,8 +13,8 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
     website: '',
     callbackUrl: '',
     webhookUrl: '',
-    payinCommission: 6,
-    payoutCommission: 2,
+    payinCommission: '',
+    payoutCommission: '',
     active: true,
     ...merchant,
   });
@@ -33,6 +33,8 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
     if (!formData.name.trim() && !formData.businessName.trim()) { setError('Business name is required'); return; }
     if (!formData.email.trim()) { setError('Email is required'); return; }
     if (!/^\S+@\S+\.\S+$/.test(formData.email)) { setError('Invalid email format'); return; }
+    if (formData.payinCommission === '' || formData.payinCommission === null) { setError('Payin commission rate is required'); return; }
+    if (formData.payoutCommission === '' || formData.payoutCommission === null) { setError('Payout commission rate is required'); return; }
 
     setSaving(true);
     try {

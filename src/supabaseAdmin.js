@@ -202,8 +202,8 @@ export async function createMerchant(formData) {
     phone: formData.phone || '',
     business_name: formData.businessName || formData.name,
     live_api_key: liveApiKey,
-    payin_commission_rate: Number(formData.payinCommissionRate) || 6,
-    payout_commission_rate: Number(formData.payoutCommissionRate) || 2,
+    payin_commission_rate: Number(formData.payinCommissionRate),
+    payout_commission_rate: Number(formData.payoutCommissionRate),
     webhook_url: formData.webhookUrl || '',
     is_active: formData.active !== undefined ? formData.active : true,
   })
