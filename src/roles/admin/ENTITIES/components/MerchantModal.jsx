@@ -13,8 +13,8 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
     website: '',
     callbackUrl: '',
     webhookUrl: '',
-    payinCommission: 2,
-    payoutCommission: 1,
+    payinCommission: 6,
+    payoutCommission: 2,
     active: true,
     ...merchant,
   });

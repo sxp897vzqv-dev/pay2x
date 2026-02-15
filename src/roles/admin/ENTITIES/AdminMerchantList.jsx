@@ -39,8 +39,8 @@ const mapMerchant = (row) => ({
   active: row.is_active,
   status: row.is_active ? 'active' : 'inactive',
   businessName: row.business_name,
-  payinCommission: row.payin_commission,
-  payoutCommission: row.payout_commission,
+  payinCommission: row.payin_commission_rate,
+  payoutCommission: row.payout_commission_rate,
   liveApiKey: row.live_api_key,
   apiKey: row.live_api_key,
   webhookUrl: row.webhook_url,
@@ -120,8 +120,8 @@ export default function AdminMerchantList() {
           website: updateData.website || '',
           callback_url: updateData.callbackUrl || '',
           webhook_url: updateData.webhookUrl || '',
-          payin_commission: Number(updateData.payinCommission) || 2,
-          payout_commission: Number(updateData.payoutCommission) || 1,
+          payin_commission_rate: Number(updateData.payinCommission) || 6,
+          payout_commission_rate: Number(updateData.payoutCommission) || 2,
           is_active: updateData.active,
         }).eq('id', selectedMerchant.id);
 
@@ -136,8 +136,8 @@ export default function AdminMerchantList() {
           website: formData.website || '',
           callbackUrl: formData.callbackUrl || '',
           webhookUrl: formData.webhookUrl || '',
-          payinCommissionRate: Number(formData.payinCommission) || 2,
-          payoutCommissionRate: Number(formData.payoutCommission) || 1,
+          payinCommissionRate: Number(formData.payinCommission) || 6,
+          payoutCommissionRate: Number(formData.payoutCommission) || 2,
           active: formData.active !== undefined ? formData.active : true,
         });
 
