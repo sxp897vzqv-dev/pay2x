@@ -162,47 +162,54 @@ export default function MerchantBalance() {
       if (!user) return;
 
       try {
-        const { data: mData } = await supabase.from('merchants').select('*').eq('id', user.id).single();
+        // Get merchant by profile_id (auth user id), not by merchant id!
+        const { data: mData } = await supabase.from('merchants').select('*').eq('profile_id', user.id).single();
         if (mData) {
-          let payinCommissionRate = mData.payin_commission_rate || 6;
-          let payoutCommissionRate = mData.payout_commission_rate || 2;
-          if (payinCommissionRate > 1) payinCommissionRate = payinCommissionRate / 100;
-          if (payoutCommissionRate > 1) payoutCommissionRate = payoutCommissionRate / 100;
+          const merchantId = mData.id; // This is the actual merchant UUID
+          
+          // Commission rates (stored as percentage like 6 for 6%)
+          let payinCommissionRate = (mData.payin_rate || mData.payin_commission_rate || 6) / 100;
+          let payoutCommissionRate = (mData.payout_rate || mData.payout_commission_rate || 2) / 100;
 
-          const { data: payins } = await supabase.from('payins').select('amount').eq('merchant_id', user.id).eq('status', 'completed');
+          // Get completed payins for this merchant
+          const { data: payins } = await supabase.from('payins').select('amount, commission').eq('merchant_id', merchantId).eq('status', 'completed');
           let totalPayinRevenue = 0, totalPayinCommission = 0;
           (payins || []).forEach(d => {
             const amount = Number(d.amount || 0);
-            const commission = amount * payinCommissionRate;
+            const commission = Number(d.commission || 0) || (amount * payinCommissionRate);
             totalPayinRevenue += (amount - commission);
             totalPayinCommission += commission;
           });
 
-          const { data: payouts } = await supabase.from('payouts').select('amount').eq('merchant_id', user.id).in('status', ['completed', 'processing', 'queued']);
+          // Get completed payouts (only completed - balance deducted on completion)
+          const { data: payouts } = await supabase.from('payouts').select('amount, commission').eq('merchant_id', merchantId).eq('status', 'completed');
           let totalPayoutAmount = 0, totalPayoutCommission = 0;
           (payouts || []).forEach(d => {
             const amount = Number(d.amount || 0);
-            const commission = amount * payoutCommissionRate;
+            const commission = Number(d.commission || 0) || (amount * payoutCommissionRate);
             totalPayoutAmount += amount;
             totalPayoutCommission += commission;
           });
 
-          const netBalance = totalPayinRevenue - (totalPayoutAmount + totalPayoutCommission);
+          // Net balance = payin revenue - payout costs
+          // Or just use the stored available_balance from merchants table
+          const netBalance = mData.available_balance ?? (totalPayinRevenue - (totalPayoutAmount + totalPayoutCommission));
+          
           setBalance({
             available: Math.max(0, netBalance),
             pending: mData.pending_settlement || 0,
             reserved: mData.reserved_amount || 0,
             totalPayinRevenue, totalPayinCommission, totalPayoutAmount, totalPayoutCommission, netBalance,
           });
+
+          // Ledger
+          const { data: ledgerData } = await supabase.from('merchant_ledger').select('*').eq('merchant_id', merchantId).order('timestamp', { ascending: false }).limit(50);
+          setLedger((ledgerData || []).map(l => ({ ...l, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
+
+          // Settlements
+          const { data: settData } = await supabase.from('merchant_settlements').select('*').eq('merchant_id', merchantId).order('created_at', { ascending: false }).limit(20);
+          setSettlements((settData || []).map(s => ({ ...s, createdAt: s.created_at ? { seconds: new Date(s.created_at).getTime() / 1000 } : null, usdtAddress: s.usdt_address })));
         }
-
-        // Ledger
-        const { data: ledgerData } = await supabase.from('merchant_ledger').select('*').eq('merchant_id', user.id).order('timestamp', { ascending: false }).limit(50);
-        setLedger((ledgerData || []).map(l => ({ ...l, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
-
-        // Settlements
-        const { data: settData } = await supabase.from('merchant_settlements').select('*').eq('merchant_id', user.id).order('created_at', { ascending: false }).limit(20);
-        setSettlements((settData || []).map(s => ({ ...s, createdAt: s.created_at ? { seconds: new Date(s.created_at).getTime() / 1000 } : null, usdtAddress: s.usdt_address })));
       } catch (e) {
         console.error(e);
       }
@@ -214,8 +221,13 @@ export default function MerchantBalance() {
   const handleSettlementRequest = async (data) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    
+    // Get merchant ID from profile_id
+    const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+    if (!merchant) return;
+    
     await supabase.from('merchant_settlements').insert({
-      merchant_id: user.id,
+      merchant_id: merchant.id,
       amount: data.amount,
       usdt_address: data.usdtAddress,
       network: 'TRC20',
