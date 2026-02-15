@@ -123,13 +123,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // 6. Calculate fee (no balance check - merchants can create payouts up to 2 lakhs without balance)
+    // 6. Calculate fee (balance deducted only on completion, not on creation)
     const payoutRate = merchant.payout_rate || 2; // Default 2%
     const fee = Math.round(amountNum * payoutRate / 100);
     const totalRequired = amountNum + fee;
 
-    // Deduct from balance if available, otherwise allow negative/credit
-    // Merchants settle later - traders fulfill payouts from their own balance
+    // NO balance deduction here - balance is deducted only when payout is COMPLETED
+    // Traders fulfill payouts from their own balance first
 
     // 7. Check duplicate orderId (stored in metadata)
     if (orderId) {
@@ -151,17 +151,9 @@ serve(async (req: Request) => {
       }
     }
 
-    // 8. Deduct balance (can go negative - merchant settles later)
-    const newBalance = (merchant.available_balance || 0) - totalRequired;
-    const { error: deductError } = await supabase
-      .from('merchants')
-      .update({ available_balance: newBalance })
-      .eq('id', merchant.id);
-
-    if (deductError) {
-      console.error('Balance deduction error:', deductError);
-      // Continue anyway - payout creation is more important
-    }
+    // 8. NO balance deduction on creation
+    // Balance will be deducted when payout status changes to 'completed'
+    // This happens via trigger or when admin/system marks payout as complete
 
     // 9. Generate payout ID
     const payoutId = `PO${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -184,12 +176,6 @@ serve(async (req: Request) => {
       .single();
 
     if (payoutError) {
-      // Refund balance
-      await supabase
-        .from('merchants')
-        .update({ available_balance: (merchant.available_balance || 0) })
-        .eq('id', merchant.id);
-
       console.error('Payout creation error:', payoutError);
       return new Response(
         JSON.stringify({ success: false, error: { code: 'CREATE_ERROR', message: 'Failed to create payout' } }),
@@ -228,9 +214,9 @@ serve(async (req: Request) => {
         order_id: orderId || null,
         amount: amountNum,
         fee,
-        total_deducted: totalRequired,
+        total_on_completion: totalRequired,
         status: 'pending',
-        message: 'Payout request created. Will be processed within 24 hours.',
+        message: 'Payout request created. Balance will be deducted on completion.',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

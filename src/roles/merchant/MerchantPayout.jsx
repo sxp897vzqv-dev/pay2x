@@ -111,6 +111,10 @@ export default function MerchantPayout() {
     if (statusFilter !== "all") {
       if (statusFilter === "failed") {
         r = r.filter(p => p.status === 'failed' || p.status === 'cancelled' || p.status === 'rejected');
+      } else if (statusFilter === "pendingVerification") {
+        r = r.filter(p => p.status === 'completed' && p.verification_status && p.verification_status !== 'verified');
+      } else if (statusFilter === "completed") {
+        r = r.filter(p => p.status === 'completed' && (!p.verification_status || p.verification_status === 'verified'));
       } else {
         r = r.filter(p => p.status === statusFilter);
       }
@@ -133,7 +137,8 @@ export default function MerchantPayout() {
     pending: payouts.filter(p => p.status === 'pending').length,
     assigned: payouts.filter(p => p.status === 'assigned').length,
     processing: payouts.filter(p => p.status === 'processing').length,
-    completed: payouts.filter(p => p.status === 'completed').length,
+    pendingVerification: payouts.filter(p => p.status === 'completed' && p.verification_status && p.verification_status !== 'verified').length,
+    completed: payouts.filter(p => p.status === 'completed' && (!p.verification_status || p.verification_status === 'verified')).length,
     failed: payouts.filter(p => p.status === 'failed' || p.status === 'cancelled' || p.status === 'rejected').length,
   }), [payouts]);
 
@@ -145,7 +150,7 @@ export default function MerchantPayout() {
 
     const amount = Number(formData.amount);
     
-    // Validate amount limits (no balance check - merchants can go negative)
+    // Validate amount limits
     if (amount < 100) {
       setToast({ type: 'error', message: 'Minimum amount is ₹100' });
       return;
@@ -157,21 +162,9 @@ export default function MerchantPayout() {
     
     const rate = payoutRate || 2;
     const payoutFee = Math.round((amount * rate) / 100);
-    const totalDeduct = amount + payoutFee;
     
-    // Deduct from balance (can go negative - merchant settles later)
-    const newBalance = availableBalance - totalDeduct;
-    const { error: updateError } = await supabase
-      .from('merchants')
-      .update({ available_balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('id', merchantId);
-    
-    if (updateError) {
-      console.error('Balance update error:', updateError);
-      // Continue anyway
-    }
-    
-    // Create payout
+    // NO balance deduction on creation - deducted only on completion
+    // Create payout request
     const { error: payoutError } = await supabase.from('payouts').insert({
       merchant_id: merchantId,
       payout_id: 'PO' + Date.now(),
@@ -189,22 +182,18 @@ export default function MerchantPayout() {
     });
     
     if (payoutError) {
-      // Rollback balance
-      await supabase.from('merchants').update({ available_balance: availableBalance }).eq('id', merchantId);
       setToast({ type: 'error', message: 'Error: ' + payoutError.message });
       return;
     }
     
-    setAvailableBalance(newBalance);
     setShowModal(false);
-    setToast({ type: 'success', message: `Payout of ₹${amount.toLocaleString()} created! Fee: ₹${payoutFee.toLocaleString()}` });
+    setToast({ type: 'success', message: `Payout request created! ₹${amount.toLocaleString()} + ₹${payoutFee.toLocaleString()} fee will be deducted on completion.` });
   };
 
   const handleCancelPayout = async (payoutId) => {
-    if (!confirm('Cancel this payout? Amount will be refunded to your balance.')) return;
+    if (!confirm('Cancel this payout request?')) return;
     
     try {
-      // Use RPC function for atomic cancel + refund
       const { data, error } = await supabase.rpc('cancel_merchant_payout', {
         p_payout_id: payoutId
       });
@@ -219,15 +208,10 @@ export default function MerchantPayout() {
         return;
       }
       
-      // Update local balance
-      if (data.new_balance !== undefined) {
-        setAvailableBalance(data.new_balance);
-      }
-      
       // Refresh payouts list
       fetchData(true);
       
-      setToast({ type: 'success', message: data.message || `Payout cancelled. ₹${data.refunded?.toLocaleString()} refunded.` });
+      setToast({ type: 'success', message: data.message || 'Payout cancelled.' });
     } catch (e) {
       setToast({ type: 'error', message: 'Error: ' + e.message });
     }
@@ -333,6 +317,7 @@ export default function MerchantPayout() {
           { label: 'Pending', value: stats.pending, color: 'bg-yellow-100 text-yellow-700', key: 'pending' },
           { label: 'Assigned', value: stats.assigned, color: 'bg-blue-100 text-blue-700', key: 'assigned' },
           { label: 'Processing', value: stats.processing, color: 'bg-amber-100 text-amber-700', key: 'processing' },
+          { label: 'Verifying', value: stats.pendingVerification, color: 'bg-orange-100 text-orange-700', key: 'pendingVerification' },
           { label: 'Completed', value: stats.completed, color: 'bg-green-100 text-green-700', key: 'completed' },
           { label: 'Failed', value: stats.failed, color: 'bg-red-100 text-red-700', key: 'failed' },
         ].map(pill => (

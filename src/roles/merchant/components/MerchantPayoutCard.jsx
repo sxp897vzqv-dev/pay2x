@@ -119,6 +119,18 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
           </div>
         )}
 
+        {/* Verification status (for completed payouts pending verification) */}
+        {payout.status === 'completed' && payout.verification_status && payout.verification_status !== 'verified' && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-xs">
+            <Clock className="w-3.5 h-3.5 text-amber-600" />
+            <span className="font-semibold text-amber-800">
+              {payout.verification_status === 'pending' ? 'Pending Verification' : 
+               payout.verification_status === 'submitted' ? 'Verification Submitted' : 
+               'Verification: ' + payout.verification_status}
+            </span>
+          </div>
+        )}
+
         {/* UTR (if completed) */}
         {payout.utr && (
           <div className="flex items-center justify-between px-3 py-2 bg-green-50 rounded-lg border border-green-200 text-xs">
@@ -153,8 +165,8 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
           )}
         </div>
 
-        {/* Cancel button for pending/assigned payouts */}
-        {(payout.status === 'pending' || payout.status === 'assigned') && onCancel && (
+        {/* Cancel button - only for pending (once assigned to trader, cannot cancel) */}
+        {payout.status === 'pending' && onCancel && (
           <button
             onClick={() => onCancel(payout.id)}
             className="w-full py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-100 flex items-center justify-center gap-1"
