@@ -3,7 +3,7 @@ import { supabase } from '../../../supabase';
 import { useRealtimeRefresh } from '../../../hooks/useRealtimeSubscription';
 import { Link } from 'react-router-dom';
 import {
-  TrendingUp, TrendingDown, DollarSign, Users, Store, Activity, RefreshCw,
+  TrendingUp, TrendingDown, IndianRupee, Users, Store, Activity, RefreshCw,
   AlertCircle, CheckCircle, Clock, ArrowRight, Database, UserCircle,
   AlertTriangle, XCircle, Eye, Calendar,
 } from 'lucide-react';
@@ -317,7 +317,7 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard title={`${periodLabel} Payins`} value={`₹${stats.payins.toLocaleString()}`} icon={TrendingUp} color="green" loading={loading} />
         <StatCard title={`${periodLabel} Payouts`} value={`₹${stats.payouts.toLocaleString()}`} icon={TrendingDown} color="blue" loading={loading} />
-        <StatCard title={`${periodLabel} Commission`} value={`₹${stats.commission.toLocaleString()}`} icon={DollarSign} color="emerald" loading={loading} />
+        <StatCard title={`${periodLabel} Commission`} value={`₹${stats.commission.toLocaleString()}`} icon={IndianRupee} color="emerald" loading={loading} />
         <StatCard title="Active UPIs" value={stats.activeUPIs.toString()} icon={Database} color="purple" loading={loading} />
       </div>
 

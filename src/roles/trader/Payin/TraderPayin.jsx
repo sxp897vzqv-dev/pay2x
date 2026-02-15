@@ -4,8 +4,10 @@ import { useRealtimeSubscription } from "../../../hooks/useRealtimeSubscription"
 import {
   CheckCircle, XCircle, Edit, Search, FileText, AlertCircle,
   MoreHorizontal, Download, TrendingUp, RefreshCw, Filter, X,
-  Calendar, CreditCard, Hash, User, DollarSign, Clock, Inbox
+  Calendar, CreditCard, Hash, User, IndianRupee, Clock, Inbox
 } from "lucide-react";
+import { StatusBadge, RelativeTime, SkeletonCard, SuccessAnimation } from "../../../components/trader";
+import { formatINR } from "../../../utils/format";
 
 function exportToCSV(rows, columns, filename) {
   const csv = columns.map(c => c.header).join(",") + "\n" +
@@ -26,29 +28,6 @@ const TABS = [
   { key: "completed", label: "Completed" },
   { key: "rejected",  label: "Rejected" },
 ];
-
-/* ─── Skeleton ─── */
-const SkeletonCard = memo(() => (
-  <div className="bg-white rounded-xl border border-slate-200 p-4 animate-pulse space-y-3">
-    <div className="flex justify-between">
-      <div className="h-3 bg-slate-200 rounded w-24" />
-      <div className="h-3 bg-slate-200 rounded w-16" />
-    </div>
-    <div className="grid grid-cols-2 gap-2">
-      {[1,2,3,4].map(i => (
-        <div key={i} className="bg-slate-50 rounded-lg p-2.5">
-          <div className="h-2 bg-slate-200 rounded w-12 mb-1.5" />
-          <div className="h-3 bg-slate-200 rounded w-16" />
-        </div>
-      ))}
-    </div>
-    <div className="flex gap-2">
-      <div className="flex-1 h-10 bg-slate-200 rounded-xl" />
-      <div className="flex-1 h-10 bg-slate-200 rounded-xl" />
-    </div>
-  </div>
-));
-SkeletonCard.displayName = 'SkeletonCard';
 
 /* ─── Empty state ─── */
 const EmptyState = memo(({ tab }) => {
@@ -90,21 +69,25 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
   }, [payin.status, payin.utrId, payin.requestedAt]);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-slate-300">
       <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : payin.status === 'rejected' ? 'bg-red-500' : 'bg-blue-500'}`} />
       <div className="p-3 space-y-3">
 
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-400 mb-0.5">Transaction ID</p>
+            <div className="flex items-center gap-2 mb-0.5">
+              <p className="text-xs text-slate-400">Transaction ID</p>
+              <span className="text-xs text-slate-400">•</span>
+              <RelativeTime date={payin.created_at} className="text-xs" />
+            </div>
             <p className="font-mono text-sm font-bold text-slate-900 truncate bg-slate-50 px-2 py-1 rounded-lg inline-block" style={{ fontFamily: 'var(--font-mono)' }}>
               {payin.transactionId || payin.id.slice(-8)}
             </p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {payin.status === 'pending' && !hasUtr && remainingTime && (
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-lg flex items-center gap-0.5 ${remainingTime.expiring ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5 ${remainingTime.expiring ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                 <Clock className="w-3 h-3" />
                 {remainingTime.min}:{remainingTime.sec.toString().padStart(2,'0')}
               </span>
@@ -135,7 +118,7 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
 
           {/* Amount cell */}
           <div className="bg-green-50 rounded-lg p-2.5 border border-green-200">
-            <div className="flex items-center gap-1 mb-1"><DollarSign className="w-3 h-3 text-green-600" /><p className="text-xs font-bold text-slate-600 uppercase">Amount</p></div>
+            <div className="flex items-center gap-1 mb-1"><IndianRupee className="w-3 h-3 text-green-600" /><p className="text-xs font-bold text-slate-600 uppercase">Amount</p></div>
             {isEditing ? (
               <div className="flex items-center gap-1">
                 <input type="number" className="flex-1 w-full px-2 py-1 border border-green-400 rounded-lg text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-green-500"
@@ -192,11 +175,9 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
 
         {/* Status badge */}
         {payin.status !== "pending" && (
-          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${
-            payin.status === "completed" ? "bg-green-100 text-green-800 border border-green-200" : "bg-red-100 text-red-800 border border-red-200"
-          }`}>
-            {payin.status === "completed" ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-            <span className="capitalize">{payin.status}{payin.autoRejected ? ' (Time Expired)' : ''}</span>
+          <div className="flex items-center gap-2">
+            <StatusBadge status={payin.status} size="md" />
+            {payin.autoRejected && <span className="text-xs text-slate-500">(Time Expired)</span>}
           </div>
         )}
       </div>
@@ -502,7 +483,7 @@ export default function TraderPayin() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><DollarSign className="w-3 h-3" /> Amount Filter</label>
+            <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><IndianRupee className="w-3 h-3" /> Amount Filter</label>
             <select value={amountFilter} onChange={e=>setAmountFilter(e.target.value)} className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-green-400 bg-white">
               <option value="all">All Amounts</option>
               <option value="high">High (&gt;₹10k)</option>

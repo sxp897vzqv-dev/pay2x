@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
-  DollarSign, CreditCard, TrendingDown, FileText, Upload, CheckCircle2, AlertCircle,
+  IndianRupee, CreditCard, TrendingDown, FileText, Upload, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import {
   immediateAutoAssignPayouts,
@@ -10,6 +10,8 @@ import {
   cancelPayoutRequestByTrader
 } from '../../../utils/Payoutassignmenthelper';
 import Toast from '../../../components/admin/Toast';
+import { StickyTabs, StatusBadge, RelativeTime, SkeletonCard } from '../../../components/trader';
+import { formatINR } from '../../../utils/format';
 import ActiveRequestBanner from './components/ActiveRequestBanner';
 import RequestTab from './components/RequestTab';
 import AssignedTab from './components/AssignedTab';
@@ -19,7 +21,7 @@ import BatchVerificationModal from './components/BatchVerificationModal';
 
 /* ─── Tabs config ─── */
 const TABS = [
-  { key: 'request',  label: 'Request',  icon: DollarSign },
+  { key: 'request',  label: 'Request',  icon: IndianRupee },
   { key: 'assigned', label: 'Assigned', icon: CreditCard },
   { key: 'history',  label: 'History',  icon: FileText },
 ];

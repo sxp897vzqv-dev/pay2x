@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { 
   Search, ArrowUpRight, ArrowDownRight, 
-  Download, TrendingUp, DollarSign, Hash
+  Download, TrendingUp, IndianRupee, Hash
 } from 'lucide-react';
 
 export default function AffiliateEarnings() {
@@ -123,7 +123,7 @@ export default function AffiliateEarnings() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/60">
           <div className="flex items-center gap-2 mb-1">
-            <DollarSign className="w-4 h-4 text-green-600" />
+            <IndianRupee className="w-4 h-4 text-green-600" />
             <p className="text-xs text-slate-500 font-medium">Total Earnings</p>
           </div>
           <p className="text-xl font-bold text-green-600">₹{stats.total.toLocaleString()}</p>

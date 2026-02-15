@@ -2,13 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, SUPABASE_URL } from '../../supabase';
 import {
   Wallet, Shield, RefreshCw, AlertTriangle, CheckCircle, XCircle,
-  Plus, ArrowRight, Copy, ExternalLink, Clock, DollarSign,
-  Archive, Trash2, Eye, EyeOff, Key, Lock, Unlock, Search, Loader, List
+  Plus, ArrowRight, Copy, ExternalLink, Clock, IndianRupee,
+  Eye, EyeOff, Key, Lock, Search, Loader, List, Settings, Save
 } from 'lucide-react';
 import Toast from '../../components/admin/Toast';
 
 // ═══════════════════════════════════════════════════════════════════
-// Derive addresses via Edge Function (avoids CORS)
+// Derive addresses via Edge Function
 // ═══════════════════════════════════════════════════════════════════
 const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 
@@ -66,442 +66,83 @@ function StatCard({ title, value, subtitle, icon: Icon, color = 'slate' }) {
   );
 }
 
-function WalletCard({ wallet, adminWallet, onSetCurrent, onArchive, isLoading, onToast }) {
-  const [showXpub, setShowXpub] = useState(false);
-  const [showAddresses, setShowAddresses] = useState(false);
-  const [derivedAddresses, setDerivedAddresses] = useState([]);
-  const [masterAddress, setMasterAddress] = useState('');
-  const [loadingMaster, setLoadingMaster] = useState(false);
-  const [deriving, setDeriving] = useState(false);
-  const [deriveFrom, setDeriveFrom] = useState(0);
-  const [deriveTo, setDeriveTo] = useState(10);
-  const [copied, setCopied] = useState(false);
-
-  // Auto-derive master address (index 0) on load
-  useEffect(() => {
-    if (wallet.master_xpub && !masterAddress) {
-      setLoadingMaster(true);
-      deriveAddressFromXpub(wallet.master_xpub, 0)
-        .then(addr => setMasterAddress(addr))
-        .catch(e => {
-          console.error('Failed to derive master:', e);
-          if (e.message?.includes('401') || e.message?.includes('API')) {
-            setMasterAddress('API_ERROR');
-          }
-        })
-        .finally(() => setLoadingMaster(false));
-    }
-  }, [wallet.master_xpub]);
-
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  // Derive addresses from XPUB via Edge Function
-  const handleDeriveAddresses = async () => {
-    if (!wallet.master_xpub) {
-      onToast?.({ msg: 'Missing XPUB', success: false });
-      return;
-    }
-    setDeriving(true);
-    try {
-      const addresses = await deriveMultipleAddresses(
-        wallet.master_xpub, 
-        parseInt(deriveFrom), 
-        parseInt(deriveTo)
-      );
-      setDerivedAddresses(addresses);
-      setShowAddresses(true);
-      onToast?.({ msg: `Derived ${addresses.length} addresses from XPUB`, success: true });
-    } catch (e) {
-      onToast?.({ msg: e.message, success: false });
-    }
-    setDeriving(false);
-  };
-
-  const statusColors = {
-    active: 'bg-green-100 text-green-700 border-green-200',
-    legacy: 'bg-amber-100 text-amber-700 border-amber-200',
-    disabled: 'bg-slate-100 text-slate-500 border-slate-200',
-  };
-
-  return (
-    <div className={`bg-white rounded-xl border-2 p-4 ${wallet.is_current ? 'border-purple-400 shadow-lg' : 'border-slate-200'}`}>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Wallet className="w-5 h-5 text-purple-600" />
-            <h3 className="font-bold text-slate-900">{wallet.name || 'HD Wallet'}</h3>
-            {wallet.is_current && (
-              <span className="px-2 py-0.5 bg-purple-600 text-white text-xs font-bold rounded-full">
-                CURRENT
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-slate-500">{wallet.id}</p>
-        </div>
-        <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${statusColors[wallet.status] || statusColors.active}`}>
-          {(wallet.status || 'active').toUpperCase()}
-        </span>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <div className="bg-slate-50 rounded-lg p-2 text-center">
-          <p className="text-xs text-slate-500">Addresses</p>
-          <p className="text-lg font-bold text-slate-700">{wallet.total_addresses || 0}</p>
-        </div>
-        <div className="bg-green-50 rounded-lg p-2 text-center">
-          <p className="text-xs text-green-600">Deposited</p>
-          <p className="text-lg font-bold text-green-700">${(wallet.total_deposited || 0).toFixed(2)}</p>
-        </div>
-        <div className="bg-purple-50 rounded-lg p-2 text-center">
-          <p className="text-xs text-purple-600">Last Index</p>
-          <p className="text-lg font-bold text-purple-700">{wallet.last_derivation_index || 0}</p>
-        </div>
-      </div>
-
-      {/* XPUB */}
-      <div className="mb-3">
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xs font-semibold text-slate-500">Master XPUB</p>
-          <button onClick={() => setShowXpub(!showXpub)} className="text-xs text-purple-600 flex items-center gap-1">
-            {showXpub ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-            {showXpub ? 'Hide' : 'Show'}
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <code className="flex-1 text-xs bg-slate-100 px-2 py-1.5 rounded-lg font-mono truncate">
-            {showXpub ? wallet.master_xpub : '••••••••••••••••••••' + (wallet.master_xpub?.slice(-8) || '')}
-          </code>
-          <button onClick={() => handleCopy(wallet.master_xpub)} className="p-1.5 hover:bg-slate-100 rounded-lg">
-            {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-slate-400" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Master Wallet Address (Index 0) */}
-      <div className="mb-3">
-        <p className="text-xs font-semibold text-slate-500 mb-1">Master Wallet (Index #0)</p>
-        <div className="flex items-center gap-2">
-          {loadingMaster ? (
-            <div className="flex-1 bg-slate-100 px-2 py-1.5 rounded-lg flex items-center gap-2">
-              <Loader className="w-3 h-3 animate-spin text-slate-400" />
-              <span className="text-xs text-slate-400">Deriving from XPUB...</span>
-            </div>
-          ) : masterAddress === 'API_ERROR' ? (
-            <div className="flex-1 bg-red-50 border border-red-200 px-2 py-1.5 rounded-lg">
-              <span className="text-xs text-red-600">⚠️ Tatum API key invalid/expired. Update in HD Wallets → Config</span>
-            </div>
-          ) : masterAddress ? (
-            <>
-              <code className="flex-1 text-xs bg-blue-50 border border-blue-200 px-2 py-1.5 rounded-lg font-mono truncate text-blue-700">
-                {masterAddress}
-              </code>
-              <button onClick={() => handleCopy(masterAddress)} className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-500">
-                <Copy className="w-4 h-4" />
-              </button>
-              <a 
-                href={`https://tronscan.org/#/address/${masterAddress}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-1.5 hover:bg-blue-100 rounded-lg text-blue-500"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </a>
-            </>
-          ) : (
-            <span className="text-xs text-slate-400">No XPUB configured</span>
-          )}
-        </div>
-      </div>
-
-      {/* Admin Wallet (Sweep Destination) */}
-      {adminWallet && (
-        <div className="mb-3">
-          <p className="text-xs font-semibold text-slate-500 mb-1">Admin Wallet (Sweep To)</p>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-purple-50 border border-purple-200 px-2 py-1.5 rounded-lg font-mono truncate text-purple-700">
-              {adminWallet}
-            </code>
-            <a 
-              href={`https://tronscan.org/#/address/${adminWallet}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 hover:bg-purple-100 rounded-lg text-purple-500"
-            >
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          </div>
-        </div>
-      )}
-
-      {/* Derive Addresses from XPUB (source of truth) */}
-      <div className="mb-3 border-t border-slate-100 pt-3">
-        <p className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1">
-          <List className="w-3 h-3" /> Derive from XPUB
-        </p>
-        <div className="flex gap-2 mb-2">
-          <input
-            type="number"
-            value={deriveFrom}
-            onChange={e => setDeriveFrom(e.target.value)}
-            placeholder="From"
-            className="w-16 px-2 py-1 text-xs border rounded-lg"
-          />
-          <span className="text-slate-400 self-center">to</span>
-          <input
-            type="number"
-            value={deriveTo}
-            onChange={e => setDeriveTo(e.target.value)}
-            placeholder="To"
-            className="w-16 px-2 py-1 text-xs border rounded-lg"
-          />
-          <button
-            onClick={handleDeriveAddresses}
-            disabled={deriving || !wallet.master_xpub}
-            className="flex-1 px-2 py-1 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1"
-          >
-            {deriving ? <Loader className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
-            Derive
-          </button>
-        </div>
-        
-        {/* Show derived addresses from API */}
-        {derivedAddresses.length > 0 && showAddresses && (
-          <div className="max-h-48 overflow-y-auto space-y-1 bg-green-50 border border-green-200 rounded-lg p-2">
-            <p className="text-xs font-semibold text-green-700 mb-1">✓ From XPUB Source:</p>
-            {derivedAddresses.map((addr) => (
-              <div key={addr.index} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="text-green-600 font-bold w-6">#{addr.index}</span>
-                  <code className="font-mono text-slate-700">
-                    {addr.address}
-                  </code>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => handleCopy(addr.address)} className="text-slate-400 hover:text-slate-600">
-                    <Copy className="w-3 h-3" />
-                  </button>
-                  <a 
-                    href={`https://tronscan.org/#/address/${addr.address}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-purple-500 hover:text-purple-700"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="flex gap-2 pt-2 border-t border-slate-100">
-        {!wallet.is_current && wallet.status === 'active' && (
-          <button
-            onClick={() => onSetCurrent(wallet.id)}
-            disabled={isLoading}
-            className="flex-1 py-2 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1"
-          >
-            <CheckCircle className="w-3.5 h-3.5" /> Set as Current
-          </button>
-        )}
-        {!wallet.is_current && wallet.status !== 'legacy' && (
-          <button
-            onClick={() => onArchive(wallet.id, 'legacy')}
-            disabled={isLoading}
-            className="flex-1 py-2 bg-amber-100 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-200 disabled:opacity-50 flex items-center justify-center gap-1"
-          >
-            <Archive className="w-3.5 h-3.5" /> Archive
-          </button>
-        )}
-        {wallet.status === 'legacy' && (
-          <button
-            onClick={() => onArchive(wallet.id, 'active')}
-            disabled={isLoading}
-            className="flex-1 py-2 bg-green-100 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-200 disabled:opacity-50 flex items-center justify-center gap-1"
-          >
-            <Unlock className="w-3.5 h-3.5" /> Reactivate
-          </button>
-        )}
-      </div>
-
-      <p className="text-xs text-slate-400 mt-2 text-center">
-        Created: {new Date(wallet.created_at).toLocaleDateString()}
-      </p>
-    </div>
-  );
-}
-
-function OrphanAddressRow({ address, onSweep, onMarkClear, isLoading }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(address.address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <tr className="border-b last:border-0 hover:bg-slate-50">
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <code className="text-xs font-mono bg-slate-100 px-2 py-1 rounded">{address.address?.slice(0, 8)}...{address.address?.slice(-6)}</code>
-          <button onClick={handleCopy} className="p-1 hover:bg-slate-200 rounded">
-            {copied ? <CheckCircle className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-slate-400" />}
-          </button>
-          <a href={`https://tronscan.org/#/address/${address.address}`} target="_blank" rel="noopener noreferrer"
-            className="p-1 hover:bg-slate-200 rounded">
-            <ExternalLink className="w-3 h-3 text-slate-400" />
-          </a>
-        </div>
-      </td>
-      <td className="px-4 py-3">
-        <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-mono">
-          {address.wallet_config_id}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-center">
-        <span className="font-mono text-sm">{address.derivation_index}</span>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <span className={`font-bold ${address.last_balance > 0 ? 'text-green-600' : 'text-slate-400'}`}>
-          ${(address.last_balance || 0).toFixed(2)}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-          address.status === 'orphan' ? 'bg-amber-100 text-amber-700' :
-          address.status === 'swept' ? 'bg-green-100 text-green-700' :
-          'bg-slate-100 text-slate-600'
-        }`}>
-          {address.status}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex gap-1 justify-end">
-          {address.last_balance > 0 && (
-            <button
-              onClick={() => onSweep(address)}
-              disabled={isLoading}
-              className="px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center gap-1"
-            >
-              <ArrowRight className="w-3 h-3" /> Sweep
-            </button>
-          )}
-          {address.status === 'orphan' && address.last_balance === 0 && (
-            <button
-              onClick={() => onMarkClear(address)}
-              disabled={isLoading}
-              className="px-2 py-1 bg-slate-200 text-slate-600 rounded text-xs font-semibold hover:bg-slate-300 disabled:opacity-50"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      </td>
-    </tr>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
 export default function AdminWalletRecovery() {
-  const [activeTab, setActiveTab] = useState('wallets');
-  const [wallets, setWallets] = useState([]);
+  const [activeTab, setActiveTab] = useState('wallet');
+  const [config, setConfig] = useState(null);
+  const [addressMeta, setAddressMeta] = useState(null);
+  const [traderAddresses, setTraderAddresses] = useState([]);
   const [orphanAddresses, setOrphanAddresses] = useState([]);
   const [recentDeposits, setRecentDeposits] = useState([]);
-  const [globalAdminWallet, setGlobalAdminWallet] = useState(''); // From tatum_config
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
 
-  // New wallet form
-  const [newWallet, setNewWallet] = useState({
-    name: '',
-    master_xpub: '',
-    admin_wallet: '',
-    tatum_api_key: '',
-  });
+  // Wallet display
+  const [showXpub, setShowXpub] = useState(false);
+  const [masterAddress, setMasterAddress] = useState('');
+  const [loadingMaster, setLoadingMaster] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Derive addresses tool
+  const [derivedAddresses, setDerivedAddresses] = useState([]);
+  const [showAddresses, setShowAddresses] = useState(false);
+  const [deriving, setDeriving] = useState(false);
+  const [deriveFrom, setDeriveFrom] = useState(0);
+  const [deriveTo, setDeriveTo] = useState(10);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch global config from tatum_config (source of truth)
-      const { data: configData } = await supabase
+      // Fetch config from tatum_config (SINGLE SOURCE OF TRUTH)
+      const { data: configData, error: configErr } = await supabase
         .from('tatum_config')
-        .select('admin_wallet, master_xpub')
+        .select('*')
         .eq('id', 'main')
         .single();
-      if (configData?.admin_wallet) {
-        setGlobalAdminWallet(configData.admin_wallet);
-      }
+      
+      if (configErr) throw configErr;
+      setConfig(configData);
 
       // Fetch address_meta for last index
       const { data: metaData } = await supabase
         .from('address_meta')
-        .select('last_index')
+        .select('*')
         .eq('id', 'main')
         .single();
+      setAddressMeta(metaData);
 
-      // Fetch traders with their deposit addresses
-      const { data: traderAddresses } = await supabase
+      // Fetch traders with deposit addresses
+      const { data: traders } = await supabase
         .from('traders')
-        .select('id, name, usdt_deposit_address, derivation_index')
+        .select('id, name, usdt_deposit_address, derivation_index, is_active')
         .not('usdt_deposit_address', 'is', null)
         .order('derivation_index', { ascending: true });
+      setTraderAddresses(traders || []);
 
-      // Fetch wallets and enrich with address data
-      const { data: walletData } = await supabase
-        .from('wallet_configs')
-        .select('*')
-        .order('is_current', { ascending: false })
-        .order('created_at', { ascending: false });
-      
-      // Enrich wallets with derived address info
-      const enrichedWallets = (walletData || []).map(w => {
-        // For current wallet, use data from tatum_config + traders
-        if (w.is_current && configData) {
-          return {
-            ...w,
-            master_xpub: w.master_xpub || configData.master_xpub,
-            total_addresses: traderAddresses?.length || 0,
-            last_derivation_index: metaData?.last_index || 0,
-            derived_addresses: traderAddresses || [],
-          };
-        }
-        return w;
-      });
-      setWallets(enrichedWallets);
-
-      // Fetch orphan addresses
-      const { data: orphanData } = await supabase
+      // Fetch orphan addresses (addresses without active traders)
+      const { data: orphans } = await supabase
         .from('address_mapping')
-        .select('*, traders(name)')
-        .or('status.eq.orphan,last_balance.gt.0,trader_id.is.null')
-        .order('last_balance', { ascending: false });
-      setOrphanAddresses(orphanData || []);
+        .select('*, traders(name, is_active)')
+        .or('status.eq.orphan,trader_id.is.null')
+        .order('created_at', { ascending: false });
+      setOrphanAddresses(orphans || []);
 
       // Fetch recent deposits
-      const { data: depositData } = await supabase
-        .from('address_deposits')
+      const { data: deposits } = await supabase
+        .from('crypto_transactions')
         .select('*')
+        .eq('type', 'deposit')
         .order('created_at', { ascending: false })
         .limit(20);
-      setRecentDeposits(depositData || []);
+      setRecentDeposits(deposits || []);
 
     } catch (e) {
       console.error('Fetch error:', e);
-      setToast({ msg: 'Failed to load data', success: false });
+      setToast({ msg: 'Failed to load data: ' + e.message, success: false });
     }
     setLoading(false);
   }, []);
@@ -510,43 +151,58 @@ export default function AdminWalletRecovery() {
     fetchData();
   }, [fetchData]);
 
-  const handleSetCurrent = async (walletId) => {
-    if (!window.confirm('Set this wallet as current? New addresses will be generated from this wallet.')) return;
-    
-    setActionLoading(true);
-    try {
-      await supabase.from('wallet_configs').update({ is_current: true }).eq('id', walletId);
-      setToast({ msg: 'Wallet set as current!', success: true });
-      fetchData();
-    } catch (e) {
-      setToast({ msg: e.message, success: false });
+  // Auto-derive master address when config loads
+  useEffect(() => {
+    if (config?.master_xpub && !masterAddress && !loadingMaster) {
+      setLoadingMaster(true);
+      deriveAddressFromXpub(config.master_xpub, 0)
+        .then(addr => setMasterAddress(addr))
+        .catch(e => {
+          console.error('Failed to derive master:', e);
+          setMasterAddress('API_ERROR');
+        })
+        .finally(() => setLoadingMaster(false));
     }
-    setActionLoading(false);
+  }, [config?.master_xpub]);
+
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setToast({ msg: 'Copied!', success: true });
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleArchive = async (walletId, newStatus) => {
-    setActionLoading(true);
+  const handleDeriveAddresses = async () => {
+    if (!config?.master_xpub) {
+      setToast({ msg: 'No XPUB configured', success: false });
+      return;
+    }
+    setDeriving(true);
     try {
-      await supabase.from('wallet_configs').update({ status: newStatus }).eq('id', walletId);
-      setToast({ msg: `Wallet ${newStatus === 'legacy' ? 'archived' : 'reactivated'}!`, success: true });
-      fetchData();
+      const addresses = await deriveMultipleAddresses(
+        config.master_xpub, 
+        parseInt(deriveFrom), 
+        parseInt(deriveTo)
+      );
+      setDerivedAddresses(addresses);
+      setShowAddresses(true);
+      setToast({ msg: `Derived ${addresses.length} addresses`, success: true });
     } catch (e) {
       setToast({ msg: e.message, success: false });
     }
-    setActionLoading(false);
+    setDeriving(false);
   };
 
   const handleSweep = async (address) => {
-    if (!globalAdminWallet) {
-      setToast({ msg: 'Admin wallet not configured! Set it in HD Wallets page.', success: false });
+    if (!config?.admin_wallet) {
+      setToast({ msg: 'Admin wallet not configured!', success: false });
       return;
     }
-    if (!window.confirm(`Sweep ${address.last_balance} USDT from ${address.address.slice(0, 12)}... to ${globalAdminWallet.slice(0, 10)}...?`)) return;
+    if (!window.confirm(`Sweep funds from ${address.address?.slice(0, 12)}... to admin wallet?`)) return;
     
     setActionLoading(true);
     try {
-      // TODO: Call Tatum API to sweep funds
-      // For now, just mark as swept
+      // TODO: Call Tatum sweep API
       await supabase.from('address_mapping').update({ status: 'swept' }).eq('address', address.address);
       setToast({ msg: 'Sweep initiated! Check Tatum dashboard.', success: true });
       fetchData();
@@ -556,59 +212,23 @@ export default function AdminWalletRecovery() {
     setActionLoading(false);
   };
 
-  const handleMarkClear = async (address) => {
-    setActionLoading(true);
-    try {
-      await supabase.from('address_mapping').update({ status: 'active' }).eq('address', address.address);
-      setToast({ msg: 'Address cleared!', success: true });
-      fetchData();
-    } catch (e) {
-      setToast({ msg: e.message, success: false });
-    }
-    setActionLoading(false);
-  };
-
-  const handleAddWallet = async () => {
-    if (!newWallet.name || !newWallet.master_xpub) {
-      setToast({ msg: 'Name and XPUB required', success: false });
-      return;
-    }
-
-    setActionLoading(true);
-    try {
-      await supabase.from('wallet_configs').insert({
-        name: newWallet.name,
-        master_xpub: newWallet.master_xpub,
-        admin_wallet: newWallet.admin_wallet || null,
-        tatum_api_key: newWallet.tatum_api_key || null,
-        status: 'active',
-        is_current: wallets.length === 0, // First wallet is current
-      });
-      setToast({ msg: 'Wallet added!', success: true });
-      setShowAddModal(false);
-      setNewWallet({ name: '', master_xpub: '', admin_wallet: '', tatum_api_key: '' });
-      fetchData();
-    } catch (e) {
-      setToast({ msg: e.message, success: false });
-    }
-    setActionLoading(false);
-  };
-
   // Stats
   const stats = {
-    totalWallets: wallets.length,
-    activeWallets: wallets.filter(w => w.status === 'active').length,
-    legacyWallets: wallets.filter(w => w.status === 'legacy').length,
-    totalAddresses: wallets.reduce((sum, w) => sum + (w.total_addresses || 0), 0),
-    orphanCount: orphanAddresses.filter(a => a.status === 'orphan').length,
-    orphanBalance: orphanAddresses.reduce((sum, a) => sum + (a.last_balance || 0), 0),
+    totalAddresses: traderAddresses.length,
+    activeAddresses: traderAddresses.filter(t => t.is_active).length,
+    lastIndex: addressMeta?.last_index || 0,
+    orphanCount: orphanAddresses.length,
+    totalDeposits: recentDeposits.reduce((sum, d) => sum + (d.usdt_amount || 0), 0),
   };
 
   const TABS = [
-    { key: 'wallets', label: 'Wallets', icon: Wallet },
+    { key: 'wallet', label: 'HD Wallet', icon: Wallet },
+    { key: 'addresses', label: 'Addresses', icon: Key },
     { key: 'orphans', label: 'Orphan Recovery', icon: AlertTriangle, badge: stats.orphanCount },
-    { key: 'deposits', label: 'Recent Deposits', icon: DollarSign },
+    { key: 'deposits', label: 'Deposits', icon: IndianRupee },
   ];
+
+  const isConfigured = config?.master_xpub && config?.tatum_api_key;
 
   return (
     <div className="space-y-6">
@@ -621,41 +241,34 @@ export default function AdminWalletRecovery() {
             </div>
             Wallet Recovery
           </h1>
-          <p className="text-slate-500 text-sm mt-0.5 ml-11">Manage HD wallets & recover orphan funds</p>
+          <p className="text-slate-500 text-sm mt-0.5 ml-11">HD wallet management & fund recovery</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={fetchData} disabled={loading}
-            className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50">
-            <RefreshCw className={`w-5 h-5 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <button onClick={() => setShowAddModal(true)}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Add Wallet
-          </button>
-        </div>
+        <button onClick={fetchData} disabled={loading}
+          className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50">
+          <RefreshCw className={`w-5 h-5 text-slate-600 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Total Wallets" value={stats.totalWallets} icon={Wallet} color="purple" />
-        <StatCard title="Active" value={stats.activeWallets} subtitle={`${stats.legacyWallets} legacy`} icon={CheckCircle} color="green" />
-        <StatCard title="Orphan Addresses" value={stats.orphanCount} icon={AlertTriangle} color={stats.orphanCount > 0 ? 'amber' : 'slate'} />
-        <StatCard title="Orphan Balance" value={`$${stats.orphanBalance.toFixed(2)}`} icon={DollarSign} color={stats.orphanBalance > 0 ? 'red' : 'slate'} />
-      </div>
-
-      {/* Warning */}
-      {stats.orphanBalance > 0 && (
+      {/* Not Configured Warning */}
+      {!loading && !isConfigured && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-bold text-amber-800">Funds Need Recovery!</p>
+            <p className="font-bold text-amber-800">Wallet Not Configured</p>
             <p className="text-sm text-amber-700">
-              ${stats.orphanBalance.toFixed(2)} USDT found in {stats.orphanCount} orphan addresses. 
-              Sweep these funds to avoid loss.
+              Go to <strong>HD Wallets → Configuration</strong> to set up your Tatum API key and generate a master wallet.
             </p>
           </div>
         </div>
       )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Total Addresses" value={stats.totalAddresses} icon={Key} color="purple" />
+        <StatCard title="Active Traders" value={stats.activeAddresses} icon={CheckCircle} color="green" />
+        <StatCard title="Last Index" value={stats.lastIndex} icon={List} color="slate" />
+        <StatCard title="Orphan Addresses" value={stats.orphanCount} icon={AlertTriangle} color={stats.orphanCount > 0 ? 'amber' : 'slate'} />
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
@@ -682,58 +295,216 @@ export default function AdminWalletRecovery() {
 
       {/* Content */}
       {loading ? (
-        <div className="text-center py-12 text-slate-400">Loading...</div>
+        <div className="text-center py-12 text-slate-400">
+          <Loader className="w-8 h-8 animate-spin mx-auto mb-2" />
+          Loading...
+        </div>
       ) : (
         <>
-          {/* Wallets Tab */}
-          {activeTab === 'wallets' && (
+          {/* Wallet Tab */}
+          {activeTab === 'wallet' && (
             <div className="space-y-4">
-              {/* Global Admin Wallet Banner */}
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center">
-                    <Wallet className="w-5 h-5 text-white" />
+              {/* Main Wallet Card */}
+              <div className="bg-white rounded-xl border-2 border-purple-400 shadow-lg p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center">
+                      <Wallet className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-xl text-slate-900">Master HD Wallet</h3>
+                      <p className="text-sm text-slate-500">TRON Network (TRC20 USDT)</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold text-purple-600">SWEEP DESTINATION</p>
-                    <p className="font-mono text-sm text-purple-900">
-                      {globalAdminWallet || 'Not configured - set in HD Wallets'}
-                    </p>
+                  <span className={`px-3 py-1 rounded-lg text-sm font-bold ${
+                    isConfigured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {isConfigured ? 'CONFIGURED' : 'NOT CONFIGURED'}
+                  </span>
+                </div>
+
+                {/* XPUB */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-semibold text-slate-600">Master XPUB</p>
+                    <button onClick={() => setShowXpub(!showXpub)} className="text-sm text-purple-600 flex items-center gap-1">
+                      {showXpub ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showXpub ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-sm bg-slate-100 px-3 py-2 rounded-lg font-mono truncate">
+                      {config?.master_xpub 
+                        ? (showXpub ? config.master_xpub : '••••••••••••••••••••' + config.master_xpub.slice(-12))
+                        : 'Not configured'}
+                    </code>
+                    {config?.master_xpub && (
+                      <button onClick={() => handleCopy(config.master_xpub)} className="p-2 hover:bg-slate-100 rounded-lg">
+                        <Copy className="w-4 h-4 text-slate-400" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                {globalAdminWallet && (
-                  <a 
-                    href={`https://tronscan.org/#/address/${globalAdminWallet}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-purple-600 hover:text-purple-700"
-                  >
-                    <ExternalLink className="w-5 h-5" />
-                  </a>
-                )}
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {wallets.length === 0 ? (
-                <div className="col-span-full text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                  <Wallet className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-500 font-semibold">No wallets configured</p>
-                  <p className="text-slate-400 text-sm">Add your first HD wallet to get started</p>
+                {/* Master Address (Index 0) */}
+                <div className="mb-4">
+                  <p className="text-sm font-semibold text-slate-600 mb-1">Master Address (Index #0)</p>
+                  <div className="flex items-center gap-2">
+                    {loadingMaster ? (
+                      <div className="flex-1 bg-slate-100 px-3 py-2 rounded-lg flex items-center gap-2">
+                        <Loader className="w-4 h-4 animate-spin text-slate-400" />
+                        <span className="text-sm text-slate-400">Deriving...</span>
+                      </div>
+                    ) : masterAddress === 'API_ERROR' ? (
+                      <div className="flex-1 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+                        <span className="text-sm text-red-600">⚠️ API error - check Tatum key</span>
+                      </div>
+                    ) : masterAddress ? (
+                      <>
+                        <code className="flex-1 text-sm bg-blue-50 border border-blue-200 px-3 py-2 rounded-lg font-mono text-blue-700">
+                          {masterAddress}
+                        </code>
+                        <button onClick={() => handleCopy(masterAddress)} className="p-2 hover:bg-blue-100 rounded-lg">
+                          <Copy className="w-4 h-4 text-blue-500" />
+                        </button>
+                        <a href={`https://tronscan.org/#/address/${masterAddress}`} target="_blank" rel="noopener noreferrer"
+                          className="p-2 hover:bg-blue-100 rounded-lg">
+                          <ExternalLink className="w-4 h-4 text-blue-500" />
+                        </a>
+                      </>
+                    ) : (
+                      <span className="text-sm text-slate-400">No XPUB configured</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Admin Wallet */}
+                <div className="mb-4">
+                  <p className="text-sm font-semibold text-slate-600 mb-1">Admin Wallet (Sweep Destination)</p>
+                  <div className="flex items-center gap-2">
+                    {config?.admin_wallet ? (
+                      <>
+                        <code className="flex-1 text-sm bg-purple-50 border border-purple-200 px-3 py-2 rounded-lg font-mono text-purple-700">
+                          {config.admin_wallet}
+                        </code>
+                        <a href={`https://tronscan.org/#/address/${config.admin_wallet}`} target="_blank" rel="noopener noreferrer"
+                          className="p-2 hover:bg-purple-100 rounded-lg">
+                          <ExternalLink className="w-4 h-4 text-purple-500" />
+                        </a>
+                      </>
+                    ) : (
+                      <span className="text-sm text-amber-600">⚠️ Not configured - sweeps won't work</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Derive Tool */}
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-sm font-semibold text-slate-600 mb-2 flex items-center gap-2">
+                    <Key className="w-4 h-4" /> Derive Addresses from XPUB
+                  </p>
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="number"
+                      value={deriveFrom}
+                      onChange={e => setDeriveFrom(e.target.value)}
+                      placeholder="From"
+                      className="w-20 px-3 py-2 text-sm border rounded-lg"
+                    />
+                    <span className="text-slate-400 self-center">to</span>
+                    <input
+                      type="number"
+                      value={deriveTo}
+                      onChange={e => setDeriveTo(e.target.value)}
+                      placeholder="To"
+                      className="w-20 px-3 py-2 text-sm border rounded-lg"
+                    />
+                    <button
+                      onClick={handleDeriveAddresses}
+                      disabled={deriving || !config?.master_xpub}
+                      className="flex-1 px-4 py-2 bg-purple-600 text-white text-sm font-semibold rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {deriving ? <Loader className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                      Derive
+                    </button>
+                  </div>
+                  
+                  {derivedAddresses.length > 0 && showAddresses && (
+                    <div className="max-h-60 overflow-y-auto space-y-1 bg-green-50 border border-green-200 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-green-700 mb-2">✓ Derived from XPUB:</p>
+                      {derivedAddresses.map((addr) => (
+                        <div key={addr.index} className="flex items-center justify-between text-sm bg-white rounded px-2 py-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-600 font-bold w-8">#{addr.index}</span>
+                            <code className="font-mono text-slate-700 text-xs">{addr.address}</code>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => handleCopy(addr.address)} className="p-1 hover:bg-slate-100 rounded">
+                              <Copy className="w-3 h-3 text-slate-400" />
+                            </button>
+                            <a href={`https://tronscan.org/#/address/${addr.address}`} target="_blank" rel="noopener noreferrer"
+                              className="p-1 hover:bg-slate-100 rounded">
+                              <ExternalLink className="w-3 h-3 text-purple-500" />
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Addresses Tab */}
+          {activeTab === 'addresses' && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              {traderAddresses.length === 0 ? (
+                <div className="text-center py-12">
+                  <Key className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500 font-semibold">No addresses generated yet</p>
                 </div>
               ) : (
-                wallets.map(wallet => (
-                  <WalletCard
-                    key={wallet.id}
-                    wallet={wallet}
-                    adminWallet={globalAdminWallet}
-                    onSetCurrent={handleSetCurrent}
-                    onArchive={handleArchive}
-                    onToast={setToast}
-                    isLoading={actionLoading}
-                  />
-                ))
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600">Index</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600">Trader</th>
+                      <th className="text-left px-4 py-3 font-semibold text-slate-600">Address</th>
+                      <th className="text-center px-4 py-3 font-semibold text-slate-600">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traderAddresses.map(trader => (
+                      <tr key={trader.id} className="border-b last:border-0 hover:bg-slate-50">
+                        <td className="px-4 py-3 font-mono font-bold text-purple-600">#{trader.derivation_index}</td>
+                        <td className="px-4 py-3 font-semibold">{trader.name}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs font-mono bg-slate-100 px-2 py-1 rounded">
+                              {trader.usdt_deposit_address?.slice(0, 10)}...{trader.usdt_deposit_address?.slice(-6)}
+                            </code>
+                            <button onClick={() => handleCopy(trader.usdt_deposit_address)} className="p-1 hover:bg-slate-200 rounded">
+                              <Copy className="w-3 h-3 text-slate-400" />
+                            </button>
+                            <a href={`https://tronscan.org/#/address/${trader.usdt_deposit_address}`} target="_blank" rel="noopener noreferrer"
+                              className="p-1 hover:bg-slate-200 rounded">
+                              <ExternalLink className="w-3 h-3 text-slate-400" />
+                            </a>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            trader.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {trader.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
-              </div>
             </div>
           )}
 
@@ -751,22 +522,35 @@ export default function AdminWalletRecovery() {
                   <thead className="bg-slate-50 border-b">
                     <tr>
                       <th className="text-left px-4 py-3 font-semibold text-slate-600">Address</th>
-                      <th className="text-left px-4 py-3 font-semibold text-slate-600">Wallet</th>
                       <th className="text-center px-4 py-3 font-semibold text-slate-600">Index</th>
-                      <th className="text-right px-4 py-3 font-semibold text-slate-600">Balance</th>
                       <th className="text-left px-4 py-3 font-semibold text-slate-600">Status</th>
                       <th className="text-right px-4 py-3 font-semibold text-slate-600">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {orphanAddresses.map(address => (
-                      <OrphanAddressRow
-                        key={address.address}
-                        address={address}
-                        onSweep={handleSweep}
-                        onMarkClear={handleMarkClear}
-                        isLoading={actionLoading}
-                      />
+                    {orphanAddresses.map(addr => (
+                      <tr key={addr.address} className="border-b last:border-0 hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <code className="text-xs font-mono bg-slate-100 px-2 py-1 rounded">
+                            {addr.address?.slice(0, 10)}...{addr.address?.slice(-6)}
+                          </code>
+                        </td>
+                        <td className="px-4 py-3 text-center font-mono">{addr.derivation_index}</td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">
+                            {addr.status || 'orphan'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => handleSweep(addr)}
+                            disabled={actionLoading}
+                            className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700 disabled:opacity-50 inline-flex items-center gap-1"
+                          >
+                            <ArrowRight className="w-3 h-3" /> Sweep
+                          </button>
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -779,8 +563,8 @@ export default function AdminWalletRecovery() {
             <div className="bg-white rounded-xl border overflow-hidden">
               {recentDeposits.length === 0 ? (
                 <div className="text-center py-12">
-                  <DollarSign className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-500 font-semibold">No recent deposits</p>
+                  <IndianRupee className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500 font-semibold">No deposits yet</p>
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -800,24 +584,25 @@ export default function AdminWalletRecovery() {
                           {new Date(deposit.created_at).toLocaleString()}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">
-                          {deposit.address?.slice(0, 8)}...{deposit.address?.slice(-6)}
+                          {deposit.to_address?.slice(0, 8)}...{deposit.to_address?.slice(-6)}
                         </td>
                         <td className="px-4 py-3 text-right font-bold text-green-600">
-                          ${deposit.amount}
+                          ${deposit.usdt_amount}
                         </td>
                         <td className="px-4 py-3">
-                          <a href={`https://tronscan.org/#/transaction/${deposit.tx_hash}`} 
-                            target="_blank" rel="noopener noreferrer"
-                            className="text-xs text-purple-600 hover:underline font-mono flex items-center gap-1">
-                            {deposit.tx_hash?.slice(0, 12)}...
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          {deposit.tx_hash && (
+                            <a href={`https://tronscan.org/#/transaction/${deposit.tx_hash}`} 
+                              target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-purple-600 hover:underline font-mono flex items-center gap-1">
+                              {deposit.tx_hash.slice(0, 12)}...
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                            deposit.status === 'credited' ? 'bg-green-100 text-green-700' :
-                            deposit.status === 'swept' ? 'bg-purple-100 text-purple-700' :
-                            deposit.status === 'orphan' ? 'bg-amber-100 text-amber-700' :
+                            deposit.status === 'completed' ? 'bg-green-100 text-green-700' :
+                            deposit.status === 'pending' ? 'bg-amber-100 text-amber-700' :
                             'bg-slate-100 text-slate-600'
                           }`}>
                             {deposit.status}
@@ -831,76 +616,6 @@ export default function AdminWalletRecovery() {
             </div>
           )}
         </>
-      )}
-
-      {/* Add Wallet Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowAddModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
-            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Key className="w-5 h-5 text-purple-600" /> Add New Wallet
-            </h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Wallet Name *</label>
-                <input
-                  type="text"
-                  value={newWallet.name}
-                  onChange={e => setNewWallet({ ...newWallet, name: e.target.value })}
-                  placeholder="e.g., Main Wallet V2"
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Master XPUB *</label>
-                <textarea
-                  value={newWallet.master_xpub}
-                  onChange={e => setNewWallet({ ...newWallet, master_xpub: e.target.value })}
-                  placeholder="xpub..."
-                  rows={3}
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Admin Wallet (Sweep To)</label>
-                <input
-                  type="text"
-                  value={newWallet.admin_wallet}
-                  onChange={e => setNewWallet({ ...newWallet, admin_wallet: e.target.value })}
-                  placeholder="TRX address..."
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Tatum API Key</label>
-                <input
-                  type="password"
-                  value={newWallet.tatum_api_key}
-                  onChange={e => setNewWallet({ ...newWallet, tatum_api_key: e.target.value })}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold hover:bg-slate-200">
-                Cancel
-              </button>
-              <button onClick={handleAddWallet} disabled={actionLoading}
-                className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                {actionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                Add Wallet
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Toast */}

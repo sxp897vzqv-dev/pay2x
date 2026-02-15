@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../supabase';
 import {
   Zap, RefreshCw, AlertTriangle, CheckCircle, Clock, XCircle,
-  TrendingUp, TrendingDown, DollarSign, Activity, RotateCcw, Filter,
+  TrendingUp, TrendingDown, IndianRupee, Activity, RotateCcw, Filter,
   BarChart3, Building2, Timer, Bell, Shield, Users, MapPin, Navigation
 } from 'lucide-react';
 import Toast from '../../components/admin/Toast';
@@ -220,7 +220,7 @@ export default function AdminPayinEngine() {
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
         {[
           { key: 'dashboard', label: 'Live Dashboard', icon: Activity },
-          { key: 'upis', label: 'UPI Pool', icon: DollarSign },
+          { key: 'upis', label: 'UPI Pool', icon: IndianRupee },
           { key: 'circuits', label: 'Circuit Breaker', icon: Shield },
           { key: 'logs', label: 'Selection Logs', icon: Timer },
         ].map(tab => (
@@ -262,7 +262,7 @@ export default function AdminPayinEngine() {
             </div>
             <div className="bg-white rounded-xl border p-4">
               <div className="flex items-center gap-2 mb-1">
-                <DollarSign className="w-4 h-4 text-green-600" />
+                <IndianRupee className="w-4 h-4 text-green-600" />
                 <span className="text-xs font-semibold text-slate-500 uppercase">Volume (1h)</span>
               </div>
               <p className="text-2xl font-bold text-green-600">₹{((stats?.volume_1h || 0) / 1000).toFixed(1)}K</p>

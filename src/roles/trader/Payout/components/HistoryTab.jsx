@@ -1,7 +1,9 @@
 import React from 'react';
 import {
-  CheckCircle, DollarSign, FileText,
+  CheckCircle, IndianRupee, FileText,
 } from 'lucide-react';
+import { StatusBadge, RelativeTime } from '../../../../components/trader';
+import { formatINR } from '../../../../utils/format';
 
 /* ─── History Row ─── */
 function HistoryRow({ payout }) {
@@ -19,11 +21,11 @@ function HistoryRow({ payout }) {
             <CheckCircle className="w-3.5 h-3.5 text-green-600" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-900">₹{(payout.amount || 0).toLocaleString()}</p>
+            <p className="text-sm font-bold text-slate-900">{formatINR(payout.amount)}</p>
             <p className="text-xs text-slate-400">{timeStr}</p>
           </div>
         </div>
-        <span className="flex-shrink-0 px-2 py-0.5 bg-green-100 text-green-700 rounded-lg text-xs font-bold">DONE</span>
+        <StatusBadge status="completed" size="sm" />
       </div>
 
       {/* details row */}
@@ -96,7 +98,7 @@ export default function HistoryTab({ payouts, totalAmount }) {
         </div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-3">
           <div className="flex items-center gap-1.5 mb-1">
-            <DollarSign className="w-3.5 h-3.5 text-green-600" />
+            <IndianRupee className="w-3.5 h-3.5 text-green-600" />
             <p className="text-xs font-semibold text-green-600 uppercase">Total</p>
           </div>
           <p className="text-xl font-bold text-green-800">₹{totalAmount.toLocaleString()}</p>

@@ -5,7 +5,7 @@ import GlobalSearch from '../../components/admin/GlobalSearch';
 import NotificationCenter from '../../components/admin/NotificationCenter';
 import {
   LayoutDashboard, Users, Store, UserCircle, TrendingUp, TrendingDown,
-  AlertCircle, Database, FileText, DollarSign, LogOut, Menu, X, Shield,
+  AlertCircle, Database, FileText, IndianRupee, LogOut, Menu, X, Shield,
   ChevronDown, ChevronRight, Settings, Bell, Cpu, Search, Wallet, 
   RefreshCw, BarChart3, FileCheck, Activity, BookOpen, Bitcoin, History,
 } from 'lucide-react';
@@ -115,7 +115,7 @@ const navGroups = [
       { to: '/admin/wallet-recovery', icon: Shield, label: 'Wallet Recovery', shortLabel: 'Recovery' },
       { to: '/admin/settlements',  icon: Wallet,     label: 'Settlements',  shortLabel: 'Settle' },
       { to: '/admin/refunds',      icon: RefreshCw,  label: 'Refunds',      shortLabel: 'Refunds' },
-      { to: '/admin/commission',   icon: DollarSign, label: 'Commission',   shortLabel: 'Comm.' },
+      { to: '/admin/commission',   icon: IndianRupee, label: 'Commission',   shortLabel: 'Comm.' },
     ],
   },
   {
@@ -135,7 +135,7 @@ const navGroups = [
       { to: '/admin/security-status', icon: Shield, label: 'Security Status', shortLabel: 'Status' },
       { to: '/admin/alerts',          icon: Bell,   label: 'Alerts',          shortLabel: 'Alerts' },
       { to: '/admin/api-monitoring',  icon: Activity, label: 'API Monitoring',  shortLabel: 'API' },
-      { to: '/admin/platform-earnings', icon: DollarSign, label: 'Platform Earnings', shortLabel: 'Earnings' },
+      { to: '/admin/platform-earnings', icon: IndianRupee, label: 'Platform Earnings', shortLabel: 'Earnings' },
       { to: '/admin/affiliates', icon: Users, label: 'Affiliates', shortLabel: 'Affiliates' },
     ],
   },

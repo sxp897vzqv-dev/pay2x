@@ -108,7 +108,13 @@ export default function MerchantPayout() {
 
   const filtered = useMemo(() => {
     let r = payouts;
-    if (statusFilter !== "all") r = r.filter(p => p.status === statusFilter);
+    if (statusFilter !== "all") {
+      if (statusFilter === "failed") {
+        r = r.filter(p => p.status === 'failed' || p.status === 'cancelled' || p.status === 'rejected');
+      } else {
+        r = r.filter(p => p.status === statusFilter);
+      }
+    }
     if (debouncedSearch) {
       const s = debouncedSearch.toLowerCase();
       r = r.filter(p => 
@@ -125,61 +131,51 @@ export default function MerchantPayout() {
   const stats = useMemo(() => ({
     total: payouts.length,
     pending: payouts.filter(p => p.status === 'pending').length,
-    queued: payouts.filter(p => p.status === 'queued').length,
+    assigned: payouts.filter(p => p.status === 'assigned').length,
     processing: payouts.filter(p => p.status === 'processing').length,
     completed: payouts.filter(p => p.status === 'completed').length,
-    failed: payouts.filter(p => p.status === 'failed').length,
+    failed: payouts.filter(p => p.status === 'failed' || p.status === 'cancelled' || p.status === 'rejected').length,
   }), [payouts]);
 
   const handleCreatePayout = async (formData) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!merchantId) {
+      setToast({ type: 'error', message: 'Error: Merchant not loaded' });
+      return;
+    }
 
     const amount = Number(formData.amount);
     
-    // Get merchant info with rates
-    const { data: merchant } = await supabase
-      .from('merchants')
-      .select('id, available_balance, payout_rate')
-      .eq('profile_id', user.id)
-      .single();
-    
-    if (!merchant) {
-      setToast({ type: 'error', message: 'Error: Could not fetch merchant data' });
+    // Validate amount limits (no balance check - merchants can go negative)
+    if (amount < 100) {
+      setToast({ type: 'error', message: 'Minimum amount is ₹100' });
+      return;
+    }
+    if (amount > 200000) {
+      setToast({ type: 'error', message: 'Maximum amount is ₹2,00,000' });
       return;
     }
     
-    const rate = merchant.payout_rate || 2;
+    const rate = payoutRate || 2;
     const payoutFee = Math.round((amount * rate) / 100);
-    const totalRequired = amount + payoutFee;
+    const totalDeduct = amount + payoutFee;
     
-    // Check balance
-    if ((merchant.available_balance || 0) < totalRequired) {
-      setToast({ 
-        type: 'error', 
-        message: `Insufficient balance! Required: ₹${totalRequired.toLocaleString()} (incl. ₹${payoutFee.toLocaleString()} fee)` 
-      });
-      return;
-    }
-    
-    // Reserve amount (deduct from available)
-    const { error: reserveError } = await supabase
+    // Deduct from balance (can go negative - merchant settles later)
+    const newBalance = availableBalance - totalDeduct;
+    const { error: updateError } = await supabase
       .from('merchants')
-      .update({ 
-        available_balance: (merchant.available_balance || 0) - totalRequired,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', merchant.id);
+      .update({ available_balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('id', merchantId);
     
-    if (reserveError) {
-      setToast({ type: 'error', message: 'Error reserving balance: ' + reserveError.message });
-      return;
+    if (updateError) {
+      console.error('Balance update error:', updateError);
+      // Continue anyway
     }
     
     // Create payout
     const { error: payoutError } = await supabase.from('payouts').insert({
-      merchant_id: merchant.id,
+      merchant_id: merchantId,
       payout_id: 'PO' + Date.now(),
+      txn_id: 'PO' + Date.now(),
       beneficiary_name: formData.beneficiaryName,
       payment_mode: formData.paymentMode,
       upi_id: formData.paymentMode === 'upi' ? formData.upiId : null,
@@ -187,35 +183,51 @@ export default function MerchantPayout() {
       ifsc_code: formData.paymentMode === 'bank' ? formData.ifscCode : null,
       amount: amount,
       merchant_fee: payoutFee,
+      commission: payoutFee,
       purpose: formData.purpose,
       status: 'pending',
     });
     
     if (payoutError) {
-      // Rollback balance reservation
-      await supabase
-        .from('merchants')
-        .update({ available_balance: merchant.available_balance })
-        .eq('id', merchant.id);
-      setToast({ type: 'error', message: 'Error creating payout: ' + payoutError.message });
+      // Rollback balance
+      await supabase.from('merchants').update({ available_balance: availableBalance }).eq('id', merchantId);
+      setToast({ type: 'error', message: 'Error: ' + payoutError.message });
       return;
     }
     
-    // Update local balance
-    setAvailableBalance((merchant.available_balance || 0) - totalRequired);
+    setAvailableBalance(newBalance);
     setShowModal(false);
-    setToast({ type: 'success', message: `Payout of ₹${amount.toLocaleString()} created successfully!` });
+    setToast({ type: 'success', message: `Payout of ₹${amount.toLocaleString()} created! Fee: ₹${payoutFee.toLocaleString()}` });
   };
 
   const handleCancelPayout = async (payoutId) => {
-    if (!confirm('Cancel this payout? This cannot be undone.')) return;
+    if (!confirm('Cancel this payout? Amount will be refunded to your balance.')) return;
     
     try {
-      await supabase.from('payouts').update({
-        status: 'failed',
-        failure_reason: 'Cancelled by merchant',
-      }).eq('id', payoutId);
-      setToast({ type: 'info', message: 'Payout cancelled' });
+      // Use RPC function for atomic cancel + refund
+      const { data, error } = await supabase.rpc('cancel_merchant_payout', {
+        p_payout_id: payoutId
+      });
+      
+      if (error) {
+        setToast({ type: 'error', message: 'Error: ' + error.message });
+        return;
+      }
+      
+      if (!data?.success) {
+        setToast({ type: 'error', message: data?.error || 'Failed to cancel payout' });
+        return;
+      }
+      
+      // Update local balance
+      if (data.new_balance !== undefined) {
+        setAvailableBalance(data.new_balance);
+      }
+      
+      // Refresh payouts list
+      fetchData(true);
+      
+      setToast({ type: 'success', message: data.message || `Payout cancelled. ₹${data.refunded?.toLocaleString()} refunded.` });
     } catch (e) {
       setToast({ type: 'error', message: 'Error: ' + e.message });
     }
@@ -319,7 +331,8 @@ export default function MerchantPayout() {
         {[
           { label: 'All', value: stats.total, color: 'bg-slate-100 text-slate-700', key: 'all' },
           { label: 'Pending', value: stats.pending, color: 'bg-yellow-100 text-yellow-700', key: 'pending' },
-          { label: 'Processing', value: stats.processing, color: 'bg-blue-100 text-blue-700', key: 'processing' },
+          { label: 'Assigned', value: stats.assigned, color: 'bg-blue-100 text-blue-700', key: 'assigned' },
+          { label: 'Processing', value: stats.processing, color: 'bg-amber-100 text-amber-700', key: 'processing' },
           { label: 'Completed', value: stats.completed, color: 'bg-green-100 text-green-700', key: 'completed' },
           { label: 'Failed', value: stats.failed, color: 'bg-red-100 text-red-700', key: 'failed' },
         ].map(pill => (

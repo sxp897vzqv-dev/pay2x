@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import { 
-  DollarSign, Search, Filter, Download, RefreshCw, User, Calendar, 
+  IndianRupee, Search, Filter, Download, RefreshCw, User, Calendar, 
   TrendingUp, TrendingDown, CheckCircle, AlertTriangle, ChevronDown, 
   ChevronUp, AlertCircle, Eye, EyeOff
 } from 'lucide-react';
@@ -421,7 +421,7 @@ export default function AdminCommission() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <div className="p-2 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl shadow-sm">
-              <DollarSign className="w-5 h-5 text-white" />
+              <IndianRupee className="w-5 h-5 text-white" />
             </div>
             Commission Audit
           </h1>
@@ -469,7 +469,7 @@ export default function AdminCommission() {
           value={`₹${totals.totalActual.toLocaleString()}`} 
           color="green" 
           subtitle="Sum of overallCommission"
-          icon={DollarSign}
+          icon={IndianRupee}
         />
         <StatCard 
           title="Expected Commission" 
@@ -614,7 +614,7 @@ export default function AdminCommission() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
-          <DollarSign className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+          <IndianRupee className="w-12 h-12 text-slate-200 mx-auto mb-3" />
           <p className="text-slate-500 font-medium">No traders found</p>
         </div>
       )}

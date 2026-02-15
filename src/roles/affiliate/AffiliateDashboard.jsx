@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useOutletContext, Link } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { 
-  Users, TrendingUp, DollarSign, Coins,
+  Users, TrendingUp, IndianRupee, Coins,
   ArrowUpRight, ArrowDownRight, ChevronRight, Sparkles
 } from 'lucide-react';
 
@@ -143,7 +143,7 @@ export default function AffiliateDashboard() {
               <p className="text-xs text-slate-500 mt-1">Lifetime</p>
             </div>
             <div className="p-2.5 md:p-3 bg-blue-100 rounded-xl">
-              <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
+              <IndianRupee className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
             </div>
           </div>
         </div>

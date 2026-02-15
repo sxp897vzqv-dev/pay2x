@@ -1,8 +1,9 @@
 import React from 'react';
 import {
-  CreditCard, DollarSign, CheckCircle, AlertCircle,
+  CreditCard, IndianRupee, CheckCircle, AlertCircle,
 } from 'lucide-react';
 import PayoutCard from './PayoutCard';
+import { formatINR } from '../../../../utils/format';
 
 export default function AssignedTab({ payouts, totalAmount, onProcess, onCancel, processing }) {
   if (payouts.length === 0) {
@@ -30,7 +31,7 @@ export default function AssignedTab({ payouts, totalAmount, onProcess, onCancel,
         </div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-3">
           <div className="flex items-center gap-1.5 mb-1">
-            <DollarSign className="w-3.5 h-3.5 text-green-600" />
+            <IndianRupee className="w-3.5 h-3.5 text-green-600" />
             <p className="text-xs font-semibold text-green-600 uppercase">Total</p>
           </div>
           <p className="text-xl font-bold text-green-800">₹{totalAmount.toLocaleString()}</p>

@@ -1,19 +1,31 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { corsHeaders } from '../_shared/cors.ts'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 /**
  * POLL USDT DEPOSITS
- * Backup polling in case webhook fails
- * Should be called by cron every 2 minutes
+ * Simple balance-based detection:
+ * - Check current USDT balance via Tatum
+ * - Compare with last_usdt_balance in DB
+ * - Credit the difference
+ * 
+ * Fee: 5 USDT if deposit < 1000 USDT
  */
+
+const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+const SMALL_DEPOSIT_FEE_USDT = 5
+const SMALL_DEPOSIT_THRESHOLD_USDT = 1000
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  console.log('🔍 Polling for missed deposits...')
+  console.log('🔍 Polling for USDT deposits...')
 
   try {
     const supabase = createClient(
@@ -21,117 +33,152 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Get Tatum config
-    const { data: config, error: configError } = await supabase
+    // Get config
+    const { data: config } = await supabase
       .from('tatum_config')
       .select('tatum_api_key, default_usdt_rate')
       .eq('id', 'main')
       .single()
 
-    if (configError || !config?.tatum_api_key) {
-      console.log('❌ Tatum config not found')
+    if (!config?.tatum_api_key) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Config not found' }),
+        JSON.stringify({ success: false, error: 'No Tatum API key' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Get all trader addresses
-    const { data: addressMappings, error: mappingsError } = await supabase
+    // Get addresses
+    const { data: addresses } = await supabase
       .from('address_mapping')
-      .select('address, trader_id')
+      .select('address, trader_id, last_usdt_balance')
 
-    if (mappingsError || !addressMappings || addressMappings.length === 0) {
-      console.log('✅ No addresses to poll')
+    if (!addresses || addresses.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, message: 'No addresses to poll', found: 0 }),
+        JSON.stringify({ success: true, message: 'No addresses', found: 0 }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`📋 Checking ${addressMappings.length} addresses`)
-
     const usdtRate = config.default_usdt_rate || 92
     let foundDeposits = 0
+    const results: any[] = []
 
-    for (const { address, trader_id } of addressMappings) {
+    for (const addr of addresses) {
       try {
-        // Check last 10 transactions for this address
-        const txResponse = await fetch(
-          `https://api.tatum.io/v3/tron/transaction/account/${address}?limit=10`,
-          {
-            headers: { 'x-api-key': config.tatum_api_key },
-          }
+        // Get account from Tatum
+        const accountResp = await fetch(
+          `https://api.tatum.io/v3/tron/account/${addr.address}`,
+          { headers: { 'x-api-key': config.tatum_api_key } }
         )
 
-        if (!txResponse.ok) {
-          console.error(`Failed to fetch txs for ${address}`)
+        if (!accountResp.ok) {
+          console.log(`⚠️ Account not active: ${addr.address}`)
+          results.push({ address: addr.address, status: 'inactive' })
           continue
         }
 
-        const transactions = await txResponse.json()
+        const account = await accountResp.json()
+        
+        // Find USDT balance
+        let currentUsdt = 0
+        if (account.trc20 && Array.isArray(account.trc20)) {
+          for (const token of account.trc20) {
+            if (token[USDT_CONTRACT]) {
+              currentUsdt = parseInt(token[USDT_CONTRACT]) / 1000000
+              break
+            }
+          }
+        }
 
-        if (!Array.isArray(transactions)) continue
+        const lastKnown = parseFloat(addr.last_usdt_balance) || 0
+        const newDeposit = currentUsdt - lastKnown
 
-        for (const tx of transactions) {
-          // Skip if not USDT to this address
-          if (tx.to !== address || tx.tokenInfo?.symbol !== 'USDT') continue
+        console.log(`💰 ${addr.address}: current=${currentUsdt}, last=${lastKnown}, diff=${newDeposit}`)
 
-          // Check if already processed
-          const { data: existing } = await supabase
-            .from('crypto_transactions')
-            .select('id')
-            .eq('tx_hash', tx.txID)
-            .single()
+        if (newDeposit > 0) {
+          console.log(`🎉 New deposit detected: ${newDeposit} USDT`)
 
-          if (existing) continue // Already processed
+          // Apply fee if < 1000 USDT
+          let creditAmount = newDeposit
+          let feeAmount = 0
+          
+          if (newDeposit < SMALL_DEPOSIT_THRESHOLD_USDT) {
+            feeAmount = Math.min(SMALL_DEPOSIT_FEE_USDT, newDeposit) // Don't fee more than deposit
+            creditAmount = newDeposit - feeAmount
+          }
 
-          console.log(`💰 Found missed deposit: ${tx.txID}`)
+          if (creditAmount <= 0) {
+            console.log(`⚠️ Deposit too small after fee`)
+            results.push({ address: addr.address, status: 'too_small', deposit: newDeposit, fee: feeAmount })
+            continue
+          }
 
-          // Process the deposit
-          const amount = parseFloat(tx.value) / 1000000 // USDT has 6 decimals
+          const inrAmount = Math.round(creditAmount * usdtRate)
+          
+          // Generate tx reference
+          const txRef = `BAL_${Date.now()}_${addr.address.slice(-6)}`
 
+          // Credit trader (with NET amount after fee, GROSS for sweep)
           const { data: result, error: creditError } = await supabase
             .rpc('credit_trader_on_usdt_deposit', {
-              p_trader_id: trader_id,
-              p_usdt_amount: amount,
+              p_trader_id: addr.trader_id,
+              p_usdt_amount: creditAmount,  // Net amount (after fee) for balance
               p_usdt_rate: usdtRate,
-              p_tx_hash: tx.txID,
-              p_from_address: address
+              p_tx_hash: txRef,
+              p_from_address: addr.address,
+              p_gross_amount: newDeposit    // Gross amount for sweep
             })
 
           if (creditError) {
-            console.error('Credit error:', creditError)
+            console.error('❌ Credit error:', creditError)
+            results.push({ address: addr.address, status: 'credit_error', error: creditError.message })
             continue
           }
 
           if (result?.success) {
-            console.log(`✅ Polled deposit processed: ₹${result.inr_amount}`)
+            console.log(`✅ Credited ₹${inrAmount}`)
+
+            // Update last known balance
+            await supabase
+              .from('address_mapping')
+              .update({ last_usdt_balance: currentUsdt })
+              .eq('address', addr.address)
+
             foundDeposits++
+            results.push({
+              address: addr.address,
+              status: 'credited',
+              grossUsdt: newDeposit,
+              feeUsdt: feeAmount,
+              netUsdt: creditAmount,
+              inr: inrAmount,
+              newBalance: result.new_balance
+            })
+          } else {
+            console.log(`⚠️ Credit failed:`, result)
+            results.push({ address: addr.address, status: 'credit_failed', result })
           }
+        } else {
+          results.push({ address: addr.address, status: 'no_new', balance: currentUsdt })
         }
 
-        // Rate limit - don't hammer Tatum API
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise(r => setTimeout(r, 100))
 
       } catch (error) {
-        console.error(`Error checking ${address}:`, error.message)
+        console.error(`Error: ${error.message}`)
+        results.push({ address: addr.address, status: 'error', error: error.message })
       }
     }
 
-    console.log(`✅ Polling complete. Found ${foundDeposits} missed deposits`)
+    console.log(`✅ Done. Found ${foundDeposits} deposits`)
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        checked: addressMappings.length,
-        found: foundDeposits
-      }),
+      JSON.stringify({ success: true, checked: addresses.length, found: foundDeposits, results }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
-    console.error('❌ Error in polling:', error)
+    console.error('❌ Error:', error)
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

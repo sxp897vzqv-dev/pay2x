@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import {
   CheckCircle, XCircle, Clock, CreditCard, Building2, User, Hash,
-  DollarSign, AlertCircle, X,
+  IndianRupee, AlertCircle, X,
 } from 'lucide-react';
+import { StatusBadge } from '../../../../components/trader';
+import { formatINR } from '../../../../utils/format';
 
 /* ─── Cancel Bottom Sheet ─── */
 function CancelSheet({ payout, onClose, onCancel }) {
@@ -22,7 +24,7 @@ function CancelSheet({ payout, onClose, onCancel }) {
         <div className="px-4 pt-3">
           <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 flex items-center justify-between">
             <p className="text-xs text-slate-500">Amount</p>
-            <p className="text-sm font-bold text-slate-900">₹{(payout.amount || 0).toLocaleString()}</p>
+            <p className="text-sm font-bold text-slate-900">{formatINR(payout.amount)}</p>
           </div>
         </div>
         {/* body */}
@@ -53,7 +55,7 @@ export default function PayoutCard({ payout, onProcess, onCancel, isProcessing }
 
   return (
     <>
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-slate-300">
         <div className="h-1 bg-blue-500" />
         <div className="p-3 space-y-3">
 
@@ -65,9 +67,7 @@ export default function PayoutCard({ payout, onProcess, onCancel, isProcessing }
                 {payout.id.slice(-10)}
               </p>
             </div>
-            <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold">
-              <Clock className="w-3 h-3" /> PENDING
-            </span>
+            <StatusBadge status="assigned" size="sm" />
           </div>
 
           {/* info grid 2×2 */}
@@ -101,8 +101,8 @@ export default function PayoutCard({ payout, onProcess, onCancel, isProcessing }
 
             {/* amount cell */}
             <div className="bg-green-50 rounded-lg p-2.5 border border-green-200 col-span-2 sm:col-span-1">
-              <div className="flex items-center gap-1 mb-1"><DollarSign className="w-3 h-3 text-green-600" /><p className="text-xs font-bold text-slate-600 uppercase">Amount</p></div>
-              <p className="text-base font-bold text-green-700">₹{(payout.amount || 0).toLocaleString()}</p>
+              <div className="flex items-center gap-1 mb-1"><IndianRupee className="w-3 h-3 text-green-600" /><p className="text-xs font-bold text-slate-600 uppercase">Amount</p></div>
+              <p className="text-base font-bold text-green-700">{formatINR(payout.amount)}</p>
             </div>
           </div>
 

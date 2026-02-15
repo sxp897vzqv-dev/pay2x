@@ -123,23 +123,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // 6. Check balance
+    // 6. Calculate fee (no balance check - merchants can create payouts up to 2 lakhs without balance)
     const payoutRate = merchant.payout_rate || 2; // Default 2%
     const fee = Math.round(amountNum * payoutRate / 100);
     const totalRequired = amountNum + fee;
 
-    if ((merchant.available_balance || 0) < totalRequired) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { 
-            code: 'INSUFFICIENT_BALANCE', 
-            message: `Insufficient balance. Required: ₹${totalRequired}, Available: ₹${merchant.available_balance || 0}` 
-          } 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    // Deduct from balance if available, otherwise allow negative/credit
+    // Merchants settle later - traders fulfill payouts from their own balance
 
     // 7. Check duplicate orderId (stored in metadata)
     if (orderId) {
@@ -161,18 +151,16 @@ serve(async (req: Request) => {
       }
     }
 
-    // 8. Deduct balance
+    // 8. Deduct balance (can go negative - merchant settles later)
+    const newBalance = (merchant.available_balance || 0) - totalRequired;
     const { error: deductError } = await supabase
       .from('merchants')
-      .update({ available_balance: (merchant.available_balance || 0) - totalRequired })
+      .update({ available_balance: newBalance })
       .eq('id', merchant.id);
 
     if (deductError) {
       console.error('Balance deduction error:', deductError);
-      return new Response(
-        JSON.stringify({ success: false, error: { code: 'BALANCE_ERROR', message: 'Failed to deduct balance' } }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      // Continue anyway - payout creation is more important
     }
 
     // 9. Generate payout ID

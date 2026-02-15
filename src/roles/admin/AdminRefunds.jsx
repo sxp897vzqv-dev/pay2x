@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getRefunds, processRefund, getChargebacks, updateChargeback } from '../../utils/enterprise';
-import { RefreshCw, DollarSign, AlertTriangle, Clock, CheckCircle, XCircle, FileText, Search } from 'lucide-react';
+import { RefreshCw, IndianRupee, AlertTriangle, Clock, CheckCircle, XCircle, FileText, Search } from 'lucide-react';
 
 const REFUND_STATUS = {
   pending: { color: 'yellow', label: 'Pending' },
@@ -142,7 +142,7 @@ function RefundsTab({ refunds, onSelect, onRefresh, formatCurrency }) {
   if (refunds.length === 0) {
     return (
       <div className="bg-[#1a1a2e] rounded-xl border border-white/5 p-8 text-center">
-        <DollarSign className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+        <IndianRupee className="w-12 h-12 text-gray-600 mx-auto mb-3" />
         <p className="text-gray-400">No refund requests</p>
       </div>
     );

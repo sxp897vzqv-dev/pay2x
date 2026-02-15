@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../../supabase';
 import {
   RefreshCw, AlertCircle, X, User, Mail, Phone, Key,
-  DollarSign, Shield, MessageCircle, Wallet, Lock, UserPlus, Users,
+  IndianRupee, Shield, MessageCircle, Wallet, Lock, UserPlus, Users,
 } from 'lucide-react';
 
 export default function TraderModal({ trader, onClose, onSave }) {
@@ -230,7 +230,7 @@ export default function TraderModal({ trader, onClose, onSave }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <DollarSign className="w-3.5 h-3.5 text-green-500" /> Payin Rate (%)
+                  <IndianRupee className="w-3.5 h-3.5 text-green-500" /> Payin Rate (%)
                 </label>
                 <input
                   type="number"
@@ -245,7 +245,7 @@ export default function TraderModal({ trader, onClose, onSave }) {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <DollarSign className="w-3.5 h-3.5 text-blue-500" /> Payout Rate (%)
+                  <IndianRupee className="w-3.5 h-3.5 text-blue-500" /> Payout Rate (%)
                 </label>
                 <input
                   type="number"

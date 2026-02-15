@@ -116,7 +116,7 @@ export const adminNavigation = {
       items: [
         { to: '/admin/logs', label: 'Logs', icon: 'FileText' },
         { to: '/admin/review-queue', label: 'Review Queue', icon: 'ClipboardCheck' },
-        { to: '/admin/commission', label: 'Commission', icon: 'DollarSign' },
+        { to: '/admin/commission', label: 'Commission', icon: 'IndianRupee' },
       ],
     },
   ],

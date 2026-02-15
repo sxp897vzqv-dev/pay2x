@@ -7,7 +7,7 @@ import { TwoFactorActions } from '../../../hooks/useTwoFactor';
 import {
   Users, Search, Filter, Plus, RefreshCw, Eye, CheckCircle, AlertCircle,
   Wallet, Phone, Mail, Download, UserPlus, ToggleLeft, ToggleRight, X,
-  User, Lock, DollarSign, Shield, MessageCircle, Key, Copy, MoreVertical,
+  User, Lock, IndianRupee, Shield, MessageCircle, Key, Copy, MoreVertical,
   Trash2, Edit, EyeOff,
 } from 'lucide-react';
 import { logDataDeleted } from '../../../utils/auditLogger';

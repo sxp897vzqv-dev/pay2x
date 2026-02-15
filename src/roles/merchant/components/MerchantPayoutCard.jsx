@@ -5,12 +5,19 @@ import {
 } from 'lucide-react';
 
 export default function PayoutCard({ payout, onCancel, isNew }) {
+  // Handle column name variations (DB has both old and new names)
+  const beneficiaryName = payout.beneficiary_name || payout.account_name || 'N/A';
+  const ifscCode = payout.ifsc_code || payout.ifsc || 'N/A';
+  const paymentMode = payout.payment_mode || (payout.upi_id ? 'upi' : 'bank');
+  
   const statusColors = {
     pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: Clock },
-    queued: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: Clock },
+    assigned: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: User },
     processing: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: RefreshCw },
     completed: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: CheckCircle },
     failed: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
+    cancelled: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700', icon: Ban },
+    rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
   };
 
   const status = statusColors[payout.status] || statusColors.pending;
@@ -49,7 +56,7 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
               <User className="w-3 h-3 text-purple-600" />
               <p className="text-xs font-bold text-slate-400 uppercase">Beneficiary</p>
             </div>
-            <p className="text-xs font-bold text-slate-800 truncate">{payout.beneficiary_name || 'N/A'}</p>
+            <p className="text-xs font-bold text-slate-800 truncate">{beneficiaryName}</p>
           </div>
 
           <div className="bg-blue-50 rounded-lg p-2.5 border border-blue-200">
@@ -60,7 +67,7 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
             <p className="text-base font-bold text-blue-700">₹{payout.amount?.toLocaleString()}</p>
           </div>
 
-          {payout.payment_mode === 'upi' ? (
+          {paymentMode === 'upi' ? (
             <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100 col-span-2">
               <div className="flex items-center gap-1 mb-1">
                 <CreditCard className="w-3 h-3 text-green-600" />
@@ -87,7 +94,7 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
                   <p className="text-xs font-bold text-slate-400 uppercase">IFSC</p>
                 </div>
                 <p className="text-xs font-semibold text-slate-800" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {payout.ifsc_code || 'N/A'}
+                  {ifscCode}
                 </p>
               </div>
             </>
@@ -146,8 +153,8 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
           )}
         </div>
 
-        {/* Cancel button for pending/queued payouts */}
-        {(payout.status === 'pending' || payout.status === 'queued') && onCancel && (
+        {/* Cancel button for pending/assigned payouts */}
+        {(payout.status === 'pending' || payout.status === 'assigned') && onCancel && (
           <button
             onClick={() => onCancel(payout.id)}
             className="w-full py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-100 flex items-center justify-center gap-1"

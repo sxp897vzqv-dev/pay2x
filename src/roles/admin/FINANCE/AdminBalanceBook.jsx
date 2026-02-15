@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../../supabase';
 import {
-  BookOpen, TrendingUp, TrendingDown, DollarSign, Search, Filter,
+  BookOpen, TrendingUp, TrendingDown, IndianRupee, Search, Filter,
   ChevronDown, ChevronRight, Calendar, Download, RefreshCw, Plus,
   ArrowUpRight, ArrowDownRight, Building2, User, Wallet, Eye,
   FileText, PieChart, BarChart3, X, Check, AlertCircle, Shield,
@@ -201,7 +201,7 @@ export default function AdminBalanceBook() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard title="Total Revenue" value={summary.totalRevenue} icon={TrendingUp} color="green" />
         <SummaryCard title="Total Expenses" value={summary.totalExpenses} icon={TrendingDown} color="red" />
-        <SummaryCard title="Net Profit" value={summary.netProfit} icon={DollarSign} color={summary.netProfit >= 0 ? 'blue' : 'red'} />
+        <SummaryCard title="Net Profit" value={summary.netProfit} icon={IndianRupee} color={summary.netProfit >= 0 ? 'blue' : 'red'} />
         <SummaryCard title="Journal Entries" value={journalEntries.length} icon={FileText} color="purple" isCount />
       </div>
 
@@ -477,8 +477,8 @@ function ChartOfAccountsTab({ accounts, onViewAccount }) {
     asset: { label: 'Assets', color: 'blue', icon: TrendingUp },
     liability: { label: 'Liabilities', color: 'orange', icon: TrendingDown },
     equity: { label: 'Equity', color: 'purple', icon: Wallet },
-    revenue: { label: 'Revenue', color: 'green', icon: DollarSign },
-    expense: { label: 'Expenses', color: 'red', icon: DollarSign },
+    revenue: { label: 'Revenue', color: 'green', icon: IndianRupee },
+    expense: { label: 'Expenses', color: 'red', icon: IndianRupee },
   };
 
   return (

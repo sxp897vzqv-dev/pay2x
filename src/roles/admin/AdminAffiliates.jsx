@@ -3,7 +3,7 @@ import { supabase } from '../../supabase';
 import { createAffiliate } from '../../supabaseAdmin';
 import { 
   Users, Plus, Search, Filter, MoreVertical, Eye, Edit2, 
-  Ban, CheckCircle, TrendingUp, DollarSign, Calendar,
+  Ban, CheckCircle, TrendingUp, IndianRupee, Calendar,
   CreditCard, UserPlus, X, Save, Building, Phone, Mail
 } from 'lucide-react';
 
@@ -311,7 +311,7 @@ export default function AdminAffiliates() {
         <div className="bg-white rounded-xl p-4 shadow-sm border">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-orange-100 rounded-lg">
-              <DollarSign size={20} className="text-orange-600" />
+              <IndianRupee size={20} className="text-orange-600" />
             </div>
             <div>
               <p className="text-sm text-gray-500">Pending Settlement</p>

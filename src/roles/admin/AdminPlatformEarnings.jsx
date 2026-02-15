@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
 import {
-  DollarSign, TrendingUp, TrendingDown, Calendar,
+  IndianRupee, TrendingUp, TrendingDown, Calendar,
   RefreshCw, Download, PieChart, BarChart3
 } from 'lucide-react';
 
@@ -125,7 +125,7 @@ export default function AdminPlatformEarnings() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <div className="p-2 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl shadow-sm">
-              <DollarSign className="w-5 h-5 text-white" />
+              <IndianRupee className="w-5 h-5 text-white" />
             </div>
             Platform Earnings
           </h1>
@@ -157,7 +157,7 @@ export default function AdminPlatformEarnings() {
           title="Total Profit"
           value={`₹${stats.totalProfit.toLocaleString()}`}
           subtitle={`${stats.transactionCount} transactions`}
-          icon={DollarSign}
+          icon={IndianRupee}
           color="green"
         />
         <StatCard

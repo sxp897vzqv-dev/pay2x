@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase';
 import {
-  CheckCircle, XCircle, Clock, FileText, Video, User, DollarSign,
+  CheckCircle, XCircle, Clock, FileText, Video, User, IndianRupee,
   AlertTriangle, Eye, RefreshCw, Filter, ChevronDown, ExternalLink
 } from 'lucide-react';
 import Toast from '../../components/admin/Toast';
@@ -220,7 +220,7 @@ export default function AdminPayoutVerification() {
                   </div>
                   <div className="flex items-center gap-4 text-sm text-slate-500">
                     <span className="flex items-center gap-1">
-                      <DollarSign className="w-3.5 h-3.5" />
+                      <IndianRupee className="w-3.5 h-3.5" />
                       ₹{(req.assigned_amount || 0).toLocaleString()}
                     </span>
                     <span>{req.completedPayoutCount} payouts</span>

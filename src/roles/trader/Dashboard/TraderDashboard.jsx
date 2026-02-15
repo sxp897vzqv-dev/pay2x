@@ -2,10 +2,12 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../supabase';
 import {
-  TrendingUp, TrendingDown, DollarSign, Wallet, Activity, RefreshCw,
+  TrendingUp, TrendingDown, IndianRupee, Wallet, Activity, RefreshCw,
   Calendar, ArrowRight, AlertTriangle, AlertCircle, XCircle, CheckCircle, Clock,
 } from 'lucide-react';
 import StatCard from '../../../components/admin/StatCard';
+import { SkeletonStats, RelativeTime } from '../../../components/trader';
+import { formatINR } from '../../../utils/format';
 
 /* ─── Alert Card ─── */
 const AlertCard = ({ alert }) => {
@@ -104,10 +106,12 @@ function getDateRange(preset) {
 export default function TraderDashboard() {
   const [traderId, setTraderId] = useState(null);
   const [stats, setStats] = useState({
-    payins: 0, payouts: 0, commission: 0,
-    overallCommission: 0, balance: 0, securityHold: 0,
-    commissionBalance: 0, lifetimeEarnings: 0, // New fields
-    pendingPayins: 0, pendingPayouts: 0, pendingDisputes: 0,
+    payins: 0, payouts: 0, 
+    payinCommission: 0, payoutCommission: 0, pendingCommission: 0, 
+    overallCommission: 0, lifetimeCommission: 0,
+    balance: 0, securityHold: 0,
+    commissionBalance: 0, lifetimeEarnings: 0,
+    pendingPayins: 0, pendingPayoutsCount: 0, pendingDisputes: 0,
   });
   const [alerts, setAlerts] = useState([]);
   const [recentTx, setRecentTx] = useState([]);
@@ -208,10 +212,13 @@ export default function TraderDashboard() {
         toDate = range.to;
       }
 
-      const [piCRes, piPRes, poCRes, poPRes, disputesRes, recentPayins, recentPayouts] = await Promise.all([
+      const [piCRes, piPRes, poVerifiedRes, poPendingRes, poPRes, disputesRes, recentPayins, recentPayouts] = await Promise.all([
         supabase.from('payins').select('amount,commission').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', fromDate).lte('completed_at', toDate),
         supabase.from('payins').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).eq('status', 'pending'),
-        supabase.from('payouts').select('amount').eq('trader_id', trader.id).eq('status', 'completed').gte('completed_at', fromDate).lte('completed_at', toDate),
+        // Verified payouts (commission already credited)
+        supabase.from('payouts').select('amount,commission').eq('trader_id', trader.id).eq('status', 'completed').eq('verification_status', 'verified').gte('completed_at', fromDate).lte('completed_at', toDate),
+        // Pending verification payouts (commission not yet credited) - includes NULL and non-verified
+        supabase.from('payouts').select('amount,commission').eq('trader_id', trader.id).eq('status', 'completed').or('verification_status.is.null,verification_status.neq.verified').gte('completed_at', fromDate).lte('completed_at', toDate),
         supabase.from('payouts').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).in('status', ['pending', 'assigned']),
         supabase.from('disputes').select('id', { count: 'exact', head: true }).eq('trader_id', trader.id).in('status', ['pending', 'routed_to_trader']),
         supabase.from('payins').select('*').eq('trader_id', trader.id).order('created_at', { ascending: false }).limit(5),
@@ -221,8 +228,25 @@ export default function TraderDashboard() {
       let payins = 0, commission = 0;
       (piCRes.data || []).forEach(v => { payins += Number(v.amount || 0); commission += Number(v.commission || 0); });
 
-      let payouts = 0;
-      (poCRes.data || []).forEach(v => { payouts += Number(v.amount || 0); });
+      const payoutRate = Number(trader.payout_commission || 1) / 100;
+      
+      // Verified payouts (earned commission)
+      let verifiedPayouts = 0, verifiedPayoutCommission = 0;
+      (poVerifiedRes.data || []).forEach(v => { 
+        const amt = Number(v.amount || 0);
+        verifiedPayouts += amt; 
+        verifiedPayoutCommission += Number(v.commission || 0) || (amt * payoutRate);
+      });
+      
+      // Pending verification payouts (pending commission)
+      let pendingPayouts = 0, pendingPayoutCommission = 0;
+      (poPendingRes.data || []).forEach(v => { 
+        const amt = Number(v.amount || 0);
+        pendingPayouts += amt; 
+        pendingPayoutCommission += Number(v.commission || 0) || (amt * payoutRate);
+      });
+      
+      const totalPayouts = verifiedPayouts + pendingPayouts;
 
       const rawBalance = Number(trader.balance || 0);
       const securityHold = Number(trader.security_hold || 0);
@@ -233,15 +257,23 @@ export default function TraderDashboard() {
         ...(recentPayouts.data || []).map(d => ({ ...d, type: 'payout' })),
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 8);
 
+      // Overall commission for this period = payin + verified payout commission
+      const periodOverallCommission = commission + verifiedPayoutCommission;
+      
       setStats({
-        payins, payouts, commission,
-        overallCommission: Number(trader.overall_commission || 0),
+        payins, 
+        payouts: totalPayouts, 
+        payinCommission: commission,
+        payoutCommission: verifiedPayoutCommission,
+        pendingCommission: pendingPayoutCommission,
+        overallCommission: periodOverallCommission,
+        lifetimeCommission: Number(trader.overall_commission || 0),
         balance: rawBalance - securityHold,
         securityHold,
         commissionBalance: Number(trader.commission_balance || 0),
         lifetimeEarnings: Number(trader.lifetime_earnings || trader.overall_commission || 0),
         pendingPayins: piPRes.count || 0,
-        pendingPayouts: poPRes.count || 0,
+        pendingPayoutsCount: poPRes.count || 0,
         pendingDisputes: disputesRes.count || 0,
       });
 
@@ -350,82 +382,24 @@ export default function TraderDashboard() {
         )}
       </div>
 
-      {/* Hero: Balance + Commission + Earnings */}
-      <div className="grid grid-cols-3 gap-3">
-        {/* Balance */}
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <Wallet className="w-4 h-4" />
-            </div>
-            <span className="text-blue-200 text-xs font-semibold uppercase tracking-wide">Balance</span>
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.balance.toLocaleString()}`}
-          </h2>
-          <p className="text-blue-200 text-xs mt-1">Working capital</p>
-        </div>
-        
-        {/* Commission */}
-        <div className="bg-gradient-to-br from-emerald-600 to-green-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
-            </div>
-            <span className="text-green-200 text-xs font-semibold uppercase tracking-wide">Commission</span>
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.commissionBalance.toLocaleString()}`}
-          </h2>
-          <p className="text-green-200 text-xs mt-1">Earned (withdrawable)</p>
-        </div>
-        
-        {/* Earnings */}
-        <div className="bg-gradient-to-br from-purple-600 to-violet-700 rounded-2xl p-4 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-            <span className="text-purple-200 text-xs font-semibold uppercase tracking-wide">Earnings</span>
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-            {loading ? <span className="inline-block w-20 h-6 bg-white/20 animate-pulse rounded" /> : `₹${stats.lifetimeEarnings.toLocaleString()}`}
-          </h2>
-          <p className="text-purple-200 text-xs mt-1">Lifetime total</p>
-        </div>
-      </div>
-
-      {/* Secondary info strip */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-yellow-600" />
-            <span className="text-xs text-slate-600">Hold: <span className="font-semibold text-slate-900">₹{stats.securityHold.toLocaleString()}</span></span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5 text-orange-500" />
-            <span className="text-xs text-slate-600">Disputes: <span className="font-semibold text-slate-900">{stats.pendingDisputes}</span></span>
-          </div>
-        </div>
-        <div className="text-right">
-          <span className="text-xs text-slate-500">{periodLabel} Net: </span>
-          <span className={`text-sm font-bold ${stats.payins - stats.payouts >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {loading ? '—' : `₹${(stats.payins - stats.payouts).toLocaleString()}`}
-          </span>
-        </div>
-      </div>
-
       {/* Primary stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
         <StatCard title={`${periodLabel} Payins`} value={`₹${stats.payins.toLocaleString()}`} icon={TrendingUp} color="green" loading={loading} />
         <StatCard title={`${periodLabel} Payouts`} value={`₹${stats.payouts.toLocaleString()}`} icon={TrendingDown} color="blue" loading={loading} />
-        <StatCard title={`${periodLabel} Commission`} value={`₹${stats.commission.toLocaleString()}`} icon={DollarSign} color="emerald" loading={loading} className="col-span-2 sm:col-span-1" />
+        <StatCard title={`${periodLabel} Overall Commission`} value={`₹${stats.overallCommission.toLocaleString()}`} icon={IndianRupee} color="purple" loading={loading} className="col-span-2 sm:col-span-1" subtitle={`Lifetime: ₹${stats.lifetimeCommission.toLocaleString()}`} />
+      </div>
+
+      {/* Commission stats */}
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <StatCard title={`${periodLabel} Payin Commission`} value={`₹${stats.payinCommission.toLocaleString()}`} icon={IndianRupee} color="green" loading={loading} />
+        <StatCard title={`${periodLabel} Payout Commission`} value={`₹${stats.payoutCommission.toLocaleString()}`} icon={IndianRupee} color="blue" loading={loading} subtitle="Verified" />
+        <StatCard title="Pending Commission" value={`₹${stats.pendingCommission.toLocaleString()}`} icon={Clock} color="amber" loading={loading} subtitle="Awaiting verification" />
       </div>
 
       {/* Pending items */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <StatCard title="Pending Payins" value={stats.pendingPayins.toString()} icon={TrendingUp} color="yellow" loading={loading} subtitle="Awaiting action" />
-        <StatCard title="Pending Payouts" value={stats.pendingPayouts.toString()} icon={TrendingDown} color="red" loading={loading} subtitle="Awaiting action" />
+        <StatCard title="Pending Payouts" value={stats.pendingPayoutsCount.toString()} icon={TrendingDown} color="red" loading={loading} subtitle="Awaiting action" />
       </div>
 
       {/* Quick Actions */}
@@ -436,7 +410,7 @@ export default function TraderDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-3">
           {[
             { href: '/trader/payin', icon: TrendingUp, title: 'Process Payins', sub: `${stats.pendingPayins} pending`, color: '#16a34a', bg: 'from-green-50 to-emerald-50' },
-            { href: '/trader/payout', icon: TrendingDown, title: 'Handle Payouts', sub: `${stats.pendingPayouts} pending`, color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
+            { href: '/trader/payout', icon: TrendingDown, title: 'Handle Payouts', sub: `${stats.pendingPayoutsCount} pending`, color: '#2563eb', bg: 'from-blue-50 to-cyan-50' },
             { href: '/trader/balance', icon: Wallet, title: 'Manage Balance', sub: `₹${stats.balance.toLocaleString()}`, color: '#9333ea', bg: 'from-purple-50 to-pink-50' },
           ].map((item, i) => {
             const Icon = item.icon;

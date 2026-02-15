@@ -23,7 +23,8 @@ export default function CreatePayoutModal({ onClose, onSubmit, availableBalance 
   const validate = () => {
     if (!form.beneficiaryName.trim()) { alert('Enter beneficiary name'); return false; }
     if (!form.amount || Number(form.amount) <= 0) { alert('Enter valid amount'); return false; }
-    if (Number(form.amount) > availableBalance) { alert(`Insufficient balance. Available: ₹${availableBalance}`); return false; }
+    if (Number(form.amount) < 100) { alert('Minimum amount is ₹100'); return false; }
+    if (Number(form.amount) > 200000) { alert('Maximum amount is ₹2,00,000'); return false; }
     
     if (form.paymentMode === 'upi') {
       if (!form.upiId || !/^[a-zA-Z0-9._-]+@[a-zA-Z0-9]+$/.test(form.upiId)) {

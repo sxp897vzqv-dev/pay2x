@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle, Hash, DollarSign, Building2, AlertCircle } from 'lucide-react';
+import { X, CheckCircle, Hash, IndianRupee, Building2, AlertCircle } from 'lucide-react';
 
 /**
  * Simple modal to mark a payout as completed (just UTR input)

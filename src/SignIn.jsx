@@ -819,32 +819,6 @@ const SignIn = () => {
             </form>
             )}
 
-            {/* Divider */}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-white text-gray-500">Secured access</span>
-              </div>
-            </div>
-
-            {/* Role Indicators */}
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="p-3 bg-purple-50 rounded-lg border border-purple-100">
-                <Shield className="w-5 h-5 text-purple-600 mx-auto mb-1" />
-                <p className="text-xs font-medium text-purple-900">Admin</p>
-              </div>
-              <div className="p-3 bg-teal-50 rounded-lg border border-teal-100">
-                <TrendingUp className="w-5 h-5 text-teal-600 mx-auto mb-1" />
-                <p className="text-xs font-medium text-teal-900">Merchant</p>
-              </div>
-              <div className="p-3 bg-green-50 rounded-lg border border-green-100">
-                <Zap className="w-5 h-5 text-green-600 mx-auto mb-1" />
-                <p className="text-xs font-medium text-green-900">Trader</p>
-              </div>
-            </div>
-
             {/* Footer */}
             <div className="pt-4 border-t border-gray-100">
               <div className="flex items-center justify-center gap-2 text-xs text-gray-500">

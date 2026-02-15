@@ -5,7 +5,7 @@ import {
   User, Wallet, CreditCard, Activity, ArrowLeft, RefreshCw, Edit, Save,
   CheckCircle, AlertCircle, Phone, Mail, Calendar, Shield, Lock, Plus,
   Minus, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Clock,
-  DollarSign, Send,
+  IndianRupee, Send,
 } from 'lucide-react';
 import { 
   logBalanceTopup, 
@@ -134,8 +134,8 @@ function ProfileTab({ trader, onUpdate, saving }) {
             { key: 'name', label: 'Full Name', icon: User, type: 'text', display: trader.name },
             { key: 'email', label: 'Email', icon: Mail, type: 'email', display: trader.email },
             { key: 'phone', label: 'Phone', icon: Phone, type: 'tel', display: trader.phone },
-            { key: 'commissionRate', label: 'Payin Commission (%)', icon: DollarSign, type: 'number', display: trader.payin_commission || trader.commissionRate },
-            { key: 'payoutCommission', label: 'Payout Commission (%)', icon: DollarSign, type: 'number', display: trader.payout_commission || trader.payoutCommission },
+            { key: 'commissionRate', label: 'Payin Commission (%)', icon: IndianRupee, type: 'number', display: trader.payin_commission || trader.commissionRate },
+            { key: 'payoutCommission', label: 'Payout Commission (%)', icon: IndianRupee, type: 'number', display: trader.payout_commission || trader.payoutCommission },
             { key: 'priority', label: 'Priority', icon: Shield, type: 'select', options: ['Low', 'Normal', 'High', 'VIP'], display: trader.priority },
           ].map(field => {
             const Icon = field.icon;

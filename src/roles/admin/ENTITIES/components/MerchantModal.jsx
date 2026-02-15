@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Store, RefreshCw, AlertCircle, X, Mail, Phone, Globe, Key,
-  DollarSign, Building, Link as LinkIcon,
+  IndianRupee, Building, Link as LinkIcon,
 } from 'lucide-react';
 
 export default function MerchantModal({ merchant, onClose, onSave }) {
@@ -188,7 +188,7 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <DollarSign className="w-3.5 h-3.5 text-green-500" /> Payin Rate (%)
+                  <IndianRupee className="w-3.5 h-3.5 text-green-500" /> Payin Rate (%)
                 </label>
                 <input
                   type="number"
@@ -203,7 +203,7 @@ export default function MerchantModal({ merchant, onClose, onSave }) {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <DollarSign className="w-3.5 h-3.5 text-blue-500" /> Payout Rate (%)
+                  <IndianRupee className="w-3.5 h-3.5 text-blue-500" /> Payout Rate (%)
                 </label>
                 <input
                   type="number"

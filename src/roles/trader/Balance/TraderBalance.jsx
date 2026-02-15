@@ -1,24 +1,29 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from '../../../supabase';
 import {
-  Wallet, TrendingUp, TrendingDown, RefreshCw, DollarSign,
+  Wallet, TrendingUp, TrendingDown, RefreshCw, IndianRupee,
   Copy, CheckCircle, AlertCircle, Download, History,
-  Lock, ExternalLink, AlertTriangle, Clock, ArrowDown, IndianRupee,
+  Lock, ExternalLink, AlertTriangle, Clock, ArrowDown,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import Toast from '../../../components/admin/Toast';
 
 /* ─── Transaction row ─── */
 function TransactionItem({ transaction }) {
-  const isDeposit = transaction.type === 'deposit' || transaction.type?.includes('topup');
+  const inrAmount = transaction.inr_amount || 0;
+  const usdtAmount = transaction.usdt_amount || 0;
+  
   return (
     <div className="flex items-center gap-3 py-3 border-b border-slate-100 last:border-0">
-      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${isDeposit ? 'bg-green-100' : 'bg-red-100'}`}>
-        {isDeposit ? <TrendingUp className="text-green-600" size={16} /> : <TrendingDown className="text-red-600" size={16} />}
+      <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-green-100">
+        <TrendingUp className="text-green-600" size={16} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-900 text-sm">
-          {isDeposit ? 'Deposit' : transaction.type === 'withdrawal' ? 'Withdrawal' : 'Transaction'}
+          USDT Deposit
+        </p>
+        <p className="text-xs text-slate-500">
+          {usdtAmount.toLocaleString()} USDT @ ₹{transaction.usdt_rate || 0}
         </p>
         <p className="text-xs text-slate-400 truncate">
           {new Date(transaction.created_at || Date.now())
@@ -26,8 +31,8 @@ function TransactionItem({ transaction }) {
         </p>
       </div>
       <div className="text-right flex-shrink-0">
-        <p className={`font-bold text-sm ${isDeposit ? 'text-green-600' : 'text-red-600'}`}>
-          {isDeposit ? '+' : '−'}₹{transaction.amount?.toLocaleString()}
+        <p className="font-bold text-sm text-green-600">
+          +₹{inrAmount.toLocaleString()}
         </p>
         <span className={`text-xs px-2 py-0.5 rounded-full ${
           transaction.status === 'completed' ? 'bg-green-100 text-green-700' :
@@ -35,9 +40,10 @@ function TransactionItem({ transaction }) {
           'bg-red-100 text-red-700'
         }`}>{transaction.status}</span>
       </div>
-      {transaction.tx_hash && (
+      {transaction.tx_hash && !transaction.tx_hash.startsWith('POLL_') && (
         <a href={`https://tronscan.org/#/transaction/${transaction.tx_hash}`} target="_blank" rel="noopener noreferrer"
-          className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">
+          className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
+          title="View on TronScan">
           <ExternalLink size={14} />
         </a>
       )}
@@ -114,20 +120,21 @@ export default function TraderBalance() {
       setDerivationIndex(trader.derivation_index || null);
       balanceRef.current = total;
 
-      // Fetch crypto transactions
+      // Fetch crypto transactions (deposits only)
       const { data: txData } = await supabase
         .from('crypto_transactions')
         .select('*')
         .eq('trader_id', trader.id)
+        .eq('type', 'deposit')
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (txData) {
         let totalUSDT = 0, totalINR = 0, count = 0;
         txData.forEach(data => {
-          if (data.type === 'deposit' && data.status === 'completed') {
+          if (data.status === 'completed') {
             totalUSDT += data.usdt_amount || 0;
-            totalINR += data.amount || 0;
+            totalINR += data.inr_amount || 0;
             count++;
           }
         });
@@ -237,16 +244,20 @@ export default function TraderBalance() {
 
   const handleExport = () => {
     const csv = [
-      ['Date','Type','Amount (INR)','Status','Transaction Hash'],
+      ['Date','USDT Amount','Rate','INR Amount','Status','Transaction Hash'],
       ...transactions.map(t => [
         new Date(t.created_at || '').toLocaleDateString(),
-        t.type||'', t.amount||'', t.status||'', t.tx_hash||''
+        t.usdt_amount || 0,
+        t.usdt_rate || 0,
+        t.inr_amount || 0,
+        t.status || '',
+        t.tx_hash || ''
       ])
     ].map(r => r.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.href = url; a.download = `transactions-${Date.now()}.csv`; a.click();
+    a.href = url; a.download = `usdt-deposits-${Date.now()}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -301,7 +312,7 @@ export default function TraderBalance() {
       {/* ── USDT Rate Strip ── */}
       <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl p-3 sm:p-4 text-white shadow-md flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="bg-white/20 p-2 rounded-lg"><DollarSign className="w-5 h-5" /></div>
+          <div className="bg-white/20 p-2 rounded-lg"><IndianRupee className="w-5 h-5" /></div>
           <div>
             <p className="text-xs text-green-100">USDT Buy Rate</p>
             <p className="text-xl font-bold">₹{usdtBuyRate}</p>

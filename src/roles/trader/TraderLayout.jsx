@@ -38,6 +38,42 @@ import {
         from { opacity:0; transform: translateY(10px); }
         to   { opacity:1; transform: translateY(0); }
       }
+      .anim-card-up { animation: cardUp .3s ease-out both; }
+
+      /* Card hover effect */
+      .card-hover {
+        transition: all 0.2s ease;
+      }
+      .card-hover:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px -5px rgba(0,0,0,0.1), 0 4px 10px -5px rgba(0,0,0,0.04);
+        border-color: #cbd5e1;
+      }
+      
+      /* Success checkmark animation */
+      @keyframes successPop {
+        0% { transform: scale(0); opacity: 0; }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      .anim-success { animation: successPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
+      
+      /* Pulse for pending items */
+      @keyframes gentlePulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      .pulse-pending { animation: gentlePulse 2s ease-in-out infinite; }
+      
+      /* Sticky header shadow */
+      .sticky-shadow {
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+      }
+      
+      /* Smooth number transitions */
+      .number-animate {
+        transition: all 0.3s ease;
+      }
     `;
     document.head.appendChild(s);
   }

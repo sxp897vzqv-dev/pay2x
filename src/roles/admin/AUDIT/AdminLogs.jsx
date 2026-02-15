@@ -3,7 +3,7 @@ import { supabase } from '../../../supabase';
 import { Link } from 'react-router-dom';
 import {
   FileText, Search, Filter, Download, RefreshCw, User, Calendar, Clock,
-  DollarSign, Settings, Shield, TrendingUp, TrendingDown, AlertCircle,
+  IndianRupee, Settings, Shield, TrendingUp, TrendingDown, AlertCircle,
   Activity, CreditCard, Wallet, Key, LogIn, Database, BarChart3, X,
   AlertTriangle, Lock, Unlock, UserPlus, UserMinus, CheckCircle, Globe,
 } from 'lucide-react';
@@ -25,8 +25,8 @@ const ACTION_CONFIG = {
   usdt_deposit_detected: { icon: AlertCircle, color: 'text-blue-600', bg: 'bg-blue-100', label: 'USDT Deposit Detected', category: 'financial' },
   usdt_deposit_credited: { icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-100', label: 'USDT Deposit Credited', category: 'financial' },
   usdt_sweep_completed: { icon: Activity, color: 'text-purple-600', bg: 'bg-purple-100', label: 'USDT Swept to Admin', category: 'financial' },
-  settlement_approved: { icon: DollarSign, color: 'text-green-600', bg: 'bg-green-100', label: 'Settlement Approved', category: 'financial' },
-  settlement_completed: { icon: DollarSign, color: 'text-green-600', bg: 'bg-green-100', label: 'Settlement Completed', category: 'financial' },
+  settlement_approved: { icon: IndianRupee, color: 'text-green-600', bg: 'bg-green-100', label: 'Settlement Approved', category: 'financial' },
+  settlement_completed: { icon: IndianRupee, color: 'text-green-600', bg: 'bg-green-100', label: 'Settlement Completed', category: 'financial' },
   
   // Entity Management
   trader_activated: { icon: UserPlus, color: 'text-green-600', bg: 'bg-green-100', label: 'Trader Activated', category: 'entity' },
@@ -66,7 +66,7 @@ const ACTION_CONFIG = {
 /* ─── Tabs Configuration ─── */
 const TABS = [
   { key: 'all', label: 'All Events', icon: FileText, activeClass: 'border-slate-600 bg-slate-50 text-slate-700', badgeClass: 'bg-slate-200 text-slate-800' },
-  { key: 'financial', label: 'Financial', icon: DollarSign, activeClass: 'border-green-600 bg-green-50 text-green-700', badgeClass: 'bg-green-200 text-green-800' },
+  { key: 'financial', label: 'Financial', icon: IndianRupee, activeClass: 'border-green-600 bg-green-50 text-green-700', badgeClass: 'bg-green-200 text-green-800' },
   { key: 'entity', label: 'Entity Mgmt', icon: User, activeClass: 'border-blue-600 bg-blue-50 text-blue-700', badgeClass: 'bg-blue-200 text-blue-800' },
   { key: 'operational', label: 'Operations', icon: Activity, activeClass: 'border-purple-600 bg-purple-50 text-purple-700', badgeClass: 'bg-purple-200 text-purple-800' },
   { key: 'security', label: 'Security', icon: Shield, activeClass: 'border-red-600 bg-red-50 text-red-700', badgeClass: 'bg-red-200 text-red-800' },

@@ -3,7 +3,7 @@ import { supabase } from '../../../supabase';
 import {
   Building2, Plus, RefreshCw, X, Copy, Edit, Trash2, CheckCircle, AlertCircle,
   Smartphone, QrCode, Wallet, Shield, Check, ToggleLeft, ToggleRight,
-  TrendingUp, Clock, DollarSign
+  TrendingUp, Clock, IndianRupee
 } from 'lucide-react';
 import Toast from '../../../components/admin/Toast';
 
@@ -141,7 +141,7 @@ function UpiCard({ upi, onToggle, onEdit, onDelete, disabled, toggling }) {
         {/* Limits */}
         <div className="flex items-center gap-4 text-xs mb-3">
           <div className="flex items-center gap-1 text-slate-500">
-            <DollarSign className="w-3.5 h-3.5" />
+            <IndianRupee className="w-3.5 h-3.5" />
             <span>Daily: ₹{((upi.daily_limit || 100000) / 1000).toFixed(0)}K</span>
           </div>
           <div className="flex items-center gap-1 text-slate-500">

@@ -3,7 +3,7 @@ import { useOutletContext, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import { useMultipleRealtimeSubscriptions } from '../../hooks/useRealtimeSubscription';
 import {
-  TrendingUp, TrendingDown, DollarSign, Activity, RefreshCw,
+  TrendingUp, TrendingDown, IndianRupee, Activity, RefreshCw,
   AlertCircle, CheckCircle, Clock, AlertTriangle, Eye,
   Wallet, Download, ArrowRight, XCircle, Calendar, Filter, X,
 } from 'lucide-react';
@@ -393,7 +393,7 @@ export default function MerchantDashboard() {
         <StatCard title="Transactions" value={stats.totalTransactions.toString()} icon={Activity} color="purple" subtitle={datePreset === 'today' ? 'Today' : datePreset} />
         <StatCard title="Failed" value={stats.failedTransactions.toString()} icon={AlertCircle} color="red" subtitle={stats.failedTransactions > 0 ? "Attention" : "All good"} />
         <StatCard title="Disputes" value={stats.pendingDisputes.toString()} icon={AlertTriangle} color="orange" subtitle={stats.pendingDisputes > 0 ? "Pending" : "None"} />
-        <StatCard title="Net Revenue" value={`₹${(stats.payins - stats.payouts).toLocaleString()}`} icon={DollarSign} color="yellow" />
+        <StatCard title="Net Revenue" value={`₹${(stats.payins - stats.payouts).toLocaleString()}`} icon={IndianRupee} color="yellow" />
       </div>
 
       {/* Quick Actions */}

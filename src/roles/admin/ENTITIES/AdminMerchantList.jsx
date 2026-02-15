@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Store, Search, Filter, Plus, Eye, CheckCircle, AlertCircle,
   ToggleLeft, ToggleRight, Download, Globe, Key, RefreshCw, X,
-  User, Mail, Phone, Building, Link as LinkIcon, DollarSign,
+  User, Mail, Phone, Building, Link as LinkIcon, IndianRupee,
   MoreVertical, Edit, Trash2, EyeOff, Copy, Shield,
 } from 'lucide-react';
 import { logDataDeleted } from '../../../utils/auditLogger';

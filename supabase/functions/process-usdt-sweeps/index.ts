@@ -1,14 +1,20 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { corsHeaders } from '../_shared/cors.ts'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 /**
  * PROCESS USDT SWEEPS
  * Moves USDT from trader addresses to admin wallet
  * Should be called by cron every 5 minutes
+ * No auth required - uses service_role internally
  */
 
 const USDT_TRC20_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+const REFILL_TRX_AMOUNT = '10' // TRX to send back after sweep
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -116,7 +122,8 @@ serve(async (req) => {
 
         const { key: privateKey } = await privateKeyResponse.json()
 
-        // Send USDT to admin wallet
+        // Send USDT to admin wallet using Tatum TRC20 transfer
+        // API: POST /v3/tron/trc20/transaction
         const sendResponse = await fetch(
           'https://api.tatum.io/v3/tron/trc20/transaction',
           {
@@ -126,16 +133,17 @@ serve(async (req) => {
               'x-api-key': config.tatum_api_key,
             },
             body: JSON.stringify({
-              from: from_address,
               to: config.admin_wallet,
               amount: amount.toString(),
               tokenAddress: USDT_TRC20_CONTRACT,
               fromPrivateKey: privateKey,
+              feeLimit: 100  // 100 TRX fee limit (for energy)
             }),
           }
         )
 
         const sendData = await sendResponse.json()
+        console.log('Tatum response:', JSON.stringify(sendData))
 
         if (sendData.txId) {
           console.log(`✅ Sweep successful: ${sendData.txId}`)
@@ -158,6 +166,58 @@ serve(async (req) => {
             status: 'completed',
             description: `Auto-sweep ${amount} USDT to admin wallet`
           })
+
+          // Reset last_usdt_balance to 0 after sweep (so new deposits are detected)
+          await supabase.from('address_mapping')
+            .update({ last_usdt_balance: 0 })
+            .eq('address', from_address)
+
+          // Refill TRX for next sweep
+          try {
+            console.log(`💸 Refilling ${REFILL_TRX_AMOUNT} TRX to ${from_address}`)
+            
+            // Get master private key
+            const masterPkResponse = await fetch(
+              'https://api.tatum.io/v3/tron/wallet/priv',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': config.tatum_api_key,
+                },
+                body: JSON.stringify({
+                  mnemonic: config.master_mnemonic,
+                  index: 0,
+                }),
+              }
+            )
+            
+            if (masterPkResponse.ok) {
+              const { key: masterPk } = await masterPkResponse.json()
+              
+              const refillResponse = await fetch('https://api.tatum.io/v3/tron/transaction', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': config.tatum_api_key,
+                },
+                body: JSON.stringify({
+                  fromPrivateKey: masterPk,
+                  to: from_address,
+                  amount: REFILL_TRX_AMOUNT
+                }),
+              })
+              
+              const refillData = await refillResponse.json()
+              if (refillData.txId) {
+                console.log(`✅ TRX refill sent: ${refillData.txId}`)
+              } else {
+                console.log(`⚠️ TRX refill failed: ${refillData.message}`)
+              }
+            }
+          } catch (refillError) {
+            console.error('⚠️ TRX refill error (non-fatal):', refillError.message)
+          }
 
           succeeded++
         } else {
