@@ -44,14 +44,14 @@ export default function MerchantPayout() {
       // Get merchant info
       const { data: merchant } = await supabase
         .from('merchants')
-        .select('id, available_balance, payout_rate, payout_commission_rate')
+        .select('id, available_balance, payout_commission_rate')
         .eq('profile_id', user.id)
         .single();
 
       if (merchant) {
         setMerchantId(merchant.id);
         setAvailableBalance(merchant.available_balance || 0);
-        setPayoutRate(merchant.payout_commission_rate ?? merchant.payout_rate ?? 2);
+        setPayoutRate(merchant.payout_commission_rate ?? 2);
       }
 
       // Get payouts
