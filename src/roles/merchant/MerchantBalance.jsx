@@ -167,9 +167,9 @@ export default function MerchantBalance() {
         if (mData) {
           const merchantId = mData.id; // This is the actual merchant UUID
           
-          // Commission rates (stored as percentage like 6 for 6%)
-          let payinCommissionRate = (mData.payin_rate || mData.payin_commission_rate || 6) / 100;
-          let payoutCommissionRate = (mData.payout_rate || mData.payout_commission_rate || 2) / 100;
+          // Commission rates - prefer payin_commission_rate over payin_rate (admin sets commission_rate)
+          let payinCommissionRate = (mData.payin_commission_rate ?? mData.payin_rate ?? 6) / 100;
+          let payoutCommissionRate = (mData.payout_commission_rate ?? mData.payout_rate ?? 2) / 100;
 
           // Get completed payins for this merchant
           const { data: payins } = await supabase.from('payins').select('amount, commission').eq('merchant_id', merchantId).eq('status', 'completed');

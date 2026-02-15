@@ -56,7 +56,7 @@ serve(async (req: Request) => {
     // 2. Validate API key and get merchant
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, name, is_active, available_balance, payout_rate, webhook_url, webhook_secret')
+      .select('id, name, is_active, available_balance, payout_rate, payout_commission_rate, webhook_url, webhook_secret')
       .eq('live_api_key', apiKey)
       .single();
 
@@ -124,7 +124,7 @@ serve(async (req: Request) => {
     }
 
     // 6. Calculate fee (balance deducted only on completion, not on creation)
-    const payoutRate = merchant.payout_rate || 2; // Default 2%
+    const payoutRate = merchant.payout_commission_rate ?? merchant.payout_rate ?? 2; // Default 2%
     const fee = Math.round(amountNum * payoutRate / 100);
     const totalRequired = amountNum + fee;
 
