@@ -111,11 +111,11 @@ export function getGeoMatch(
 export function getClientIP(req: Request): string {
   // Try various headers (Cloudflare, proxy, etc.)
   const headers = [
-    'cf-connecting-ip',      // Cloudflare
-    'x-real-ip',             // Nginx
-    'x-forwarded-for',       // Standard proxy
-    'x-client-ip',
+    'x-real-ip',             // Vercel/Nginx (most reliable)
+    'x-client-ip',           // Our proxy
     'true-client-ip',        // Akamai
+    'cf-connecting-ip',      // Cloudflare
+    'x-forwarded-for',       // Standard proxy (may be chained)
   ];
 
   for (const header of headers) {
@@ -127,4 +127,46 @@ export function getClientIP(req: Request): string {
   }
 
   return '';
+}
+
+/**
+ * Get geo data from Vercel headers (faster than IP lookup)
+ * Returns null if headers not present
+ */
+export function getGeoFromVercelHeaders(req: Request): GeoLocation | null {
+  const city = req.headers.get('x-vercel-ip-city');
+  const region = req.headers.get('x-vercel-ip-region');
+  const country = req.headers.get('x-vercel-ip-country');
+  
+  // If we have Vercel geo headers, use them (faster)
+  if (city || region || country) {
+    return {
+      city: city ? decodeURIComponent(city) : null,
+      state: region || null,
+      country: country || null,
+      lat: null,  // Vercel doesn't provide lat/lon
+      lon: null,
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Get location - tries Vercel headers first, falls back to IP lookup
+ */
+export async function getLocation(req: Request): Promise<GeoLocation> {
+  // Try Vercel headers first (instant, no API call)
+  const vercelGeo = getGeoFromVercelHeaders(req);
+  if (vercelGeo && (vercelGeo.city || vercelGeo.state)) {
+    return vercelGeo;
+  }
+  
+  // Fall back to IP lookup
+  const clientIP = getClientIP(req);
+  if (clientIP) {
+    return getLocationFromIP(clientIP);
+  }
+  
+  return { city: null, state: null, country: null, lat: null, lon: null };
 }

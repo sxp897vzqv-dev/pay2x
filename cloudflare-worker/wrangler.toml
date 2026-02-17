@@ -1,0 +1,12 @@
+# Cloudflare Worker config for Pay2X API
+name = "pay2x-api"
+main = "api-proxy.js"
+compatibility_date = "2024-01-01"
+
+# Custom domain routing
+routes = [
+  { pattern = "api.pay2x.io/*", zone_name = "pay2x.io" }
+]
+
+# Or use workers.dev subdomain for testing first:
+# workers_dev = true

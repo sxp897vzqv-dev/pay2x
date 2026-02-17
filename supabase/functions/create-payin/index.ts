@@ -35,7 +35,7 @@ import {
   RequestContext 
 } from '../_shared/logger.ts';
 import { queueWebhook } from '../_shared/webhook-queue.ts';
-import { getLocationFromIP, getClientIP, GeoLocation } from '../_shared/geo.ts';
+import { getLocation, getClientIP, GeoLocation } from '../_shared/geo.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -326,14 +326,10 @@ serve(async (req: Request) => {
       }
     }
 
-    // 9. Get user location from IP
+    // 9. Get user location (tries Vercel headers first, falls back to IP lookup)
     const clientIP = getClientIP(req);
-    let userGeo: GeoLocation = { city: null, state: null, country: null, lat: null, lon: null };
-    
-    if (clientIP) {
-      userGeo = await getLocationFromIP(clientIP);
-      log('info', 'User geo detected', ctx, { ip: clientIP, city: userGeo.city, state: userGeo.state });
-    }
+    const userGeo = await getLocation(req);
+    log('info', 'User geo detected', ctx, { ip: clientIP, city: userGeo.city, state: userGeo.state });
 
     // 10. Smart UPI selection via PayinEngine v4 (with geo)
     log('info', 'Selecting UPI', ctx, { amount: amountNum, userId, userCity: userGeo.city });
