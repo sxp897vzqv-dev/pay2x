@@ -1,14 +1,16 @@
-import React, { useState, useRef } from 'react';
-import { supabase } from '../../../../supabase';
+import React, { useState, useRef, useCallback } from 'react';
+import { supabase, SUPABASE_URL } from '../../../../supabase';
+import * as tus from 'tus-js-client';
 import {
   X, RefreshCw, CheckCircle, Upload, FileText, Video, AlertCircle,
-  Image as ImageIcon, Trash2, Eye,
+  Image as ImageIcon, Trash2, Eye, Wifi, WifiOff, Pause, Play,
 } from 'lucide-react';
 
 const MAX_STATEMENT_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
 const MIN_VIDEO_DURATION = 5; // seconds
 const MAX_VIDEO_DURATION = 60; // seconds
+const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks for resumable upload
 
 export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
   const [utrId, setUtrId] = useState(payout.utr || '');
@@ -19,9 +21,13 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
   const [videoDuration, setVideoDuration] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ statement: 0, video: 0 });
+  const [uploadStatus, setUploadStatus] = useState({ statement: 'pending', video: 'pending' }); // pending, uploading, paused, complete, error
   const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState({ statement: 0, video: 0 });
   
   const videoRef = useRef(null);
+  const tusUploadsRef = useRef({ statement: null, video: null }); // Store TUS upload instances for pause/resume
+  const uploadedUrlsRef = useRef({ statement: null, video: null }); // Store successful upload URLs
 
   // Handle statement file selection
   const handleStatementFile = (e) => {
@@ -43,6 +49,8 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
     
     setError(null);
     setStatementFile(file);
+    setUploadStatus(s => ({ ...s, statement: 'pending' }));
+    setUploadProgress(p => ({ ...p, statement: 0 }));
     
     // Preview for images
     if (file.type.startsWith('image/')) {
@@ -71,6 +79,8 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
     
     setError(null);
     setVideoFile(file);
+    setUploadStatus(s => ({ ...s, video: 'pending' }));
+    setUploadProgress(p => ({ ...p, video: 0 }));
     setVideoPreview(URL.createObjectURL(file));
     
     // Check duration
@@ -92,17 +102,148 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
 
   // Clear file
   const clearStatement = () => {
+    // Abort any ongoing upload
+    if (tusUploadsRef.current.statement) {
+      tusUploadsRef.current.statement.abort();
+      tusUploadsRef.current.statement = null;
+    }
     setStatementFile(null);
     setStatementPreview(null);
+    setUploadStatus(s => ({ ...s, statement: 'pending' }));
+    setUploadProgress(p => ({ ...p, statement: 0 }));
+    uploadedUrlsRef.current.statement = null;
   };
 
   const clearVideo = () => {
+    // Abort any ongoing upload
+    if (tusUploadsRef.current.video) {
+      tusUploadsRef.current.video.abort();
+      tusUploadsRef.current.video = null;
+    }
     setVideoFile(null);
     setVideoPreview(null);
     setVideoDuration(null);
+    setUploadStatus(s => ({ ...s, video: 'pending' }));
+    setUploadProgress(p => ({ ...p, video: 0 }));
+    uploadedUrlsRef.current.video = null;
   };
 
-  // Upload files and submit
+  // TUS Resumable Upload
+  const uploadWithTus = useCallback(async (file, bucket, path, type) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Get current session token
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          reject(new Error('Session expired. Please refresh and try again.'));
+          return;
+        }
+
+        setUploadStatus(s => ({ ...s, [type]: 'uploading' }));
+
+        const upload = new tus.Upload(file, {
+          endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+          retryDelays: [0, 1000, 3000, 5000, 10000], // Retry delays in ms
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            'x-upsert': 'true', // Overwrite if exists
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          metadata: {
+            bucketName: bucket,
+            objectName: path,
+            contentType: file.type,
+            cacheControl: '3600',
+          },
+          chunkSize: CHUNK_SIZE,
+          
+          onError: (err) => {
+            console.error(`TUS upload error (${type}):`, err);
+            setUploadStatus(s => ({ ...s, [type]: 'error' }));
+            setRetryCount(r => ({ ...r, [type]: r[type] + 1 }));
+            
+            // Check if it's a network error (can resume)
+            if (err.originalRequest) {
+              setError(`Upload interrupted. Tap "Resume" to continue.`);
+            } else {
+              reject(err);
+            }
+          },
+          
+          onProgress: (bytesUploaded, bytesTotal) => {
+            const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
+            setUploadProgress(p => ({ ...p, [type]: percentage }));
+          },
+          
+          onSuccess: () => {
+            setUploadStatus(s => ({ ...s, [type]: 'complete' }));
+            setUploadProgress(p => ({ ...p, [type]: 100 }));
+            
+            // Get public URL
+            const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+            uploadedUrlsRef.current[type] = data.publicUrl;
+            resolve(data.publicUrl);
+          },
+
+          onShouldRetry: (err, retryAttempt, options) => {
+            // Retry on network errors
+            const status = err.originalResponse?.getStatus?.();
+            if (status === 403) {
+              // Token expired, don't retry
+              return false;
+            }
+            // Retry on 5xx errors and network issues
+            if (!status || status >= 500) {
+              return true;
+            }
+            return false;
+          },
+
+          onAfterResponse: (req, res) => {
+            // Log for debugging
+            const status = res.getStatus();
+            if (status >= 400) {
+              console.warn(`TUS response ${status} for ${type}`);
+            }
+          },
+        });
+
+        // Store reference for pause/resume
+        tusUploadsRef.current[type] = upload;
+
+        // Check for previous incomplete uploads and resume
+        const previousUploads = await upload.findPreviousUploads();
+        if (previousUploads.length > 0) {
+          console.log(`Resuming previous upload for ${type}`);
+          upload.resumeFromPreviousUpload(previousUploads[0]);
+        }
+
+        // Start upload
+        upload.start();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }, []);
+
+  // Pause upload
+  const pauseUpload = (type) => {
+    if (tusUploadsRef.current[type]) {
+      tusUploadsRef.current[type].abort();
+      setUploadStatus(s => ({ ...s, [type]: 'paused' }));
+    }
+  };
+
+  // Resume upload
+  const resumeUpload = (type) => {
+    if (tusUploadsRef.current[type]) {
+      setUploadStatus(s => ({ ...s, [type]: 'uploading' }));
+      tusUploadsRef.current[type].start();
+    }
+  };
+
+  // Main submit handler
   const handleSubmit = async () => {
     if (!utrId.trim()) {
       setError('UTR / Reference is required');
@@ -128,47 +269,19 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
       const timestamp = Date.now();
       const payoutId = payout.id;
       
-      // Upload statement
-      setUploadProgress(p => ({ ...p, statement: 10 }));
+      // Prepare paths
       const statementExt = statementFile.name.split('.').pop();
       const statementPath = `statements/${payoutId}_${timestamp}.${statementExt}`;
       
-      const { data: statementData, error: statementError } = await supabase.storage
-        .from('payout-proofs')
-        .upload(statementPath, statementFile, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-      
-      if (statementError) throw new Error('Failed to upload statement: ' + statementError.message);
-      setUploadProgress(p => ({ ...p, statement: 100 }));
-      
-      // Get statement URL
-      const { data: statementUrlData } = supabase.storage
-        .from('payout-proofs')
-        .getPublicUrl(statementPath);
-      const statementUrl = statementUrlData.publicUrl;
-      
-      // Upload video
-      setUploadProgress(p => ({ ...p, video: 10 }));
       const videoExt = videoFile.name.split('.').pop();
       const videoPath = `videos/${payoutId}_${timestamp}.${videoExt}`;
       
-      const { data: videoData, error: videoError } = await supabase.storage
-        .from('payout-proofs')
-        .upload(videoPath, videoFile, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-      
-      if (videoError) throw new Error('Failed to upload video: ' + videoError.message);
-      setUploadProgress(p => ({ ...p, video: 100 }));
-      
-      // Get video URL
-      const { data: videoUrlData } = supabase.storage
-        .from('payout-proofs')
-        .getPublicUrl(videoPath);
-      const videoUrl = videoUrlData.publicUrl;
+      // Upload both files in parallel using TUS
+      const [statementUrl, videoUrl] = await Promise.all([
+        // Skip if already uploaded
+        uploadedUrlsRef.current.statement || uploadWithTus(statementFile, 'payout-proofs', statementPath, 'statement'),
+        uploadedUrlsRef.current.video || uploadWithTus(videoFile, 'payout-proofs', videoPath, 'video'),
+      ]);
       
       // Call the RPC function to submit proof
       const { data: result, error: rpcError } = await supabase.rpc('submit_payout_proof', {
@@ -188,7 +301,7 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
       onSubmit(result);
     } catch (err) {
       console.error('Upload error:', err);
-      setError(err.message);
+      setError(err.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -197,10 +310,21 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
   const totalProgress = (uploadProgress.statement + uploadProgress.video) / 2;
   const isValid = utrId.trim() && statementFile && videoFile && 
     (!videoDuration || (videoDuration >= MIN_VIDEO_DURATION && videoDuration <= MAX_VIDEO_DURATION));
+  
+  // Check if any upload is paused or errored (can retry)
+  const canResume = uploadStatus.statement === 'paused' || uploadStatus.statement === 'error' ||
+                    uploadStatus.video === 'paused' || uploadStatus.video === 'error';
+
+  // Format file size
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={uploading ? undefined : onClose} />
       <div className="relative w-full sm:w-full sm:max-w-lg bg-white shadow-2xl sm:rounded-2xl rounded-t-2xl overflow-hidden mt-auto sm:mt-0 max-h-[90vh] flex flex-col">
         {/* handle */}
         <div className="sm:hidden flex justify-center pt-2 pb-1">
@@ -225,7 +349,7 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
             <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-blue-800">
               <p className="font-semibold mb-1">Verification Required</p>
-              <p>Upload bank statement and screen recording as proof. Your balance will be credited after admin verification.</p>
+              <p>Upload bank statement and screen recording as proof. Uploads are <span className="font-semibold">resumable</span> — if connection drops, progress is saved.</p>
             </div>
           </div>
 
@@ -256,17 +380,54 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
                     <FileText className="w-10 h-10 text-red-500" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-700 truncate">{statementFile?.name}</p>
-                      <p className="text-xs text-slate-500">{(statementFile?.size / 1024).toFixed(1)} KB</p>
+                      <p className="text-xs text-slate-500">{formatSize(statementFile?.size)}</p>
                     </div>
                   </div>
                 ) : (
                   <img src={statementPreview} alt="Statement" className="w-full max-h-48 object-contain bg-slate-50" />
                 )}
+                
+                {/* Progress bar for statement */}
+                {(uploadStatus.statement === 'uploading' || uploadStatus.statement === 'paused') && (
+                  <div className="px-3 py-2 bg-blue-50 border-t border-blue-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-blue-700 font-medium">
+                        {uploadStatus.statement === 'paused' ? 'Paused' : 'Uploading...'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-blue-700">{uploadProgress.statement}%</span>
+                        <button 
+                          onClick={() => uploadStatus.statement === 'paused' ? resumeUpload('statement') : pauseUpload('statement')}
+                          className="p-1 hover:bg-blue-100 rounded"
+                        >
+                          {uploadStatus.statement === 'paused' ? (
+                            <Play className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <Pause className="w-3.5 h-3.5 text-blue-600" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-1.5">
+                      <div 
+                        className="h-full bg-blue-600 rounded-full transition-all duration-300" 
+                        style={{ width: `${uploadProgress.statement}%` }} 
+                      />
+                    </div>
+                  </div>
+                )}
+                
                 <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between bg-white">
-                  <span className="text-xs font-semibold text-green-600 flex items-center gap-1">
-                    <CheckCircle className="w-3.5 h-3.5" /> Uploaded
+                  <span className={`text-xs font-semibold flex items-center gap-1 ${
+                    uploadStatus.statement === 'complete' ? 'text-green-600' :
+                    uploadStatus.statement === 'error' ? 'text-red-600' :
+                    'text-slate-500'
+                  }`}>
+                    {uploadStatus.statement === 'complete' && <><CheckCircle className="w-3.5 h-3.5" /> Uploaded</>}
+                    {uploadStatus.statement === 'error' && <><WifiOff className="w-3.5 h-3.5" /> Failed - will retry</>}
+                    {uploadStatus.statement === 'pending' && <>Ready to upload</>}
                   </span>
-                  <button onClick={clearStatement} disabled={uploading}
+                  <button onClick={clearStatement} disabled={uploading && uploadStatus.statement === 'uploading'}
                     className="text-xs text-red-500 font-semibold hover:text-red-700 disabled:opacity-40 flex items-center gap-1">
                     <Trash2 className="w-3.5 h-3.5" /> Remove
                   </button>
@@ -296,10 +457,47 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
                   controls 
                   className="w-full max-h-48 bg-black"
                 />
+                
+                {/* Progress bar for video */}
+                {(uploadStatus.video === 'uploading' || uploadStatus.video === 'paused') && (
+                  <div className="px-3 py-2 bg-blue-50 border-t border-blue-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-blue-700 font-medium">
+                        {uploadStatus.video === 'paused' ? 'Paused' : 'Uploading...'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-blue-700">{uploadProgress.video}%</span>
+                        <button 
+                          onClick={() => uploadStatus.video === 'paused' ? resumeUpload('video') : pauseUpload('video')}
+                          className="p-1 hover:bg-blue-100 rounded"
+                        >
+                          {uploadStatus.video === 'paused' ? (
+                            <Play className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <Pause className="w-3.5 h-3.5 text-blue-600" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-1.5">
+                      <div 
+                        className="h-full bg-blue-600 rounded-full transition-all duration-300" 
+                        style={{ width: `${uploadProgress.video}%` }} 
+                      />
+                    </div>
+                  </div>
+                )}
+                
                 <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between bg-white">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-green-600 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" /> Uploaded
+                    <span className={`text-xs font-semibold flex items-center gap-1 ${
+                      uploadStatus.video === 'complete' ? 'text-green-600' :
+                      uploadStatus.video === 'error' ? 'text-red-600' :
+                      'text-slate-500'
+                    }`}>
+                      {uploadStatus.video === 'complete' && <><CheckCircle className="w-3.5 h-3.5" /> Uploaded</>}
+                      {uploadStatus.video === 'error' && <><WifiOff className="w-3.5 h-3.5" /> Failed - will retry</>}
+                      {uploadStatus.video === 'pending' && <>Ready to upload</>}
                     </span>
                     {videoDuration && (
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
@@ -311,7 +509,7 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
                       </span>
                     )}
                   </div>
-                  <button onClick={clearVideo} disabled={uploading}
+                  <button onClick={clearVideo} disabled={uploading && uploadStatus.video === 'uploading'}
                     className="text-xs text-red-500 font-semibold hover:text-red-700 disabled:opacity-40 flex items-center gap-1">
                     <Trash2 className="w-3.5 h-3.5" /> Remove
                   </button>
@@ -328,11 +526,31 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
             )}
           </div>
 
+          {/* Resumable upload notice */}
+          {(statementFile || videoFile) && !uploading && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-start gap-2">
+              <Wifi className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-green-700">
+                <span className="font-semibold">Resumable upload enabled.</span> If your connection drops, upload will continue from where it left off.
+              </p>
+            </div>
+          )}
+
           {/* Error message */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-red-700">{error}</p>
+              <div className="flex-1">
+                <p className="text-xs text-red-700">{error}</p>
+                {canResume && (
+                  <button 
+                    onClick={handleSubmit}
+                    className="mt-2 text-xs font-semibold text-red-600 underline"
+                  >
+                    Tap to retry
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -347,16 +565,21 @@ export default function VerificationUploadModal({ payout, onClose, onSubmit }) {
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-blue-600 w-16">Statement</span>
                   <div className="flex-1 bg-blue-200 rounded-full h-1.5">
-                    <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${uploadProgress.statement}%` }} />
+                    <div className="h-full bg-blue-600 rounded-full transition-all duration-300" style={{ width: `${uploadProgress.statement}%` }} />
                   </div>
+                  <span className="text-xs text-blue-600 w-8">{uploadProgress.statement}%</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-blue-600 w-16">Video</span>
                   <div className="flex-1 bg-blue-200 rounded-full h-1.5">
-                    <div className="h-full bg-blue-600 rounded-full transition-all" style={{ width: `${uploadProgress.video}%` }} />
+                    <div className="h-full bg-blue-600 rounded-full transition-all duration-300" style={{ width: `${uploadProgress.video}%` }} />
                   </div>
+                  <span className="text-xs text-blue-600 w-8">{uploadProgress.video}%</span>
                 </div>
               </div>
+              <p className="text-xs text-blue-600 text-center">
+                Don't close this screen. Upload will resume if interrupted.
+              </p>
             </div>
           )}
         </div>

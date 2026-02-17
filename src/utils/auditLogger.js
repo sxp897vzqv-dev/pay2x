@@ -284,6 +284,33 @@ export const logMerchantAPIKeyGenerated = (merchantId, merchantName, keyPrefix) 
     requiresReview: true,
   });
 
+// Merchant balance operations
+export const logMerchantBalanceTopup = (merchantId, merchantName, amount, balanceBefore, balanceAfter, note) =>
+  logAuditEvent({
+    action: 'merchant_balance_topup',
+    category: 'financial',
+    entityType: 'merchant',
+    entityId: merchantId,
+    entityName: merchantName,
+    details: { amount, note },
+    balanceBefore,
+    balanceAfter,
+    severity: 'info',
+  });
+
+export const logMerchantBalanceDeduct = (merchantId, merchantName, amount, balanceBefore, balanceAfter, reason) =>
+  logAuditEvent({
+    action: 'merchant_balance_deduct',
+    category: 'financial',
+    entityType: 'merchant',
+    entityId: merchantId,
+    entityName: merchantName,
+    details: { amount, note: reason },
+    balanceBefore,
+    balanceAfter,
+    severity: 'warning',
+  });
+
 // Authentication operations
 export const logLoginSuccess = (role, userId, userName, email, userAgent, clientIP) =>
   logAuditEvent({

@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { supabase } from '../../supabase';
-import { useRealtimeSubscription } from '../../hooks/useRealtimeSubscription';
+import { supabase } from '../../../supabase';
+import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
+import { logMerchantActivity, MERCHANT_ACTIONS } from '../../../utils/merchantActivityLogger';
 import {
   AlertCircle, Plus, Search, Filter, X, Calendar, Download,
   RefreshCw, Clock, CheckCircle, XCircle, AlertTriangle, Eye,
 } from 'lucide-react';
 import DisputeCard from './components/MerchantDisputeCard';
 import CreateDisputeModal from './components/MerchantCreateDisputeModal';
-import { Toast } from '../../components/admin';
+import { Toast } from '../../../components/admin';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 /* ─── Dispute Details Modal ─── */
 function DisputeDetailsModal({ dispute, onClose }) {
@@ -261,66 +263,29 @@ export default function MerchantDispute() {
   }), [disputes]);
 
   const handleCreateDispute = async (formData, evidence) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
+    // Modal now handles the API call directly
+    // This callback is for post-creation activities
     try {
-      const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
-      if (!merchant) {
-        setToast({ type: 'error', message: 'Error: Could not fetch merchant data' });
-        return;
-      }
-
-      let evidenceUrl = null;
-      if (evidence) {
-        const filename = `${Date.now()}_${evidence.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-        const { error: upErr } = await supabase.storage.from('dispute-proofs').upload(filename, evidence);
-        if (!upErr) {
-          const { data: urlData } = supabase.storage.from('dispute-proofs').getPublicUrl(filename);
-          evidenceUrl = urlData.publicUrl;
+      // Log activity
+      await logMerchantActivity(MERCHANT_ACTIONS.DISPUTE_CREATED, {
+        entityType: 'dispute',
+        entityId: formData.disputeId,
+        details: {
+          dispute_id: formData.disputeId,
+          amount: Number(formData.amount),
+          type: formData.type,
+          reason: formData.reason,
+          upi_id: formData.upiId,
+          order_id: formData.orderId,
         }
-      }
-
-      // Create dispute
-      const { data: dispute, error: insertError } = await supabase.from('disputes').insert({
-        merchant_id: merchant.id,
-        dispute_id: 'DSP' + Date.now(),
-        transaction_id: formData.transactionId,
-        payin_id: formData.type === 'payin' ? formData.payinId : null,
-        payout_id: formData.type === 'payout' ? formData.payoutId : null,
-        upi_id: formData.upiId || null,
-        utr: formData.utr || null,
-        amount: Number(formData.amount),
-        reason: formData.reason,
-        type: formData.type,
-        evidence_url: evidenceUrl,
-        status: 'pending',
-        deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      }).select().single();
-
-      if (insertError) {
-        setToast({ type: 'error', message: 'Error creating dispute: ' + insertError.message });
-        return;
-      }
-
-      // Auto-route dispute to trader
-      if (dispute) {
-        try {
-          const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
-          await fetch(`${SUPABASE_URL}/functions/v1/route-dispute`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ disputeId: dispute.id }),
-          });
-        } catch (routeErr) {
-          console.error('Auto-route failed:', routeErr);
-        }
-      }
-
+      });
+      
+      // Refresh disputes list
+      fetchDisputes(true);
       setShowModal(false);
       setToast({ type: 'success', message: 'Dispute filed successfully! We\'ll notify you of updates.' });
     } catch (error) {
-      setToast({ type: 'error', message: 'Error: ' + error.message });
+      console.error('Post-dispute logging error:', error);
     }
   };
 
@@ -348,14 +313,7 @@ export default function MerchantDispute() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm font-medium">Loading disputes…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading disputes…" color="orange" />;
   }
 
   return (

@@ -1193,7 +1193,7 @@ function RatesTab() {
               : 'Never'}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Filters: UPI/IMPS payments, >₹2L liquidity, avg of top 5 offers
+            Filters: UPI/IMPS payments, &gt;₹2L liquidity, avg of top 5 offers
           </p>
         </div>
         <button

@@ -64,6 +64,35 @@ export default function AdminSettlements() {
     
     setProcessing(settlement.id);
     try {
+      // Get merchant balance BEFORE
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('available_balance, pending_settlement')
+        .eq('id', settlement.merchant_id)
+        .single();
+      
+      const settlementAmount = Number(settlement.amount);
+      const currentBalance = merchant?.available_balance || 0;
+      const currentPending = merchant?.pending_settlement || 0;
+      
+      console.log('BEFORE approve:', { 
+        available_balance: currentBalance, 
+        pending_settlement: currentPending,
+        settlement_amount: settlementAmount
+      });
+      
+      // Check if pending_settlement was properly set (should be >= settlement amount)
+      // If not, we need to deduct from available_balance now
+      let newBalance = currentBalance;
+      if (currentPending < settlementAmount) {
+        // Balance wasn't properly reserved - deduct now
+        newBalance = currentBalance - settlementAmount;
+        console.log('WARNING: pending_settlement not set correctly, deducting now:', {
+          from: currentBalance,
+          to: newBalance
+        });
+      }
+      
       // Update settlement status
       const { error } = await supabase
         .from('merchant_settlements')
@@ -76,14 +105,22 @@ export default function AdminSettlements() {
       
       if (error) throw error;
       
-      // Clear pending_settlement on merchant (already deducted from available_balance)
-      await supabase
+      // Update merchant: clear pending_settlement, and deduct balance if it wasn't reserved
+      const { error: merchantError } = await supabase
         .from('merchants')
         .update({ 
-          pending_settlement: 0,
+          available_balance: newBalance,
+          pending_settlement: Math.max(0, currentPending - settlementAmount),
           updated_at: new Date().toISOString()
         })
         .eq('id', settlement.merchant_id);
+      
+      if (merchantError) throw merchantError;
+      
+      console.log('AFTER approve:', { 
+        available_balance: newBalance, 
+        pending_settlement: Math.max(0, currentPending - settlementAmount)
+      });
       
       fetchData();
       alert('Settlement approved!');
@@ -99,6 +136,24 @@ export default function AdminSettlements() {
     
     setProcessing(settlement.id);
     try {
+      const settlementAmount = Number(settlement.amount);
+      
+      // Get current merchant balance
+      const { data: merchant } = await supabase
+        .from('merchants')
+        .select('available_balance, pending_settlement')
+        .eq('id', settlement.merchant_id)
+        .single();
+      
+      const currentBalance = merchant?.available_balance || 0;
+      const currentPending = merchant?.pending_settlement || 0;
+      
+      console.log('BEFORE reject:', { 
+        available_balance: currentBalance, 
+        pending_settlement: currentPending,
+        settlement_amount: settlementAmount
+      });
+      
       // Update settlement status
       const { error } = await supabase
         .from('merchant_settlements')
@@ -111,23 +166,25 @@ export default function AdminSettlements() {
       
       if (error) throw error;
       
-      // Refund the amount back to merchant
-      const { data: merchant } = await supabase
-        .from('merchants')
-        .select('available_balance, pending_settlement')
-        .eq('id', settlement.merchant_id)
-        .single();
+      // Refund: add back to available_balance, reduce pending_settlement
+      const newBalance = currentBalance + settlementAmount;
+      const newPending = Math.max(0, currentPending - settlementAmount);
       
-      if (merchant) {
-        await supabase
-          .from('merchants')
-          .update({ 
-            available_balance: (merchant.available_balance || 0) + Number(settlement.amount),
-            pending_settlement: 0,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', settlement.merchant_id);
-      }
+      const { error: merchantError } = await supabase
+        .from('merchants')
+        .update({ 
+          available_balance: newBalance,
+          pending_settlement: newPending,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', settlement.merchant_id);
+      
+      if (merchantError) throw merchantError;
+      
+      console.log('AFTER reject:', { 
+        available_balance: newBalance, 
+        pending_settlement: newPending
+      });
       
       fetchData();
       alert('Settlement rejected. Amount refunded to merchant.');

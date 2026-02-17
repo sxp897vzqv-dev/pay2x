@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import TestModeBanner from './components/TestModeBanner';
+import { logMerchantActivity, MERCHANT_ACTIONS } from '../../utils/merchantActivityLogger';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
-  AlertCircle, Settings, LogOut, Menu, X, Shield, Users, ChevronDown, ChevronRight,
-  Webhook, FileText, ShieldCheck, RotateCcw, CreditCard,
+  AlertCircle, Settings, LogOut, Menu, X, Shield, ChevronDown, ChevronRight,
+  FileText, CreditCard,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -57,9 +58,9 @@ const navGroups = [
   {
     label: 'Transactions',
     items: [
-      { to: '/merchant/payins',  icon: TrendingUp,   label: 'Payins',  shortLabel: 'Payins' },
-      { to: '/merchant/payouts', icon: TrendingDown, label: 'Payouts', shortLabel: 'Payouts' },
-      { to: '/merchant/refunds', icon: RotateCcw,    label: 'Refunds', shortLabel: 'Refunds' },
+      { to: '/merchant/payins',   icon: TrendingUp,   label: 'Payins',   shortLabel: 'Payins' },
+      { to: '/merchant/payouts',  icon: TrendingDown, label: 'Payouts',  shortLabel: 'Payouts' },
+      { to: '/merchant/disputes', icon: AlertCircle,  label: 'Disputes', shortLabel: 'Disputes' },
     ],
   },
   {
@@ -71,23 +72,19 @@ const navGroups = [
   {
     label: 'Integration',
     items: [
-      { to: '/merchant/api',      icon: Code,    label: 'API Keys',  shortLabel: 'API' },
-      { to: '/merchant/webhooks', icon: Webhook, label: 'Webhooks',  shortLabel: 'Webhooks' },
+      { to: '/merchant/api', icon: Code, label: 'API & Webhooks', shortLabel: 'API' },
     ],
   },
   {
     label: 'Reports',
     items: [
-      { to: '/merchant/reports',  icon: FileText,    label: 'Reports',  shortLabel: 'Reports' },
-      { to: '/merchant/disputes', icon: AlertCircle, label: 'Disputes', shortLabel: 'Disputes' },
+      { to: '/merchant/reports', icon: FileText, label: 'Reports', shortLabel: 'Reports' },
     ],
   },
   {
     label: 'Settings',
     items: [
-      { to: '/merchant/team',     icon: Users,       label: 'Team',     shortLabel: 'Team' },
-      { to: '/merchant/security', icon: ShieldCheck, label: 'Security', shortLabel: 'Security' },
-      { to: '/merchant/settings', icon: Settings,    label: 'Settings', shortLabel: 'Settings' },
+      { to: '/merchant/settings', icon: Settings, label: 'Settings', shortLabel: 'Settings' },
     ],
   },
 ];
@@ -97,8 +94,8 @@ const bottomNavItems = [
   { to: '/merchant/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
   { to: '/merchant/payins',    icon: TrendingUp,      shortLabel: 'Payins' },
   { to: '/merchant/payouts',   icon: TrendingDown,    shortLabel: 'Payouts' },
+  { to: '/merchant/disputes',  icon: AlertCircle,     shortLabel: 'Disputes' },
   { to: '/merchant/balance',   icon: Wallet,          shortLabel: 'Balance' },
-  { to: '/merchant/api',       icon: Code,            shortLabel: 'API' },
 ];
 
 const allLinks = navGroups.flatMap(g => g.items);
@@ -161,13 +158,25 @@ export default function MerchantLayout() {
     const newMode = !testMode;
     await supabase.from('merchants').update({ test_mode: newMode }).eq('id', merchantInfo.id);
     setTestMode(newMode);
+    
+    // Log activity
+    logMerchantActivity(
+      newMode ? MERCHANT_ACTIONS.TEST_MODE_ENABLED : MERCHANT_ACTIONS.TEST_MODE_DISABLED,
+      { details: { test_mode: newMode } }
+    );
   };
 
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
   const handleLogout = async () => {
-    try { await supabase.auth.signOut(); navigate('/signin'); }
-    catch (e) { alert('Logout failed: ' + e.message); }
+    try {
+      // Log before signing out (need auth for RPC)
+      await logMerchantActivity(MERCHANT_ACTIONS.LOGOUT);
+      await supabase.auth.signOut();
+      navigate('/signin');
+    } catch (e) {
+      alert('Logout failed: ' + e.message);
+    }
   };
 
   const toggleGroup = (label) => {

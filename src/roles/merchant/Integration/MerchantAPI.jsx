@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { supabase } from '../../supabase';
+import { supabase } from '../../../supabase';
+import { logMerchantActivity, MERCHANT_ACTIONS } from '../../../utils/merchantActivityLogger';
 import {
   Key, Copy, CheckCircle, RefreshCw, AlertCircle, Code, Book, Download,
   Globe, Shield, Eye, EyeOff, Terminal, FileText, Zap, X, ExternalLink,
 } from 'lucide-react';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 /* ─── Test Mode Toggle ─── */
 function TestModeToggle() {
@@ -160,10 +162,11 @@ export default function MerchantAPI() {
           setWebhookUrl(data.webhook_url || '');
           setWebhookSecret(data.webhook_secret || '');
           setWebhookEvents(data.webhook_events || ['payin.success', 'payin.failed', 'payout.completed']);
+          
+          // Webhook logs - use merchant.id, not user.id
+          const { data: logs } = await supabase.from('webhook_logs').select('*').eq('merchant_id', data.id).order('timestamp', { ascending: false }).limit(50);
+          setWebhookLogs((logs || []).map(l => ({ ...l, merchantId: l.merchant_id, responseCode: l.response_code, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
         }
-        // Webhook logs
-        const { data: logs } = await supabase.from('webhook_logs').select('*').eq('merchant_id', user.id).order('timestamp', { ascending: false }).limit(50);
-        setWebhookLogs((logs || []).map(l => ({ ...l, merchantId: l.merchant_id, responseCode: l.response_code, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
       } catch (e) { console.error('Error fetching API data:', e); }
       setLoading(false);
     };
@@ -185,14 +188,31 @@ export default function MerchantAPI() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Get merchant ID first
+    const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+    if (!merchant) {
+      alert('Merchant not found');
+      return;
+    }
+
     setRegenerating(true);
     const newKey = `${mode === 'live' ? 'live' : 'test'}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
     try {
       const fieldName = mode === 'live' ? 'live_api_key' : 'test_api_key';
       const updateData = { [fieldName]: newKey, api_key_updated_at: new Date().toISOString() };
-      await supabase.from('merchants').update(updateData).eq('id', user.id);
+      await supabase.from('merchants').update(updateData).eq('id', merchant.id);
       setApiKeys(prev => ({ ...prev, [mode]: newKey }));
+      
+      // Log activity (critical action)
+      await logMerchantActivity(MERCHANT_ACTIONS.API_KEY_REGENERATED, {
+        details: { 
+          key_type: mode,
+          action: hasExistingKey ? 'regenerated' : 'generated',
+          key_prefix: newKey.substring(0, 10) + '...'
+        }
+      });
+      
       const successMsg = `✅ ${mode === 'live' ? 'Live' : 'Test'} API key ${hasExistingKey ? 'regenerated' : 'generated'} successfully!`;
       setSuccessMessage(successMsg);
       setTimeout(() => setSuccessMessage(''), 3000);
@@ -210,6 +230,15 @@ export default function MerchantAPI() {
     if (!webhookUrl || !webhookUrl.startsWith('https://')) { alert('Webhook URL must start with https://'); return; }
     try {
       await supabase.from('merchants').update({ webhook_url: webhookUrl, webhook_events: webhookEvents }).eq('id', user.id);
+      
+      // Log activity
+      await logMerchantActivity(MERCHANT_ACTIONS.WEBHOOK_URL_UPDATED, {
+        details: { 
+          webhook_url: webhookUrl,
+          events: webhookEvents
+        }
+      });
+      
       alert('✅ Webhook configuration saved!');
     } catch (e) { alert('Error: ' + e.message); }
   };
@@ -223,19 +252,18 @@ export default function MerchantAPI() {
         status: 'delivered', response_code: 200,
         payload: { test: true, timestamp: Date.now() },
       });
+      
+      // Log activity
+      await logMerchantActivity(MERCHANT_ACTIONS.WEBHOOK_TEST_SENT, {
+        details: { webhook_url: webhookUrl }
+      });
+      
       alert('✅ Test webhook fired! Check logs below.');
     } catch (e) { alert('Error: ' + e.message); }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-purple-500 animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm font-medium">Loading API settings…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading API settings…" />;
   }
 
   return (

@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../../supabase';
+import { supabase } from '../../../supabase';
+import { logMerchantActivity, MERCHANT_ACTIONS } from '../../../utils/merchantActivityLogger';
 import {
   Wallet, TrendingUp, TrendingDown, Download, RefreshCw, CheckCircle,
-  AlertCircle, Clock, Lock, Plus, Building, ArrowDown, History, Shield,
+  AlertCircle, Clock, Lock, Plus, Building, ArrowDown, History, Shield, X,
 } from 'lucide-react';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 /* ─── Transaction Ledger Row ─── */
 function LedgerRow({ tx }) {
-  const isCredit = tx.type === 'payin' || tx.type === 'refund';
+  // In balance_history: positive amount = credit, negative = debit
+  const isCredit = Number(tx.amount) > 0;
+  const displayAmount = Math.abs(Number(tx.amount) || 0);
   
   return (
     <div className="flex items-center gap-3 py-3 border-b border-slate-100 last:border-0">
@@ -15,15 +19,15 @@ function LedgerRow({ tx }) {
         {isCredit ? <TrendingUp className="text-green-600" size={16} /> : <TrendingDown className="text-red-600" size={16} />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-slate-900 text-sm capitalize">{tx.type}</p>
-        <p className="text-xs text-slate-400 truncate">{tx.description || 'N/A'}</p>
+        <p className="font-semibold text-slate-900 text-sm capitalize">{tx.reason?.replace(/_/g, ' ') || tx.type || 'Transaction'}</p>
+        <p className="text-xs text-slate-400 truncate">{tx.note || tx.description || '—'}</p>
       </div>
       <div className="text-right flex-shrink-0">
         <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-red-600'}`}>
-          {isCredit ? '+' : '−'}₹{tx.amount?.toLocaleString()}
+          {isCredit ? '+' : '−'}₹{displayAmount.toLocaleString()}
         </p>
         <p className="text-xs text-slate-400">
-          {new Date((tx.timestamp?.seconds || 0) * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+          {tx.created_at ? new Date(tx.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
         </p>
       </div>
     </div>
@@ -70,7 +74,7 @@ function SettlementModal({ onClose, onSubmit, availableBalance }) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <h3 className="text-base font-bold text-slate-900">Request Settlement</h3>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-slate-500" />
+            <X className="w-5 h-5 text-slate-500" />
           </button>
         </div>
 
@@ -202,9 +206,15 @@ export default function MerchantBalance() {
             totalPayinRevenue, totalPayinCommission, totalPayoutAmount, totalPayoutCommission, netBalance,
           });
 
-          // Ledger
-          const { data: ledgerData } = await supabase.from('merchant_ledger').select('*').eq('merchant_id', merchantId).order('timestamp', { ascending: false }).limit(50);
-          setLedger((ledgerData || []).map(l => ({ ...l, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
+          // Ledger - using balance_history table
+          const { data: ledgerData } = await supabase
+            .from('balance_history')
+            .select('*')
+            .eq('entity_type', 'merchant')
+            .eq('entity_id', merchantId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+          setLedger(ledgerData || []);
 
           // Settlements
           const { data: settData } = await supabase.from('merchant_settlements').select('*').eq('merchant_id', merchantId).order('created_at', { ascending: false }).limit(20);
@@ -238,7 +248,36 @@ export default function MerchantBalance() {
       return;
     }
     
-    // Create settlement request
+    // First deduct from available balance (reserve the amount) - do this BEFORE creating settlement
+    const currentBalance = merchant.available_balance || 0;
+    const newBalance = currentBalance - amount;
+    
+    // Get current pending_settlement from DB (not from state which could be stale)
+    const { data: currentMerchant } = await supabase
+      .from('merchants')
+      .select('pending_settlement')
+      .eq('id', merchant.id)
+      .single();
+    
+    const currentPending = currentMerchant?.pending_settlement || 0;
+    const newPending = currentPending + amount;
+    
+    // Update merchant balance FIRST
+    const { error: updateError } = await supabase
+      .from('merchants')
+      .update({ 
+        available_balance: newBalance,
+        pending_settlement: newPending,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', merchant.id);
+    
+    if (updateError) {
+      alert('Error reserving balance: ' + updateError.message);
+      return;
+    }
+    
+    // Now create settlement request
     const { error: insertError } = await supabase.from('merchant_settlements').insert({
       merchant_id: merchant.id,
       amount: amount,
@@ -248,20 +287,26 @@ export default function MerchantBalance() {
     });
     
     if (insertError) {
-      alert('Error: ' + insertError.message);
+      // Rollback the balance change
+      await supabase
+        .from('merchants')
+        .update({ 
+          available_balance: currentBalance,
+          pending_settlement: currentPending,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', merchant.id);
+      alert('Error creating settlement: ' + insertError.message);
       return;
     }
     
-    // Deduct from available balance (reserve the amount)
-    const newBalance = (merchant.available_balance || 0) - amount;
-    await supabase
-      .from('merchants')
-      .update({ 
-        available_balance: newBalance,
-        pending_settlement: (balance.pending || 0) + amount,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', merchant.id);
+    console.log('Settlement created:', { 
+      oldBalance: currentBalance, 
+      newBalance, 
+      oldPending: currentPending, 
+      newPending,
+      amount 
+    });
     
     // Update local state
     setBalance(prev => ({
@@ -283,19 +328,22 @@ export default function MerchantBalance() {
       usdtAddress: s.usdt_address 
     })));
     
+    // Log activity
+    await logMerchantActivity(MERCHANT_ACTIONS.SETTLEMENT_REQUESTED, {
+      entityType: 'settlement',
+      details: {
+        amount: amount,
+        usdt_address: data.usdtAddress,
+        network: 'TRC20',
+      }
+    });
+    
     setShowModal(false);
     alert('Settlement request submitted! Amount reserved from balance.');
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <RefreshCw className="w-10 h-10 text-green-500 animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm font-medium">Loading balance…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading balance…" color="purple" />;
   }
 
   return (
@@ -304,7 +352,7 @@ export default function MerchantBalance() {
       <div className="hidden sm:flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-sm">
+            <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg shadow-purple-500/20">
               <Wallet className="w-5 h-5 text-white" />
             </div>
             Balance
@@ -314,7 +362,7 @@ export default function MerchantBalance() {
         <button 
           onClick={() => setShowModal(true)}
           disabled={balance.netBalance < 50000}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Request Settlement
         </button>
       </div>
@@ -324,7 +372,7 @@ export default function MerchantBalance() {
         <button 
           onClick={() => setShowModal(true)}
           disabled={balance.netBalance < 50000}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 text-sm font-semibold active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed">
+          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Settlement
         </button>
       </div>
@@ -450,7 +498,7 @@ export default function MerchantBalance() {
           return (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
-                activeTab === tab.key ? 'bg-white text-green-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                activeTab === tab.key ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}>
               <Icon className="w-4 h-4" />{tab.label}
             </button>
@@ -463,7 +511,28 @@ export default function MerchantBalance() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-900">Transaction Ledger</h3>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold hover:bg-blue-100">
+            <button 
+              onClick={() => {
+                if (ledger.length === 0) { alert('No transactions to export'); return; }
+                const csv = [
+                  ['Date', 'Type', 'Amount', 'Note'],
+                  ...ledger.map(tx => [
+                    tx.created_at ? new Date(tx.created_at).toLocaleString() : '',
+                    tx.reason || tx.type || '',
+                    tx.amount || 0,
+                    tx.note || tx.description || '',
+                  ])
+                ].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ledger-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold hover:bg-blue-100"
+            >
               <Download className="w-3.5 h-3.5" /> CSV
             </button>
           </div>

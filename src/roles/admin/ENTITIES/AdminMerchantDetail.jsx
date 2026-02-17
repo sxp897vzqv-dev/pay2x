@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../../supabase';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Store, ArrowLeft, RefreshCw, Edit, Save, CheckCircle, AlertCircle, Globe, Mail, Phone, Key, Eye, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Activity, Calendar, Shield, Copy } from 'lucide-react';
+import { Store, ArrowLeft, RefreshCw, Edit, Save, CheckCircle, AlertCircle, Globe, Mail, Phone, Key, Eye, TrendingUp, TrendingDown, ToggleLeft, ToggleRight, Activity, Calendar, Shield, Copy, Wallet, Plus, Minus, Send, Clock } from 'lucide-react';
 import {
   logMerchantActivated,
   logMerchantDeactivated,
   logAuditEvent,
   logMerchantAPIKeyGenerated,
+  logMerchantBalanceTopup,
+  logMerchantBalanceDeduct,
 } from '../../../utils/auditLogger';
 import ResetPasswordButton from './components/ResetPasswordButton';
 
@@ -105,6 +107,209 @@ function ProfileTab({ merchant, onUpdate, saving }) {
             <p className="text-xs text-slate-400">Reset merchant's login password</p>
           </div>
           <ResetPasswordButton email={merchant.email} name={merchant.name || merchant.businessName} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Balance Tab ─── */
+function BalanceTab({ merchant, setToast, onRefresh }) {
+  const [amount, setAmount] = useState('');
+  const [action, setAction] = useState('topup');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  const availableBalance = Number(merchant.available_balance) || 0;
+  const pendingBalance = Number(merchant.pending_balance) || 0;
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const { data } = await supabase
+          .from('balance_history')
+          .select('*')
+          .eq('entity_type', 'merchant')
+          .eq('entity_id', merchant.id)
+          .order('created_at', { ascending: false })
+          .limit(20);
+        setHistory(data || []);
+      } catch (e) { console.error(e); }
+    };
+    if (merchant.id) fetchHistory();
+  }, [merchant.id]);
+
+  const handleSubmit = async () => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { setToast({ msg: 'Enter a valid amount', success: false }); return; }
+    if (!note.trim()) { setToast({ msg: 'Please add a note', success: false }); return; }
+
+    setSaving(true);
+    try {
+      const balanceBefore = availableBalance;
+      let newBalance = balanceBefore;
+      let reason = '';
+
+      if (action === 'topup') {
+        newBalance = balanceBefore + amt;
+        reason = 'admin_topup';
+      } else if (action === 'deduct') {
+        if (amt > balanceBefore) { 
+          setToast({ msg: 'Cannot deduct more than available balance', success: false }); 
+          setSaving(false); 
+          return; 
+        }
+        newBalance = balanceBefore - amt;
+        reason = 'admin_deduct';
+      }
+
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // Update merchant balance
+      const { error: updateError } = await supabase.from('merchants').update({ 
+        available_balance: newBalance,
+        updated_at: new Date().toISOString(),
+      }).eq('id', merchant.id);
+
+      if (updateError) throw updateError;
+
+      // Create balance history entry
+      const { error: historyError } = await supabase.from('balance_history').insert({
+        entity_type: 'merchant',
+        entity_id: merchant.id,
+        amount: action === 'topup' ? amt : -amt,
+        balance_before: balanceBefore,
+        balance_after: newBalance,
+        reason: reason,
+        actor_id: user?.id || null,
+        actor_role: 'admin',
+        note: note,
+      });
+
+      if (historyError) {
+        console.error('Balance history error:', historyError);
+        // Non-fatal, continue
+      }
+
+      // Audit logs
+      if (action === 'topup') {
+        await logMerchantBalanceTopup(merchant.id, merchant.name || merchant.businessName || 'Unknown', amt, balanceBefore, newBalance, note);
+      } else {
+        await logMerchantBalanceDeduct(merchant.id, merchant.name || merchant.businessName || 'Unknown', amt, balanceBefore, newBalance, note);
+      }
+
+      setToast({ msg: 'Balance updated successfully', success: true });
+      setAmount(''); setNote('');
+      if (onRefresh) onRefresh();
+
+      // Refresh history
+      const { data } = await supabase
+        .from('balance_history')
+        .select('*')
+        .eq('entity_type', 'merchant')
+        .eq('entity_id', merchant.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setHistory(data || []);
+    } catch (e) { 
+      console.error(e); 
+      setToast({ msg: 'Failed to update balance: ' + (e.message || 'Unknown error'), success: false }); 
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl p-4 text-white">
+          <p className="text-green-100 text-xs font-semibold mb-1">Available Balance</p>
+          <p className="text-2xl font-bold">₹{availableBalance.toLocaleString()}</p>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-4 text-white">
+          <p className="text-amber-100 text-xs font-semibold mb-1">Pending Balance</p>
+          <p className="text-2xl font-bold">₹{pendingBalance.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+        <p className="text-xs text-slate-500">
+          Total: <span className="font-bold text-slate-900">₹{(availableBalance + pendingBalance).toLocaleString()}</span> = Available + Pending
+        </p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-bold text-slate-900">Balance Action</h3>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: 'topup', label: 'Add Balance', icon: Plus, bg: '#f0fdf4', border: '#22c55e' },
+              { key: 'deduct', label: 'Deduct Balance', icon: Minus, bg: '#fef2f2', border: '#ef4444' },
+            ].map(opt => {
+              const Icon = opt.icon;
+              const isSelected = action === opt.key;
+              return (
+                <button key={opt.key} onClick={() => setAction(opt.key)}
+                  className="p-3 rounded-xl border-2 transition-all text-left"
+                  style={{ borderColor: isSelected ? opt.border : '#e2e8f0', backgroundColor: isSelected ? opt.bg : '#fff' }}>
+                  <Icon className="w-5 h-5 mb-1" style={{ color: isSelected ? opt.border : '#94a3b8' }} />
+                  <p className={`text-sm font-semibold ${isSelected ? 'text-slate-900' : 'text-slate-600'}`}>{opt.label}</p>
+                </button>
+              );
+            })}
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Amount *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold">₹</span>
+              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
+                className="w-full pl-8 pr-3 py-3 border border-slate-300 rounded-xl text-lg font-bold focus:outline-none focus:ring-2 focus:ring-purple-400" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">Note *</label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Reason for this action..." rows={2}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none" />
+          </div>
+          <button onClick={handleSubmit} disabled={saving || !amount || !note.trim()}
+            className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold text-sm hover:bg-purple-700 disabled:opacity-40 flex items-center justify-center gap-2">
+            {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {saving ? 'Processing...' : 'Apply Action'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-bold text-slate-900">Balance History</h3>
+        </div>
+        <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+          {history.length > 0 ? history.map(tx => {
+            const isCredit = Number(tx.amount) > 0;
+            return (
+              <div key={tx.id} className="px-4 py-3 flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isCredit ? 'bg-green-100' : 'bg-red-100'}`}>
+                  {isCredit ? <Plus className="w-4 h-4 text-green-600" /> : <Minus className="w-4 h-4 text-red-600" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 capitalize">{tx.reason?.replace(/_/g, ' ') || 'Transaction'}</p>
+                  <p className="text-xs text-slate-400 truncate">{tx.note || '—'}</p>
+                  <p className="text-xs text-slate-400">{tx.created_at ? new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</p>
+                </div>
+                <p className={`text-sm font-bold ${isCredit ? 'text-green-600' : 'text-red-600'}`}>
+                  {isCredit ? '+' : '−'}₹{Math.abs(Number(tx.amount) || 0).toLocaleString()}
+                </p>
+              </div>
+            );
+          }) : (
+            <div className="p-6 text-center">
+              <Clock className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+              <p className="text-sm text-slate-500">No history yet</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -398,11 +603,13 @@ export default function AdminMerchantDetail() {
 
       <div className="flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         <TabButton active={activeTab === 'profile'} icon={Store} label="Profile" onClick={() => setActiveTab('profile')} />
+        <TabButton active={activeTab === 'balance'} icon={Wallet} label="Balance" onClick={() => setActiveTab('balance')} />
         <TabButton active={activeTab === 'api'} icon={Key} label="API Keys" onClick={() => setActiveTab('api')} />
         <TabButton active={activeTab === 'activity'} icon={Activity} label="Activity" onClick={() => setActiveTab('activity')} />
       </div>
 
       {activeTab === 'profile' && <ProfileTab merchant={merchant} onUpdate={handleUpdate} saving={saving} />}
+      {activeTab === 'balance' && <BalanceTab merchant={merchant} setToast={setToast} onRefresh={fetchMerchant} />}
       {activeTab === 'api' && <APITab merchant={merchant} setToast={setToast} onRefresh={fetchMerchant} />}
       {activeTab === 'activity' && <ActivityTab merchant={merchant} />}
     </div>

@@ -1,123 +1,212 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { supabase } from "../../supabase";
-import { useRealtimeSubscription } from "../../hooks/useRealtimeSubscription";
+import { supabase } from "../../../supabase";
+import { useRealtimeSubscription } from "../../../hooks/useRealtimeSubscription";
 import {
   TrendingUp, Search, Download, Filter, X, CheckCircle, XCircle, Clock,
   AlertCircle, Calendar, Hash, User, CreditCard, Smartphone,
-  RefreshCw, Copy, MoreHorizontal, Eye, ArrowRight,
+  RefreshCw, Copy, Eye, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { Toast } from '../../components/admin';
+import { Toast } from '../../../components/admin';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+
+/* ─── Time Ago Helper ─── */
+function timeAgo(dateStr) {
+  if (!dateStr) return null;
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
 
 /* ─── Payin Card ─── */
 function PayinCard({ payin, onViewWebhook, isNew }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
+  const [expanded, setExpanded] = useState(false);
 
   const statusColors = {
-    completed: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', icon: CheckCircle },
-    pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: Clock },
-    rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
-    failed: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle },
+    completed: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', stripe: 'bg-green-500', icon: CheckCircle },
+    pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', stripe: 'bg-yellow-500', icon: Clock },
+    rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', stripe: 'bg-red-500', icon: XCircle },
+    failed: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', stripe: 'bg-red-500', icon: XCircle },
+    expired: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-600', stripe: 'bg-slate-400', icon: Clock },
   };
 
   const status = statusColors[payin.status] || statusColors.pending;
   const StatusIcon = status.icon;
 
-  const copyText = (text) => {
+  const copyText = (text, label) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
   };
+
+  // Calculate net amount (amount - commission)
+  const commission = Number(payin.commission) || 0;
+  const netAmount = Number(payin.amount) - commission;
 
   return (
     <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all ${isNew ? 'ring-2 ring-purple-400 ring-offset-2' : ''}`}>
-      <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : payin.status === 'rejected' || payin.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'}`} />
-      <div className="p-3 space-y-3">
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
+      <div className={`h-1 ${status.stripe}`} />
+      <div className="p-3">
+        {/* Header Row */}
+        <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-400 mb-0.5">Order ID</p>
-            <div className="flex items-center gap-1.5">
-              <p className="font-mono text-sm font-bold text-slate-900 truncate bg-slate-50 px-2 py-1 rounded-lg inline-block" style={{ fontFamily: 'var(--font-mono)' }}>
-                {payin.order_id || payin.id?.slice(-8)}
-              </p>
-              <button onClick={() => copyText(payin.order_id || payin.id)} className="p-1 hover:bg-slate-100 rounded">
-                {copied ? <CheckCircle className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-              </button>
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <p className="font-mono text-xs text-slate-400">{payin.txn_id || payin.id?.slice(0, 12) || '—'}</p>
+              <span className="text-xs text-slate-400">•</span>
+              <span className="text-xs text-slate-500">{timeAgo(payin.created_at)}</span>
             </div>
+            <p className="text-lg font-bold text-green-600">₹{(Number(payin.amount) || 0).toLocaleString()}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${status.bg} ${status.border} ${status.text} flex items-center gap-1 border`}>
               <StatusIcon className="w-3 h-3" />
               {payin.status?.toUpperCase()}
             </span>
-            <button onClick={() => onViewWebhook(payin)} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
-              <Eye className="w-4 h-4 text-slate-500" />
-            </button>
           </div>
         </div>
 
-        {/* Info grid */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-            <div className="flex items-center gap-1 mb-1">
-              <User className="w-3 h-3 text-purple-600" />
-              <p className="text-xs font-bold text-slate-400 uppercase">Customer</p>
-            </div>
-            <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.customer_id || payin.user_id || 'N/A'}
-            </p>
+        {/* Quick Info Grid */}
+        <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
+          <div className="flex items-center gap-1.5 text-slate-600 bg-slate-50 px-2 py-1.5 rounded-lg">
+            <Hash className="w-3 h-3 text-slate-400" />
+            <span className="truncate font-medium">{payin.order_id || 'No Order ID'}</span>
           </div>
-
-          <div className="bg-green-50 rounded-lg p-2.5 border border-green-200">
-            <div className="flex items-center gap-1 mb-1">
-              <CreditCard className="w-3 h-3 text-green-600" />
-              <p className="text-xs font-bold text-slate-600 uppercase">Amount</p>
-            </div>
-            <p className="text-base font-bold text-green-700">₹{payin.amount?.toLocaleString()}</p>
+          <div className="flex items-center gap-1.5 text-slate-600 bg-slate-50 px-2 py-1.5 rounded-lg">
+            <CreditCard className="w-3 h-3 text-slate-400" />
+            <span className="truncate font-mono">{payin.upi_id || 'N/A'}</span>
           </div>
-
-          <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-            <div className="flex items-center gap-1 mb-1">
-              <Smartphone className="w-3 h-3 text-blue-600" />
-              <p className="text-xs font-bold text-slate-400 uppercase">Method</p>
-            </div>
-            <p className="text-xs font-semibold text-slate-800 capitalize">{payin.payment_method || 'UPI'}</p>
+          <div className="flex items-center gap-1.5 text-slate-600 bg-slate-50 px-2 py-1.5 rounded-lg">
+            <User className="w-3 h-3 text-slate-400" />
+            <span className="truncate">{payin.holder_name || payin.customer_id || payin.user_id || 'N/A'}</span>
           </div>
-
-          <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
-            <div className="flex items-center gap-1 mb-1">
-              <Hash className="w-3 h-3 text-indigo-600" />
-              <p className="text-xs font-bold text-slate-400 uppercase">UTR</p>
-            </div>
-            <p className="text-xs font-bold text-slate-800 truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {payin.utr || 'Pending'}
-            </p>
+          <div className="flex items-center gap-1.5 text-slate-600 bg-slate-50 px-2 py-1.5 rounded-lg">
+            <Smartphone className="w-3 h-3 text-slate-400" />
+            <span className="truncate font-mono">{payin.utr || 'Pending UTR'}</span>
           </div>
         </div>
 
-        {/* Webhook status */}
-        {payin.webhook_status && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold ${
-            payin.webhook_status === 'delivered' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-            payin.webhook_status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' :
-            'bg-yellow-50 text-yellow-700 border border-yellow-200'
-          }`}>
-            <AlertCircle className="w-3.5 h-3.5" />
-            Webhook: {payin.webhook_status?.toUpperCase()}
+        {/* Commission & Net Amount (if completed) */}
+        {payin.status === 'completed' && commission > 0 && (
+          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-2">
+            <div className="text-xs">
+              <span className="text-slate-500">Amount: </span>
+              <span className="font-bold text-slate-700">₹{Number(payin.amount).toLocaleString()}</span>
+              <span className="text-slate-400 mx-1">−</span>
+              <span className="text-slate-500">Fee: </span>
+              <span className="font-bold text-orange-600">₹{commission.toLocaleString()}</span>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-slate-500">You Received</p>
+              <p className="text-sm font-bold text-green-700">₹{netAmount.toLocaleString()}</p>
+            </div>
           </div>
         )}
 
-        {/* Timestamp */}
-        <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-100">
-          <div className="flex items-center gap-1">
-            <Clock size={11} />
-            {payin.created_at ? new Date(payin.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+        {/* Expand/Collapse Button */}
+        <button 
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg transition-colors"
+        >
+          {expanded ? 'Hide Details' : 'Show Details'}
+          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
+
+        {/* Expanded Details */}
+        {expanded && (
+          <div className="border-t border-slate-100 pt-2 mt-2 space-y-2">
+            <div className="bg-slate-50 rounded-lg p-2 text-xs space-y-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Payment ID</span>
+                <button onClick={() => copyText(payin.id, 'id')} className="font-mono text-slate-700 hover:text-purple-600 flex items-center gap-1">
+                  {payin.id?.slice(0, 16)}... {copied === 'id' ? <CheckCircle className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+              {payin.txn_id && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Transaction ID</span>
+                  <button onClick={() => copyText(payin.txn_id, 'txn')} className="font-mono text-slate-700 hover:text-purple-600 flex items-center gap-1">
+                    {payin.txn_id} {copied === 'txn' ? <CheckCircle className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-500">Order ID</span>
+                <button onClick={() => copyText(payin.order_id || payin.id, 'order')} className="font-mono text-slate-700 hover:text-purple-600 flex items-center gap-1">
+                  {payin.order_id || '—'} {copied === 'order' ? <CheckCircle className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Customer ID</span>
+                <span className="font-mono text-slate-700">{payin.customer_id || payin.user_id || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">UPI ID</span>
+                <span className="font-mono text-slate-700">{payin.upi_id || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Account Holder</span>
+                <span className="text-slate-700">{payin.holder_name || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">UTR / Reference</span>
+                <button onClick={() => copyText(payin.utr || '', 'utr')} className="font-mono text-slate-700 hover:text-purple-600 flex items-center gap-1">
+                  {payin.utr || '—'} {payin.utr && (copied === 'utr' ? <CheckCircle className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />)}
+                </button>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Amount</span>
+                <span className="font-bold text-green-600">₹{(Number(payin.amount) || 0).toLocaleString()}</span>
+              </div>
+              {commission > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Platform Fee</span>
+                  <span className="text-orange-600">−₹{commission.toLocaleString()}</span>
+                </div>
+              )}
+              {commission > 0 && (
+                <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
+                  <span className="text-slate-600 font-semibold">Net Credited</span>
+                  <span className="font-bold text-green-700">₹{netAmount.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1 border-t border-slate-200 mt-1">
+                <span className="text-slate-500">Created</span>
+                <span className="text-slate-700">
+                  {payin.created_at ? new Date(payin.created_at).toLocaleString('en-IN') : '—'}
+                </span>
+              </div>
+              {payin.completed_at && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Completed</span>
+                  <span className="text-green-700">
+                    {new Date(payin.completed_at).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+              {payin.webhook_status && (
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Webhook</span>
+                  <span className={`font-semibold ${
+                    payin.webhook_status === 'delivered' ? 'text-blue-600' :
+                    payin.webhook_status === 'failed' ? 'text-red-600' : 'text-yellow-600'
+                  }`}>{payin.webhook_status?.toUpperCase()}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2">
+              <button 
+                onClick={() => onViewWebhook(payin)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-100"
+              >
+                <Eye className="w-3.5 h-3.5" /> View Webhook
+              </button>
+            </div>
           </div>
-          {payin.upi_id && (
-            <span className="font-mono text-slate-600">UPI: {payin.upi_id}</span>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
@@ -306,7 +395,14 @@ export default function MerchantPayin() {
 
   const filtered = useMemo(() => {
     let r = payins;
-    if (statusFilter !== "all") r = r.filter(p => p.status === statusFilter);
+    if (statusFilter !== "all") {
+      if (statusFilter === 'rejected') {
+        // Include rejected, failed, and expired in "Rejected" filter
+        r = r.filter(p => ['rejected', 'failed', 'expired'].includes(p.status));
+      } else {
+        r = r.filter(p => p.status === statusFilter);
+      }
+    }
     if (debouncedSearch) {
       const s = debouncedSearch.toLowerCase();
       r = r.filter(p => 
@@ -325,7 +421,7 @@ export default function MerchantPayin() {
     total: payins.length,
     success: payins.filter(p => p.status === 'completed').length,
     pending: payins.filter(p => p.status === 'pending').length,
-    failed: payins.filter(p => p.status === 'rejected' || p.status === 'failed').length,
+    failed: payins.filter(p => ['rejected', 'failed', 'expired'].includes(p.status)).length,
   }), [payins]);
 
   const handleExport = () => {
@@ -352,14 +448,7 @@ export default function MerchantPayin() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm font-medium">Loading payins…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading payins…" color="purple" />;
   }
 
   return (
@@ -374,7 +463,7 @@ export default function MerchantPayin() {
       <div className="hidden sm:flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-sm">
+            <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg shadow-purple-500/20">
               <TrendingUp className="w-5 h-5 text-white" />
             </div>
             Payins

@@ -71,21 +71,16 @@ const AffiliateEarnings = React.lazy(() => import('./roles/affiliate/AffiliateEa
 const AffiliateSettlements = React.lazy(() => import('./roles/affiliate/AffiliateSettlements'));
 const AffiliateSettings = React.lazy(() => import('./roles/affiliate/AffiliateSettings'));
 
-// Merchant pages
-const MerchantDashboard = React.lazy(() => import('./roles/merchant/MerchantDashboard'));
-const MerchantPayin = React.lazy(() => import('./roles/merchant/MerchantPayin'));
-const MerchantPayout = React.lazy(() => import('./roles/merchant/MerchantPayout'));
-const MerchantBalance = React.lazy(() => import('./roles/merchant/MerchantBalance'));
-const MerchantAPI = React.lazy(() => import('./roles/merchant/MerchantAPI'));
-const MerchantAnalytics = React.lazy(() => import('./roles/merchant/MerchantAnalytics'));
-const MerchantDispute = React.lazy(() => import('./roles/merchant/MerchantDispute'));
-const MerchantSettings = React.lazy(() => import('./roles/merchant/MerchantSettings'));
-// Enterprise merchant pages
-const MerchantSecurity = React.lazy(() => import('./roles/merchant/MerchantSecurity'));
-const MerchantTeam = React.lazy(() => import('./roles/merchant/MerchantTeam'));
-const MerchantWebhooks = React.lazy(() => import('./roles/merchant/MerchantWebhooks'));
-const MerchantReports = React.lazy(() => import('./roles/merchant/MerchantReports'));
-const MerchantRefunds = React.lazy(() => import('./roles/merchant/MerchantRefunds'));
+// Merchant pages (organized by folder)
+const MerchantDashboard = React.lazy(() => import('./roles/merchant/Dashboard/MerchantDashboard'));
+const MerchantPayin = React.lazy(() => import('./roles/merchant/Transactions/MerchantPayin'));
+const MerchantPayout = React.lazy(() => import('./roles/merchant/Transactions/MerchantPayout'));
+const MerchantDispute = React.lazy(() => import('./roles/merchant/Transactions/MerchantDispute'));
+const MerchantBalance = React.lazy(() => import('./roles/merchant/Finance/MerchantBalance'));
+const MerchantAPI = React.lazy(() => import('./roles/merchant/Integration/MerchantAPI'));
+const MerchantReports = React.lazy(() => import('./roles/merchant/Reports/MerchantReports'));
+const MerchantSettings = React.lazy(() => import('./roles/merchant/Settings/MerchantSettings'));
+// MerchantRefunds removed
 
 // Protected Route Component
 function ProtectedRoute({ children, allowedRole, userRole }) {
@@ -359,23 +354,18 @@ function App() {
           <Route path="dashboard" element={<MerchantDashboard />} />
           <Route path="payins" element={<MerchantPayin />} />
           <Route path="payouts" element={<MerchantPayout />} />
-          <Route path="refunds" element={<MerchantRefunds />} />
           <Route path="balance" element={<MerchantBalance />} />
           
           {/* API & Integration */}
           <Route path="api" element={<MerchantAPI />} />
-          <Route path="webhooks" element={<MerchantWebhooks />} />
           
-          {/* Analytics & Reports */}
-          <Route path="analytics" element={<MerchantAnalytics />} />
+          {/* Reports */}
           <Route path="reports" element={<MerchantReports />} />
           
           {/* Support */}
           <Route path="disputes" element={<MerchantDispute />} />
           
           {/* Settings & Security */}
-          <Route path="team" element={<MerchantTeam />} />
-          <Route path="security" element={<MerchantSecurity />} />
           <Route path="settings" element={<MerchantSettings />} />
         </Route>
 

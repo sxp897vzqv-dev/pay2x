@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Eye, CheckCircle, AlertCircle, Globe, Key, Copy,
+  Eye, CheckCircle, AlertCircle, Globe, Key, Copy, Wallet,
   MoreVertical, Edit, Trash2, EyeOff,
 } from 'lucide-react';
 
@@ -72,14 +72,18 @@ export default function MerchantCard({ merchant, onEdit, onDelete, onToggleStatu
         )}
 
         {/* Stats grid */}
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <div className="bg-green-50 rounded-lg p-2 border border-green-100">
+            <p className="text-xs text-green-600 mb-0.5">Balance</p>
+            <p className="text-sm font-bold text-green-700">₹{((merchant.available_balance || 0) / 1000).toFixed(0)}k</p>
+          </div>
           <div className="bg-slate-50 rounded-lg p-2 border border-slate-100">
             <p className="text-xs text-slate-400 mb-0.5">Orders</p>
             <p className="text-sm font-bold text-slate-900">{merchant.totalOrders || 0}</p>
           </div>
-          <div className="bg-green-50 rounded-lg p-2 border border-green-100">
-            <p className="text-xs text-green-600 mb-0.5">Volume</p>
-            <p className="text-sm font-bold text-green-700">₹{((merchant.totalVolume || 0) / 1000).toFixed(0)}k</p>
+          <div className="bg-purple-50 rounded-lg p-2 border border-purple-100">
+            <p className="text-xs text-purple-600 mb-0.5">Volume</p>
+            <p className="text-sm font-bold text-purple-700">₹{((merchant.totalVolume || 0) / 1000).toFixed(0)}k</p>
           </div>
         </div>
 
@@ -97,9 +101,9 @@ export default function MerchantCard({ merchant, onEdit, onDelete, onToggleStatu
             className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold hover:bg-indigo-100 active:scale-[0.97] transition-all">
             <Eye className="w-3.5 h-3.5" /> Details
           </Link>
-          <Link to={`/admin/merchants/${merchant.id}?tab=api`}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold hover:bg-purple-100 active:scale-[0.97] transition-all">
-            <Key className="w-3.5 h-3.5" /> API Keys
+          <Link to={`/admin/merchants/${merchant.id}?tab=balance`}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-semibold hover:bg-green-100 active:scale-[0.97] transition-all">
+            <Wallet className="w-3.5 h-3.5" /> Balance
           </Link>
         </div>
 
