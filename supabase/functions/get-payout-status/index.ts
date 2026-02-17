@@ -78,6 +78,7 @@ serve(async (req: Request) => {
         account_number,
         ifsc,
         account_name,
+        upi_id,
         utr,
         created_at,
         completed_at,
@@ -106,6 +107,9 @@ serve(async (req: Request) => {
       ? payout.account_number.slice(-4).padStart(payout.account_number.length, '*')
       : null;
 
+    // Determine payout mode
+    const payoutMode = payout.metadata?.payout_mode || (payout.upi_id ? 'upi' : 'bank');
+
     // 8. Return payout details
     return new Response(
       JSON.stringify({
@@ -113,16 +117,24 @@ serve(async (req: Request) => {
         payout: {
           payout_id: payout.id,
           txn_id: payout.txn_id,
+          order_id: payout.metadata?.order_id || null,
+          user_id: payout.metadata?.user_id || null,
           amount: payout.amount,
           fee: payout.commission,
+          payout_mode: payoutMode,
           status: payout.status,
+          // Bank details (masked)
           account_number: maskedAccount,
           ifsc_code: payout.ifsc,
+          bank_name: payout.metadata?.bank_name || null,
+          // UPI details
+          upi_id: payout.upi_id,
+          // Common
           account_name: payout.account_name,
+          // Completion details
           utr: payout.utr,
           created_at: payout.created_at,
           completed_at: payout.completed_at,
-          order_id: payout.metadata?.order_id || null,
         },
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
