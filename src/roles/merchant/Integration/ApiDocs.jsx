@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   BookOpen, 
-  Code, 
   Copy, 
   Check, 
   ChevronDown, 
@@ -11,9 +10,12 @@ import {
   CreditCard,
   Send,
   AlertTriangle,
-  CheckCircle,
+  ExternalLink,
+  Terminal,
+  Globe,
+  Lock,
   Clock,
-  ExternalLink
+  Sparkles
 } from 'lucide-react';
 
 const ApiDocs = () => {
@@ -27,17 +29,20 @@ const ApiDocs = () => {
   };
 
   const CodeBlock = ({ code, language = 'bash', id }) => (
-    <div className="relative bg-gray-900 rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
-        <span className="text-xs text-gray-400 uppercase">{language}</span>
+    <div className="relative group rounded-xl overflow-hidden border border-white/10 bg-[#0d1117]">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#161b22] border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <Terminal className="w-4 h-4 text-emerald-400" />
+          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">{language}</span>
+        </div>
         <button
           onClick={() => copyToClipboard(code, id)}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white"
         >
           {copiedCode === id ? (
             <>
-              <Check className="w-3.5 h-3.5 text-green-400" />
-              <span className="text-green-400">Copied!</span>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-emerald-400">Copied!</span>
             </>
           ) : (
             <>
@@ -47,124 +52,196 @@ const ApiDocs = () => {
           )}
         </button>
       </div>
-      <pre className="p-4 overflow-x-auto text-sm">
-        <code className="text-gray-300 whitespace-pre">{code}</code>
+      <pre className="p-4 overflow-x-auto text-sm leading-relaxed">
+        <code className="text-gray-300 font-mono">{code}</code>
       </pre>
     </div>
   );
 
-  const Section = ({ id, title, icon: Icon, children, color = "blue" }) => {
+  const Section = ({ id, title, subtitle, icon: Icon, children, gradient }) => {
     const isExpanded = expandedSection === id;
-    const colors = {
-      blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-      green: 'bg-green-500/10 text-green-400 border-green-500/20',
-      orange: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-    };
 
     return (
-      <div className="border border-gray-700 rounded-xl overflow-hidden">
+      <div className={`rounded-2xl overflow-hidden border transition-all duration-300 ${
+        isExpanded ? 'border-white/20 shadow-2xl shadow-purple-500/10' : 'border-white/10 hover:border-white/20'
+      }`}>
         <button
           onClick={() => setExpandedSection(isExpanded ? null : id)}
-          className={`w-full flex items-center justify-between p-4 ${colors[color]} border-b border-gray-700 hover:bg-opacity-20 transition-colors`}
+          className={`w-full flex items-center justify-between p-5 transition-all duration-300 ${gradient}`}
         >
-          <div className="flex items-center gap-3">
-            <Icon className="w-5 h-5" />
-            <span className="font-semibold text-white">{title}</span>
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-white/10 backdrop-blur-sm">
+              <Icon className="w-6 h-6 text-white" />
+            </div>
+            <div className="text-left">
+              <h3 className="font-bold text-white text-lg">{title}</h3>
+              <p className="text-white/60 text-sm">{subtitle}</p>
+            </div>
           </div>
-          {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          <div className={`p-2 rounded-full bg-white/10 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+            <ChevronDown className="w-5 h-5 text-white" />
+          </div>
         </button>
-        {isExpanded && (
-          <div className="p-6 bg-gray-800/50 space-y-6">
+        
+        <div className={`transition-all duration-300 ease-in-out ${
+          isExpanded ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'
+        }`}>
+          <div className="p-6 bg-[#0a0a0f] space-y-8">
             {children}
           </div>
-        )}
+        </div>
       </div>
     );
   };
 
-  const Step = ({ number, title, children }) => (
-    <div className="flex gap-4">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm">
-        {number}
-      </div>
-      <div className="flex-1">
-        <h4 className="font-medium text-white mb-2">{title}</h4>
-        <div className="text-gray-400 text-sm space-y-3">
-          {children}
+  const Step = ({ number, title, children, color = "violet" }) => {
+    const colors = {
+      violet: "from-violet-500 to-purple-500",
+      emerald: "from-emerald-500 to-teal-500",
+      amber: "from-amber-500 to-orange-500",
+      blue: "from-blue-500 to-cyan-500",
+    };
+    
+    return (
+      <div className="flex gap-5">
+        <div className="flex-shrink-0">
+          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors[color]} flex items-center justify-center font-bold text-white shadow-lg`}>
+            {number}
+          </div>
+        </div>
+        <div className="flex-1 pt-1">
+          <h4 className="font-semibold text-white text-lg mb-3">{title}</h4>
+          <div className="text-gray-400 space-y-4">
+            {children}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const FlowStep = ({ children, isLast, color = "violet" }) => {
+    const colors = {
+      violet: "bg-violet-500/20 text-violet-300 border-violet-500/30",
+      emerald: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+      amber: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+      gray: "bg-white/5 text-gray-300 border-white/10",
+    };
+    
+    return (
+      <>
+        <span className={`px-4 py-2 rounded-full text-sm font-medium border ${colors[color]}`}>
+          {children}
+        </span>
+        {!isLast && <ArrowRight className="w-4 h-4 text-gray-600 flex-shrink-0" />}
+      </>
+    );
+  };
 
   const StatusBadge = ({ status, description }) => {
-    const colors = {
-      pending: 'bg-yellow-500/10 text-yellow-400',
-      completed: 'bg-green-500/10 text-green-400',
-      failed: 'bg-red-500/10 text-red-400',
-      rejected: 'bg-red-500/10 text-red-400',
-      expired: 'bg-gray-500/10 text-gray-400',
+    const styles = {
+      pending: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+      completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+      failed: "bg-red-500/10 text-red-400 border-red-500/20",
+      rejected: "bg-red-500/10 text-red-400 border-red-500/20",
+      expired: "bg-gray-500/10 text-gray-400 border-gray-500/20",
     };
+    
     return (
-      <div className="flex items-center gap-2">
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] || 'bg-gray-500/10 text-gray-400'}`}>
+      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/5">
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${styles[status]}`}>
           {status}
         </span>
-        <span className="text-gray-500 text-xs">— {description}</span>
+        <span className="text-gray-400 text-sm">{description}</span>
       </div>
+    );
+  };
+
+  const MethodBadge = ({ method }) => {
+    const styles = {
+      GET: "bg-blue-500/20 text-blue-400",
+      POST: "bg-emerald-500/20 text-emerald-400",
+      PATCH: "bg-amber-500/20 text-amber-400",
+      DELETE: "bg-red-500/20 text-red-400",
+    };
+    
+    return (
+      <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${styles[method]}`}>
+        {method}
+      </span>
     );
   };
 
   const baseUrl = 'https://api.pay2x.io';
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold text-white flex items-center justify-center gap-3">
-          <BookOpen className="w-8 h-8 text-blue-400" />
-          API Documentation
-        </h1>
-        <p className="text-gray-400">Simple step-by-step guide to integrate Pay2X</p>
-      </div>
-
-      {/* Quick Info */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <div className="text-xs text-gray-500 uppercase mb-1">Base URL</div>
-          <code className="text-blue-400 text-sm">{baseUrl}</code>
-        </div>
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <div className="text-xs text-gray-500 uppercase mb-1">Authentication</div>
-          <code className="text-blue-400 text-sm">Bearer &lt;api_key&gt;</code>
-        </div>
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <div className="text-xs text-gray-500 uppercase mb-1">Rate Limit</div>
-          <span className="text-white text-sm">60 requests/minute</span>
-        </div>
-      </div>
-
-      {/* Sections */}
-      <div className="space-y-4">
+    <div className="min-h-screen bg-[#050507]">
+      <div className="max-w-5xl mx-auto px-4 py-12 space-y-12">
         
-        {/* PAYIN SECTION */}
-        <Section id="payin" title="Collect Payment (Payin)" icon={CreditCard} color="blue">
-          <div className="space-y-8">
-            {/* Flow Diagram */}
-            <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
-              <span className="px-3 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg">Create Payin</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded-lg">Show UPI to User</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded-lg">User Pays + Enters UTR</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg">Submit UTR</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-green-500/20 text-green-400 rounded-lg">Webhook</span>
+        {/* Hero Header */}
+        <div className="text-center space-y-6">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+            <Sparkles className="w-4 h-4 text-violet-400" />
+            <span className="text-violet-300 text-sm font-medium">Developer Documentation</span>
+          </div>
+          
+          <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-gray-200 to-gray-400">
+            Pay2X API
+          </h1>
+          
+          <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+            Accept payments and send money with just a few lines of code
+          </p>
+        </div>
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-500/20">
+            <Globe className="w-6 h-6 text-violet-400 mb-3" />
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Base URL</div>
+            <code className="text-violet-300 text-sm font-mono">api.pay2x.io</code>
+          </div>
+          
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+            <Lock className="w-6 h-6 text-emerald-400 mb-3" />
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Auth</div>
+            <code className="text-emerald-300 text-sm font-mono">Bearer Token</code>
+          </div>
+          
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+            <Clock className="w-6 h-6 text-amber-400 mb-3" />
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Rate Limit</div>
+            <span className="text-amber-300 text-sm font-semibold">60/min</span>
+          </div>
+          
+          <div className="p-5 rounded-2xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20">
+            <Zap className="w-6 h-6 text-blue-400 mb-3" />
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Response</div>
+            <span className="text-blue-300 text-sm font-semibold">&lt;200ms</span>
+          </div>
+        </div>
+
+        {/* Main Sections */}
+        <div className="space-y-4">
+          
+          {/* PAYIN SECTION */}
+          <Section 
+            id="payin" 
+            title="Collect Payment" 
+            subtitle="Accept payments via UPI"
+            icon={CreditCard} 
+            gradient="bg-gradient-to-r from-violet-600 to-purple-600"
+          >
+            {/* Flow */}
+            <div className="flex items-center justify-center gap-3 flex-wrap p-4 rounded-xl bg-white/5 border border-white/10">
+              <FlowStep color="violet">Create Payin</FlowStep>
+              <FlowStep color="gray">Show UPI</FlowStep>
+              <FlowStep color="gray">User Pays</FlowStep>
+              <FlowStep color="violet">Submit UTR</FlowStep>
+              <FlowStep color="emerald" isLast>Webhook ✓</FlowStep>
             </div>
 
-            {/* Step 1 */}
-            <Step number="1" title="Create Payment Request">
-              <p>Call this when user wants to pay. You'll get a UPI ID to show them.</p>
+            <Step number="1" title="Create Payment Request" color="violet">
+              <p className="text-gray-400">Get a UPI ID to show your customer</p>
               <CodeBlock id="payin-create" language="bash" code={`curl -X POST ${baseUrl}/v1/payin/create \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -173,28 +250,24 @@ const ApiDocs = () => {
     "userId": "customer_123",
     "orderId": "ORDER-001"
   }'`} />
-              <div className="bg-gray-800 rounded-lg p-4 mt-3">
-                <div className="text-xs text-gray-500 uppercase mb-2">Response</div>
-                <CodeBlock id="payin-create-res" language="json" code={`{
-  "success": true,
-  "payment_id": "abc-123-uuid",
-  "upi_id": "merchant@okaxis",
-  "holder_name": "Rajesh Kumar",
-  "amount": 5000,
-  "timer": 600,
-  "expires_at": "2026-02-17T12:10:00Z"
-}`} />
-              </div>
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 mt-3">
-                <p className="text-blue-300 text-sm">
-                  💡 Show the <code className="bg-blue-900/50 px-1 rounded">upi_id</code> and <code className="bg-blue-900/50 px-1 rounded">holder_name</code> to your customer with a 10-minute countdown timer.
-                </p>
+              
+              <div className="p-4 rounded-xl bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/20">
+                <h5 className="text-violet-300 font-medium mb-2">📱 Show to Customer</h5>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-500">UPI ID</span>
+                    <div className="text-white font-mono">merchant@okaxis</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Name</span>
+                    <div className="text-white">Rajesh Kumar</div>
+                  </div>
+                </div>
               </div>
             </Step>
 
-            {/* Step 2 */}
-            <Step number="2" title="Submit UTR (After User Pays)">
-              <p>After user pays via their UPI app, they'll have a UTR number. Submit it:</p>
+            <Step number="2" title="Submit UTR After Payment" color="violet">
+              <p className="text-gray-400">Customer pays and gives you UTR number</p>
               <CodeBlock id="payin-utr" language="bash" code={`curl -X PATCH ${baseUrl}/v1/payin/submit-utr \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -204,9 +277,8 @@ const ApiDocs = () => {
   }'`} />
             </Step>
 
-            {/* Step 3 */}
-            <Step number="3" title="Receive Webhook">
-              <p>When trader verifies the payment, you'll receive a webhook:</p>
+            <Step number="3" title="Receive Success Webhook" color="emerald">
+              <p className="text-gray-400">We'll POST to your webhook URL</p>
               <CodeBlock id="payin-webhook" language="json" code={`{
   "event": "payment.completed",
   "data": {
@@ -219,40 +291,30 @@ const ApiDocs = () => {
 }`} />
             </Step>
 
-            {/* Check Status */}
-            <Step number="?" title="Check Status (Optional)">
-              <p>You can also poll for status instead of waiting for webhook:</p>
-              <CodeBlock id="payin-status" language="bash" code={`curl "${baseUrl}/v1/payin/status?payinId=abc-123-uuid" \\
-  -H "Authorization: Bearer YOUR_API_KEY"`} />
-            </Step>
-
-            {/* Statuses */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h4 className="font-medium text-white mb-3">Payment Statuses</h4>
-              <div className="space-y-2">
-                <StatusBadge status="pending" description="Waiting for payment" />
-                <StatusBadge status="completed" description="Payment verified" />
-                <StatusBadge status="rejected" description="Payment rejected" />
-                <StatusBadge status="expired" description="Timer ran out" />
-              </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatusBadge status="pending" description="Waiting" />
+              <StatusBadge status="completed" description="Success" />
+              <StatusBadge status="rejected" description="Rejected" />
+              <StatusBadge status="expired" description="Timeout" />
             </div>
-          </div>
-        </Section>
+          </Section>
 
-        {/* PAYOUT SECTION */}
-        <Section id="payout" title="Send Money (Payout)" icon={Send} color="green">
-          <div className="space-y-8">
-            {/* Flow */}
-            <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
-              <span className="px-3 py-1.5 bg-green-500/20 text-green-400 rounded-lg">Create Payout</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded-lg">Trader Processes</span>
-              <ArrowRight className="w-4 h-4 text-gray-500" />
-              <span className="px-3 py-1.5 bg-green-500/20 text-green-400 rounded-lg">Webhook</span>
+          {/* PAYOUT SECTION */}
+          <Section 
+            id="payout" 
+            title="Send Money" 
+            subtitle="Payouts via Bank or UPI"
+            icon={Send} 
+            gradient="bg-gradient-to-r from-emerald-600 to-teal-600"
+          >
+            <div className="flex items-center justify-center gap-3 flex-wrap p-4 rounded-xl bg-white/5 border border-white/10">
+              <FlowStep color="emerald">Create Payout</FlowStep>
+              <FlowStep color="gray">Trader Processes</FlowStep>
+              <FlowStep color="emerald" isLast>Webhook ✓</FlowStep>
             </div>
 
-            <Step number="1" title="Create Payout Request">
-              <p>Provide <strong>both</strong> bank account AND UPI details. Trader will choose the method.</p>
+            <Step number="1" title="Create Payout Request" color="emerald">
+              <p className="text-gray-400">Provide <strong className="text-white">both</strong> Bank and UPI details — trader chooses the method</p>
               <CodeBlock id="payout-create" language="bash" code={`curl -X POST ${baseUrl}/v1/payout/create \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -262,249 +324,231 @@ const ApiDocs = () => {
     "accountNumber": "1234567890123",
     "ifscCode": "SBIN0001234",
     "upiId": "johndoe@okaxis",
-    "bankName": "State Bank",
-    "userId": "customer_123",
     "orderId": "WITHDRAW-001"
   }'`} />
-              <div className="bg-gray-800 rounded-lg p-4 mt-3">
-                <div className="text-xs text-gray-500 uppercase mb-2">Response</div>
-                <CodeBlock id="payout-create-res" language="json" code={`{
-  "success": true,
-  "payout_id": "xyz-456-uuid",
-  "txn_id": "PO1708123456AB",
-  "amount": 10000,
-  "fee": 200,
-  "total_on_completion": 10200,
-  "status": "pending"
-}`} />
-              </div>
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mt-3">
-                <p className="text-yellow-300 text-sm">
-                  ⚠️ Balance is deducted only when payout is <strong>completed</strong>, not when created.
+              
+              <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
+                <p className="text-amber-300 text-sm">
+                  ⚡ Balance deducted only on <strong>completion</strong>, not on creation
                 </p>
               </div>
             </Step>
 
-            <Step number="2" title="Receive Webhook">
-              <p>When trader completes the payout:</p>
+            <Step number="2" title="Receive Completion Webhook" color="emerald">
               <CodeBlock id="payout-webhook" language="json" code={`{
   "event": "payout.completed",
   "data": {
     "payout_id": "xyz-456-uuid",
     "orderId": "WITHDRAW-001",
     "amount": 10000,
-    "status": "completed",
-    "utr": "SBIN12345678901"
+    "utr": "SBIN12345678901",
+    "status": "completed"
   }
 }`} />
             </Step>
 
-            {/* Required Fields */}
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h4 className="font-medium text-white mb-3">Required Fields</h4>
+            <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+              <h5 className="text-white font-medium mb-3">Required Fields</h5>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="text-gray-400">amount</div><div className="text-white">₹100 - ₹2,00,000</div>
-                <div className="text-gray-400">accountName</div><div className="text-white">Beneficiary name</div>
-                <div className="text-gray-400">accountNumber</div><div className="text-white">Bank account</div>
-                <div className="text-gray-400">ifscCode</div><div className="text-white">Bank IFSC</div>
-                <div className="text-gray-400">upiId</div><div className="text-white">UPI ID</div>
+                <div className="flex justify-between p-2 rounded bg-white/5">
+                  <span className="text-gray-400">amount</span>
+                  <span className="text-emerald-400">₹100 - ₹2,00,000</span>
+                </div>
+                <div className="flex justify-between p-2 rounded bg-white/5">
+                  <span className="text-gray-400">accountName</span>
+                  <span className="text-white">Beneficiary</span>
+                </div>
+                <div className="flex justify-between p-2 rounded bg-white/5">
+                  <span className="text-gray-400">accountNumber</span>
+                  <span className="text-white">Bank Account</span>
+                </div>
+                <div className="flex justify-between p-2 rounded bg-white/5">
+                  <span className="text-gray-400">ifscCode</span>
+                  <span className="text-white">IFSC</span>
+                </div>
+                <div className="flex justify-between p-2 rounded bg-white/5 col-span-2">
+                  <span className="text-gray-400">upiId</span>
+                  <span className="text-white">UPI ID</span>
+                </div>
               </div>
             </div>
-          </div>
-        </Section>
+          </Section>
 
-        {/* DISPUTE SECTION */}
-        <Section id="dispute" title="Raise Dispute" icon={AlertTriangle} color="orange">
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Payin Dispute */}
-              <div className="bg-gray-800 rounded-lg p-4 border border-orange-500/20">
-                <h4 className="font-medium text-white mb-2 flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-orange-400" />
-                  Payin Dispute
-                </h4>
-                <p className="text-gray-400 text-sm mb-3">Customer paid but not credited</p>
+          {/* DISPUTE SECTION */}
+          <Section 
+            id="dispute" 
+            title="Raise Dispute" 
+            subtitle="Resolve payment issues"
+            icon={AlertTriangle} 
+            gradient="bg-gradient-to-r from-amber-600 to-orange-600"
+          >
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="p-5 rounded-xl bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-500/20">
+                <div className="flex items-center gap-3 mb-4">
+                  <CreditCard className="w-5 h-5 text-violet-400" />
+                  <h4 className="font-semibold text-white">Payin Dispute</h4>
+                </div>
+                <p className="text-gray-400 text-sm mb-4">Customer paid but not credited</p>
                 <CodeBlock id="dispute-payin" language="json" code={`{
   "type": "payment_not_received",
   "upiId": "merchant@okaxis",
   "amount": 5000,
   "utr": "412345678901",
   "userId": "customer_123",
-  "paymentDate": "2026-02-17",
   "receiptUrl": "https://...",
-  "comment": "Customer says paid"
+  "comment": "Customer paid"
 }`} />
               </div>
 
-              {/* Payout Dispute */}
-              <div className="bg-gray-800 rounded-lg p-4 border border-orange-500/20">
-                <h4 className="font-medium text-white mb-2 flex items-center gap-2">
-                  <Send className="w-4 h-4 text-orange-400" />
-                  Payout Dispute
-                </h4>
-                <p className="text-gray-400 text-sm mb-3">Customer didn't receive payout</p>
+              <div className="p-5 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+                <div className="flex items-center gap-3 mb-4">
+                  <Send className="w-5 h-5 text-emerald-400" />
+                  <h4 className="font-semibold text-white">Payout Dispute</h4>
+                </div>
+                <p className="text-gray-400 text-sm mb-4">Customer didn't receive payout</p>
                 <CodeBlock id="dispute-payout" language="json" code={`{
   "type": "payout_not_received",
   "orderId": "WITHDRAW-001",
   "amount": 10000,
   "userId": "customer_123",
   "accountNumber": "1234567890",
-  "comment": "Customer claims not received"
+  "comment": "Not received"
 }`} />
               </div>
             </div>
 
-            <Step number="1" title="Create Dispute">
-              <CodeBlock id="dispute-create" language="bash" code={`curl -X POST ${baseUrl}/v1/dispute/create \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{ ... dispute data ... }'`} />
-            </Step>
-
-            <div className="bg-gray-800 rounded-lg p-4">
-              <h4 className="font-medium text-white mb-3">Dispute Types</h4>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-gray-400">payment_not_received</span><span className="text-orange-400">Payin</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">wrong_amount</span><span className="text-orange-400">Payin</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">duplicate_payment</span><span className="text-orange-400">Payin</span></div>
-                <div className="flex justify-between"><span className="text-gray-400">payout_not_received</span><span className="text-green-400">Payout</span></div>
+            <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+              <h5 className="text-white font-medium mb-3">Dispute Types</h5>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center justify-between p-2 rounded bg-white/5">
+                  <code className="text-gray-300">payment_not_received</code>
+                  <span className="text-violet-400">Payin</span>
+                </div>
+                <div className="flex items-center justify-between p-2 rounded bg-white/5">
+                  <code className="text-gray-300">wrong_amount</code>
+                  <span className="text-violet-400">Payin</span>
+                </div>
+                <div className="flex items-center justify-between p-2 rounded bg-white/5">
+                  <code className="text-gray-300">duplicate_payment</code>
+                  <span className="text-violet-400">Payin</span>
+                </div>
+                <div className="flex items-center justify-between p-2 rounded bg-white/5">
+                  <code className="text-gray-300">payout_not_received</code>
+                  <span className="text-emerald-400">Payout</span>
+                </div>
               </div>
             </div>
-          </div>
-        </Section>
+          </Section>
+        </div>
 
-      </div>
-
-      {/* Webhooks */}
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-        <h3 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-          <Zap className="w-5 h-5 text-yellow-400" />
-          Webhooks
-        </h3>
-        <p className="text-gray-400 mb-4">
-          Configure your webhook URL in Settings. We'll send POST requests with signature verification.
-        </p>
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <code className="bg-gray-900 px-2 py-1 rounded text-blue-400 text-sm">X-Webhook-Signature</code>
-            <span className="text-gray-400 text-sm">HMAC-SHA256 signature</span>
+        {/* Webhooks */}
+        <div className="rounded-2xl overflow-hidden border border-white/10">
+          <div className="p-5 bg-gradient-to-r from-yellow-600/20 to-amber-600/20 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-yellow-500/20">
+                <Zap className="w-5 h-5 text-yellow-400" />
+              </div>
+              <h3 className="font-bold text-white text-lg">Webhook Signature Verification</h3>
+            </div>
           </div>
-          <CodeBlock id="webhook-verify" language="javascript" code={`const crypto = require('crypto');
+          <div className="p-6 bg-[#0a0a0f]">
+            <p className="text-gray-400 mb-4">Verify webhook authenticity using HMAC-SHA256</p>
+            <CodeBlock id="webhook-verify" language="javascript" code={`const crypto = require('crypto');
 
 function verifyWebhook(payload, signature, secret) {
   const hmac = crypto.createHmac('sha256', secret);
   const digest = hmac.update(JSON.stringify(payload)).digest('hex');
   return signature === digest;
-}`} />
-        </div>
-      </div>
+}
 
-      {/* Error Codes */}
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-        <h3 className="text-xl font-semibold text-white mb-4">Error Codes</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">401</span>
-            <span className="text-gray-400">Invalid API key</span>
-          </div>
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">403</span>
-            <span className="text-gray-400">Account inactive</span>
-          </div>
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">400</span>
-            <span className="text-gray-400">Missing required fields</span>
-          </div>
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">429</span>
-            <span className="text-gray-400">Rate limit exceeded</span>
-          </div>
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">409</span>
-            <span className="text-gray-400">Duplicate order ID</span>
-          </div>
-          <div className="flex justify-between p-2 bg-gray-900 rounded">
-            <span className="text-red-400">402</span>
-            <span className="text-gray-400">No UPI available</span>
+// Header: X-Webhook-Signature`} />
           </div>
         </div>
-      </div>
 
-      {/* Limits */}
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-        <h3 className="text-xl font-semibold text-white mb-4">Limits</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="text-center p-4 bg-gray-900 rounded-lg">
-            <div className="text-2xl font-bold text-blue-400">₹100</div>
-            <div className="text-gray-500 text-sm">Minimum Amount</div>
+        {/* All Endpoints */}
+        <div className="rounded-2xl overflow-hidden border border-white/10">
+          <div className="p-5 bg-gradient-to-r from-gray-800 to-gray-900 border-b border-white/10">
+            <h3 className="font-bold text-white text-lg">All Endpoints</h3>
           </div>
-          <div className="text-center p-4 bg-gray-900 rounded-lg">
-            <div className="text-2xl font-bold text-blue-400">₹1,00,000</div>
-            <div className="text-gray-500 text-sm">Max Payin</div>
-          </div>
-          <div className="text-center p-4 bg-gray-900 rounded-lg">
-            <div className="text-2xl font-bold text-blue-400">₹2,00,000</div>
-            <div className="text-gray-500 text-sm">Max Payout</div>
+          <div className="divide-y divide-white/5 bg-[#0a0a0f]">
+            {[
+              { method: 'POST', path: '/v1/payin/create', desc: 'Create payment' },
+              { method: 'PATCH', path: '/v1/payin/submit-utr', desc: 'Submit UTR' },
+              { method: 'GET', path: '/v1/payin/status', desc: 'Check payment' },
+              { method: 'POST', path: '/v1/payin/switch', desc: 'Try different UPI' },
+              { method: 'POST', path: '/v1/payout/create', desc: 'Create payout' },
+              { method: 'GET', path: '/v1/payout/status', desc: 'Check payout' },
+              { method: 'POST', path: '/v1/dispute/create', desc: 'Raise dispute' },
+              { method: 'GET', path: '/v1/dispute/status', desc: 'Check dispute' },
+            ].map((endpoint, i) => (
+              <div key={i} className="flex items-center gap-4 p-4 hover:bg-white/5 transition-colors">
+                <MethodBadge method={endpoint.method} />
+                <code className="text-gray-300 font-mono flex-1">{endpoint.path}</code>
+                <span className="text-gray-500 text-sm">{endpoint.desc}</span>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="mt-4 p-4 bg-gray-900 rounded-lg">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-400">Rate Limit</span>
-            <span className="text-white font-medium">60 requests/minute</span>
-          </div>
-        </div>
-      </div>
 
-      {/* API Endpoints Summary */}
-      <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-        <h3 className="text-xl font-semibold text-white mb-4">All Endpoints</h3>
-        <div className="space-y-2 text-sm font-mono">
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">POST</span>
-            <span className="text-gray-300">/v1/payin/create</span>
-            <span className="text-gray-500 ml-auto">Create payment</span>
+        {/* Limits & Errors */}
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Limits */}
+          <div className="rounded-2xl overflow-hidden border border-white/10">
+            <div className="p-4 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border-b border-white/10">
+              <h3 className="font-bold text-white">Limits</h3>
+            </div>
+            <div className="p-4 bg-[#0a0a0f] space-y-3">
+              <div className="flex justify-between items-center p-3 rounded-lg bg-white/5">
+                <span className="text-gray-400">Minimum Amount</span>
+                <span className="text-white font-semibold">₹100</span>
+              </div>
+              <div className="flex justify-between items-center p-3 rounded-lg bg-white/5">
+                <span className="text-gray-400">Max Payin</span>
+                <span className="text-white font-semibold">₹1,00,000</span>
+              </div>
+              <div className="flex justify-between items-center p-3 rounded-lg bg-white/5">
+                <span className="text-gray-400">Max Payout</span>
+                <span className="text-white font-semibold">₹2,00,000</span>
+              </div>
+              <div className="flex justify-between items-center p-3 rounded-lg bg-white/5">
+                <span className="text-gray-400">Rate Limit</span>
+                <span className="text-white font-semibold">60 req/min</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs">PATCH</span>
-            <span className="text-gray-300">/v1/payin/submit-utr</span>
-            <span className="text-gray-500 ml-auto">Submit UTR</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">GET</span>
-            <span className="text-gray-300">/v1/payin/status</span>
-            <span className="text-gray-500 ml-auto">Check payment</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">POST</span>
-            <span className="text-gray-300">/v1/payin/switch</span>
-            <span className="text-gray-500 ml-auto">Try different UPI</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">POST</span>
-            <span className="text-gray-300">/v1/payout/create</span>
-            <span className="text-gray-500 ml-auto">Create payout</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">GET</span>
-            <span className="text-gray-300">/v1/payout/status</span>
-            <span className="text-gray-500 ml-auto">Check payout</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">POST</span>
-            <span className="text-gray-300">/v1/dispute/create</span>
-            <span className="text-gray-500 ml-auto">Raise dispute</span>
-          </div>
-          <div className="flex items-center gap-3 p-2 bg-gray-900 rounded">
-            <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">GET</span>
-            <span className="text-gray-300">/v1/dispute/status</span>
-            <span className="text-gray-500 ml-auto">Check dispute</span>
+
+          {/* Error Codes */}
+          <div className="rounded-2xl overflow-hidden border border-white/10">
+            <div className="p-4 bg-gradient-to-r from-red-600/20 to-pink-600/20 border-b border-white/10">
+              <h3 className="font-bold text-white">Error Codes</h3>
+            </div>
+            <div className="p-4 bg-[#0a0a0f] space-y-3">
+              {[
+                { code: '400', desc: 'Bad request' },
+                { code: '401', desc: 'Invalid API key' },
+                { code: '402', desc: 'No UPI available' },
+                { code: '403', desc: 'Account inactive' },
+                { code: '409', desc: 'Duplicate order' },
+                { code: '429', desc: 'Rate limited' },
+              ].map((err, i) => (
+                <div key={i} className="flex justify-between items-center p-3 rounded-lg bg-white/5">
+                  <span className="text-red-400 font-mono">{err.code}</span>
+                  <span className="text-gray-400">{err.desc}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Help */}
-      <div className="text-center text-gray-500 text-sm">
-        Need help? Contact <a href="mailto:support@pay2x.io" className="text-blue-400 hover:underline">support@pay2x.io</a>
+        {/* Footer */}
+        <div className="text-center py-8 border-t border-white/10">
+          <p className="text-gray-500">
+            Need help? Contact{' '}
+            <a href="mailto:support@pay2x.io" className="text-violet-400 hover:text-violet-300 transition-colors">
+              support@pay2x.io
+            </a>
+          </p>
+        </div>
       </div>
     </div>
   );
