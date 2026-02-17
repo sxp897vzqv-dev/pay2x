@@ -26,8 +26,8 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-const MIN_AMOUNT = 100;
-const MAX_AMOUNT = 200000;
+const MIN_AMOUNT = 5000;
+const MAX_AMOUNT = 50000;
 
 interface CreatePayoutRequest {
   amount: number;

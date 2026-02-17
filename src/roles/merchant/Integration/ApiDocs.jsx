@@ -361,7 +361,7 @@ const ApiDocs = () => {
               <h5 className="text-gray-900 font-semibold mb-4">Required Fields</h5>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 {[
-                  { field: 'amount', value: '₹100 - ₹2,00,000' },
+                  { field: 'amount', value: '₹5,000 - ₹50,000' },
                   { field: 'accountName', value: 'Beneficiary name' },
                   { field: 'accountNumber', value: 'Bank account' },
                   { field: 'ifscCode', value: 'Bank IFSC' },
@@ -500,9 +500,10 @@ function verifyWebhook(payload, signature, secret) {
             </div>
             <div className="p-4 bg-blue-50 space-y-3">
               {[
-                { label: 'Minimum Amount', value: '₹100' },
-                { label: 'Max Payin', value: '₹1,00,000' },
-                { label: 'Max Payout', value: '₹2,00,000' },
+                { label: 'Payin Min', value: '₹500' },
+                { label: 'Payin Max', value: '₹50,000' },
+                { label: 'Payout Min', value: '₹5,000' },
+                { label: 'Payout Max', value: '₹50,000' },
                 { label: 'Rate Limit', value: '60 req/min' },
               ].map((item, i) => (
                 <div key={i} className="flex justify-between items-center p-3 rounded-lg bg-white border border-blue-100">

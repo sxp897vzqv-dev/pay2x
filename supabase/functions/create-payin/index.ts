@@ -41,8 +41,8 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // Validation
-const MIN_AMOUNT = 100;
-const MAX_AMOUNT = 100000;
+const MIN_AMOUNT = 500;
+const MAX_AMOUNT = 50000;
 const TIMER_SECONDS = 600; // 10 minutes
 
 interface CreatePayinRequest {

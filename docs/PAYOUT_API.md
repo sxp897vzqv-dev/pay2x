@@ -78,7 +78,7 @@ POST /v1/payout/create
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `amount` | number | ✅ Yes | Amount in INR (₹100 - ₹2,00,000) |
+| `amount` | number | ✅ Yes | Amount in INR (₹5,000 - ₹50,000) |
 | `accountName` | string | ✅ Yes | Beneficiary's full name |
 | `accountNumber` | string | ✅ Yes | Bank account number |
 | `ifscCode` | string | ✅ Yes | Bank IFSC code |
@@ -340,8 +340,8 @@ function verifyWebhook(payload, signature, secret) {
 | `AUTH_INVALID_KEY` | 401 | Invalid API key |
 | `MERCHANT_INACTIVE` | 403 | Account is disabled |
 | `MISSING_FIELDS` | 400 | Required fields missing (amount, accountName, accountNumber, ifscCode, upiId) |
-| `AMOUNT_TOO_LOW` | 400 | Below ₹100 minimum |
-| `AMOUNT_TOO_HIGH` | 400 | Above ₹2,00,000 maximum |
+| `AMOUNT_TOO_LOW` | 400 | Below ₹5,000 minimum |
+| `AMOUNT_TOO_HIGH` | 400 | Above ₹50,000 maximum |
 | `DUPLICATE_ORDER` | 400 | Order ID already used |
 | `NOT_FOUND` | 404 | Payout not found |
 

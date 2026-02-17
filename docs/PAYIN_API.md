@@ -86,7 +86,7 @@ POST /v1/payin/create
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `amount` | number | Yes | Amount in INR (₹100 - ₹100,000) |
+| `amount` | number | Yes | Amount in INR (₹500 - ₹50,000) |
 | `userId` | string | Yes | Your customer's unique ID |
 | `orderId` | string | No | Your order reference (must be unique) |
 | `metadata` | object | No | Any additional data to store |
@@ -412,8 +412,8 @@ app.post('/webhook', (req, res) => {
 | `AUTH_MISSING_KEY` | 401 | API key not provided | No |
 | `AUTH_INVALID_KEY` | 401 | Invalid API key | No |
 | `MERCHANT_INACTIVE` | 403 | Account is disabled | No |
-| `AMOUNT_TOO_LOW` | 400 | Below ₹100 minimum | No |
-| `AMOUNT_TOO_HIGH` | 400 | Above ₹100,000 maximum | No |
+| `AMOUNT_TOO_LOW` | 400 | Below ₹500 minimum | No |
+| `AMOUNT_TOO_HIGH` | 400 | Above ₹50,000 maximum | No |
 | `DUPLICATE_REQUEST` | 409 | Order ID already used | No |
 | `UPI_UNAVAILABLE` | 402 | No UPIs available | Yes (60s) |
 | `PAYMENT_NOT_FOUND` | 404 | Invalid payment ID | No |
