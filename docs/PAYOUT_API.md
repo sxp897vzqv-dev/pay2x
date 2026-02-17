@@ -28,18 +28,16 @@ Authorization: Bearer <your_live_api_key>
 
 ---
 
-## Payout Modes
+## How It Works
 
-| Mode | Required Fields | Speed | Limit |
-|------|-----------------|-------|-------|
-| **Bank Transfer** | accountNumber, ifscCode, accountName | 1-4 hours | ₹2,00,000 |
-| **UPI Transfer** | upiId, accountName | Instant | ₹1,00,000 |
+1. **Merchant provides ALL details** — Bank account + UPI ID
+2. **Trader chooses method** — Bank Transfer (IMPS/NEFT) or UPI
+3. **Trader completes payout** — Enters UTR as proof
+4. **Merchant gets webhook** — With completion details
 
 ---
 
 ## Quick Start
-
-### Bank Transfer Payout
 
 ```bash
 curl -X POST https://api.pay2x.io/v1/payout/create \
@@ -50,24 +48,10 @@ curl -X POST https://api.pay2x.io/v1/payout/create \
     "accountName": "John Doe",
     "accountNumber": "1234567890123",
     "ifscCode": "SBIN0001234",
+    "upiId": "johndoe@okaxis",
     "bankName": "State Bank of India",
     "userId": "customer_123",
     "orderId": "WITHDRAWAL-001"
-  }'
-```
-
-### UPI Transfer Payout
-
-```bash
-curl -X POST https://api.pay2x.io/v1/payout/create \
-  -H "Authorization: Bearer live_your_api_key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "amount": 5000,
-    "accountName": "John Doe",
-    "upiId": "johndoe@okaxis",
-    "userId": "customer_123",
-    "orderId": "WITHDRAWAL-002"
   }'
 ```
 
@@ -94,19 +78,19 @@ POST /v1/payout/create
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `amount` | number | Yes | Amount in INR (₹100 - ₹2,00,000) |
-| `accountName` | string | Yes | Beneficiary's full name |
-| `accountNumber` | string | For Bank | Bank account number |
-| `ifscCode` | string | For Bank | Bank IFSC code |
-| `upiId` | string | For UPI | UPI ID (e.g., name@upi) |
+| `amount` | number | ✅ Yes | Amount in INR (₹100 - ₹2,00,000) |
+| `accountName` | string | ✅ Yes | Beneficiary's full name |
+| `accountNumber` | string | ✅ Yes | Bank account number |
+| `ifscCode` | string | ✅ Yes | Bank IFSC code |
+| `upiId` | string | ✅ Yes | UPI ID (e.g., name@upi) |
 | `bankName` | string | No | Bank name (optional) |
 | `userId` | string | No | Your customer's ID |
 | `orderId` | string | No | Your unique reference |
 | `metadata` | object | No | Any additional data |
 
-> **Note:** Provide either (`accountNumber` + `ifscCode`) for bank transfer OR `upiId` for UPI transfer.
+> **Note:** ALL payment details (Bank + UPI) are required. The trader will choose which method to use.
 
-#### Example Request - Bank Transfer
+#### Example Request
 
 ```json
 {
@@ -114,6 +98,7 @@ POST /v1/payout/create
   "accountName": "Priya Sharma",
   "accountNumber": "50100123456789",
   "ifscCode": "HDFC0001234",
+  "upiId": "priya.sharma@okicici",
   "bankName": "HDFC Bank",
   "userId": "user_456",
   "orderId": "WD-2026-001",
@@ -121,18 +106,6 @@ POST /v1/payout/create
     "reason": "Refund",
     "original_order": "ORD-123"
   }
-}
-```
-
-#### Example Request - UPI Transfer
-
-```json
-{
-  "amount": 5000,
-  "accountName": "Priya Sharma",
-  "upiId": "priya.sharma@okicici",
-  "userId": "user_456",
-  "orderId": "WD-2026-002"
 }
 ```
 
@@ -148,9 +121,8 @@ POST /v1/payout/create
   "amount": 25000,
   "fee": 500,
   "total_on_completion": 25500,
-  "payout_mode": "bank",
   "status": "pending",
-  "message": "Payout request created. Balance will be deducted on completion."
+  "message": "Payout request created. Trader will choose Bank or UPI method."
 }
 ```
 
@@ -162,7 +134,6 @@ POST /v1/payout/create
 | `txn_id` | Transaction reference number |
 | `fee` | Platform fee (percentage of amount) |
 | `total_on_completion` | Amount + Fee (deducted when completed) |
-| `payout_mode` | `bank` or `upi` |
 | `status` | Initial status is `pending` |
 
 #### Important Notes
@@ -206,14 +177,14 @@ GET /v1/payout/status?payoutId=f47ac10b-58cc-4372-a567-0e02b2c3d479
     "user_id": "user_456",
     "amount": 25000,
     "fee": 500,
-    "payout_mode": "bank",
     "status": "completed",
     "account_number": "*********6789",
     "ifsc_code": "HDFC0001234",
     "bank_name": "HDFC Bank",
-    "upi_id": null,
+    "upi_id": "priya.sharma@okicici",
     "account_name": "Priya Sharma",
     "utr": "HDFC12345678901234",
+    "method_used": "bank",
     "created_at": "2026-02-17T10:00:00.000Z",
     "completed_at": "2026-02-17T11:30:00.000Z"
   }
@@ -243,12 +214,12 @@ GET /v1/payout/status?payoutId=f47ac10b-58cc-4372-a567-0e02b2c3d479
 │                          PAYOUT LIFECYCLE                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-Step 1: Merchant submits payout request
+Step 1: Merchant submits payout request (with Bank + UPI details)
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  POST /v1/payout/create                                                     │
-│  { amount, accountName, accountNumber, ifscCode, userId, orderId }         │
+│  { amount, accountName, accountNumber, ifscCode, upiId, userId, orderId }  │
 │                                                                             │
 │  Returns: { payout_id, txn_id, status: "pending" }                         │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -257,12 +228,14 @@ Step 1: Merchant submits payout request
 Step 2: System assigns payout to trader
          │
          ▼
-Step 3: Trader sees payout in dashboard
+Step 3: Trader sees payout in dashboard (both Bank & UPI shown)
+         │
+         ├── Trader CHOOSES method (Bank or UPI)
          │
          ├── Trader completes transfer → Enters UTR
          │   │
          │   ▼
-         │   status = "completed"
+         │   status = "completed" (includes method_used)
          │   └── Webhook: payout.completed (with UTR)
          │
          └── Trader rejects → status = "rejected"
@@ -322,11 +295,12 @@ When payout status changes, we send a POST request to your webhook URL.
     "user_id": "user_456",
     "amount": 25000,
     "fee": 500,
-    "payout_mode": "bank",
     "status": "completed",
+    "method_used": "bank",
     "account_number": "*********6789",
     "ifsc_code": "HDFC0001234",
     "bank_name": "HDFC Bank",
+    "upi_id": "priya.sharma@okicici",
     "account_name": "Priya Sharma",
     "utr": "HDFC12345678901234",
     "completed_at": "2026-02-17T11:30:00.000Z"
@@ -365,8 +339,7 @@ function verifyWebhook(payload, signature, secret) {
 | `AUTH_MISSING_KEY` | 401 | API key not provided |
 | `AUTH_INVALID_KEY` | 401 | Invalid API key |
 | `MERCHANT_INACTIVE` | 403 | Account is disabled |
-| `MISSING_FIELDS` | 400 | Required fields missing |
-| `MISSING_PAYOUT_METHOD` | 400 | Neither bank nor UPI details provided |
+| `MISSING_FIELDS` | 400 | Required fields missing (amount, accountName, accountNumber, ifscCode, upiId) |
 | `AMOUNT_TOO_LOW` | 400 | Below ₹100 minimum |
 | `AMOUNT_TOO_HIGH` | 400 | Above ₹2,00,000 maximum |
 | `DUPLICATE_ORDER` | 400 | Order ID already used |
@@ -412,25 +385,27 @@ const axios = require('axios');
 const PAY2X_API = 'https://api.pay2x.io';
 const API_KEY = 'live_your_api_key';
 
-// Create bank payout
-async function createBankPayout(amount, accountName, accountNumber, ifsc, orderId) {
+// Create payout (both bank + UPI required, trader chooses method)
+async function createPayout(data) {
   const response = await axios.post(
     `${PAY2X_API}/v1/payout/create`,
-    { amount, accountName, accountNumber, ifscCode: ifsc, orderId },
+    data,
     { headers: { Authorization: `Bearer ${API_KEY}` } }
   );
   return response.data;
 }
 
-// Create UPI payout
-async function createUpiPayout(amount, accountName, upiId, orderId) {
-  const response = await axios.post(
-    `${PAY2X_API}/v1/payout/create`,
-    { amount, accountName, upiId, orderId },
-    { headers: { Authorization: `Bearer ${API_KEY}` } }
-  );
-  return response.data;
-}
+// Example usage
+const payout = await createPayout({
+  amount: 10000,
+  accountName: 'John Doe',
+  accountNumber: '1234567890123',
+  ifscCode: 'SBIN0001234',
+  upiId: 'johndoe@okaxis',
+  bankName: 'State Bank',
+  userId: 'customer_123',
+  orderId: 'WD-001'
+});
 
 // Check status
 async function getPayoutStatus(payoutId) {
@@ -451,7 +426,8 @@ PAY2X_API = 'https://api.pay2x.io'
 API_KEY = 'live_your_api_key'
 HEADERS = {'Authorization': f'Bearer {API_KEY}'}
 
-def create_bank_payout(amount, account_name, account_number, ifsc, order_id=None):
+def create_payout(amount, account_name, account_number, ifsc, upi_id, 
+                  bank_name=None, user_id=None, order_id=None):
     response = requests.post(
         f'{PAY2X_API}/v1/payout/create',
         json={
@@ -459,19 +435,9 @@ def create_bank_payout(amount, account_name, account_number, ifsc, order_id=None
             'accountName': account_name,
             'accountNumber': account_number,
             'ifscCode': ifsc,
-            'orderId': order_id
-        },
-        headers=HEADERS
-    )
-    return response.json()
-
-def create_upi_payout(amount, account_name, upi_id, order_id=None):
-    response = requests.post(
-        f'{PAY2X_API}/v1/payout/create',
-        json={
-            'amount': amount,
-            'accountName': account_name,
             'upiId': upi_id,
+            'bankName': bank_name,
+            'userId': user_id,
             'orderId': order_id
         },
         headers=HEADERS
@@ -484,6 +450,16 @@ def get_payout_status(payout_id):
         headers=HEADERS
     )
     return response.json()
+
+# Example
+payout = create_payout(
+    amount=10000,
+    account_name='John Doe',
+    account_number='1234567890123',
+    ifsc='SBIN0001234',
+    upi_id='johndoe@okaxis',
+    order_id='WD-001'
+)
 ```
 
 ### PHP
@@ -511,19 +487,14 @@ function createPayout($data) {
     return json_decode($response, true);
 }
 
-// Bank payout
-$bankPayout = createPayout([
+// Create payout (both bank + UPI required)
+$payout = createPayout([
     'amount' => 10000,
     'accountName' => 'John Doe',
-    'accountNumber' => '1234567890',
-    'ifscCode' => 'SBIN0001234'
-]);
-
-// UPI payout
-$upiPayout = createPayout([
-    'amount' => 5000,
-    'accountName' => 'John Doe',
-    'upiId' => 'johndoe@upi'
+    'accountNumber' => '1234567890123',
+    'ifscCode' => 'SBIN0001234',
+    'upiId' => 'johndoe@upi',
+    'orderId' => 'WD-001'
 ]);
 ```
 

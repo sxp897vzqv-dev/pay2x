@@ -4,20 +4,18 @@
  * POST /create-payout
  * Authorization: Bearer <live_api_key>
  * 
- * Supports two payout modes:
- * 1. Bank Transfer (IMPS/NEFT): accountNumber + ifscCode + accountName
- * 2. UPI Transfer: upiId + accountName
+ * Merchant provides ALL details (Bank + UPI), trader chooses the method.
  * 
  * Body: { 
- *   amount, 
+ *   amount,               // Required
  *   accountName,          // Required: Beneficiary name
- *   accountNumber?,       // For bank transfer
- *   ifscCode?,            // For bank transfer
- *   upiId?,               // For UPI transfer
- *   bankName?,            // Optional
- *   userId?,              // Your customer ID
- *   orderId?,             // Your order reference
- *   metadata?             // Any extra data
+ *   accountNumber,        // Required: Bank account number
+ *   ifscCode,             // Required: Bank IFSC code
+ *   upiId,                // Required: UPI ID
+ *   bankName?,            // Optional: Bank name
+ *   userId?,              // Optional: Your customer ID
+ *   orderId?,             // Optional: Your order reference
+ *   metadata?             // Optional: Any extra data
  * }
  */
 
@@ -34,11 +32,11 @@ const MAX_AMOUNT = 200000;
 interface CreatePayoutRequest {
   amount: number;
   accountName: string;
-  // Bank transfer fields
-  accountNumber?: string;
-  ifscCode?: string;
-  // UPI transfer field
-  upiId?: string;
+  // Bank transfer fields (required)
+  accountNumber: string;
+  ifscCode: string;
+  // UPI field (required)
+  upiId: string;
   // Optional fields
   bankName?: string;
   userId?: string;
@@ -107,39 +105,27 @@ serve(async (req: Request) => {
 
     const { amount, accountNumber, ifscCode, accountName, upiId, bankName, userId, orderId, metadata, description } = body;
 
-    // 4. Validate required fields
-    if (!amount || !accountName) {
+    // 4. Validate ALL required fields (both bank and UPI required)
+    const missingFields = [];
+    if (!amount) missingFields.push('amount');
+    if (!accountName) missingFields.push('accountName');
+    if (!accountNumber) missingFields.push('accountNumber');
+    if (!ifscCode) missingFields.push('ifscCode');
+    if (!upiId) missingFields.push('upiId');
+
+    if (missingFields.length > 0) {
       return new Response(
         JSON.stringify({ 
           success: false, 
           error: { 
             code: 'MISSING_FIELDS', 
-            message: 'amount and accountName are required' 
+            message: `Missing required fields: ${missingFields.join(', ')}`,
+            details: { missing: missingFields }
           } 
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // 4b. Validate payout mode - must have either bank details OR UPI
-    const hasBankDetails = accountNumber && ifscCode;
-    const hasUpiDetails = upiId;
-
-    if (!hasBankDetails && !hasUpiDetails) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { 
-            code: 'MISSING_PAYOUT_METHOD', 
-            message: 'Provide either (accountNumber + ifscCode) for bank transfer OR upiId for UPI transfer' 
-          } 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Determine payout mode
-    const payoutMode = hasUpiDetails ? 'upi' : 'bank';
 
     // 5. Validate amount
     const amountNum = Number(amount);
@@ -201,7 +187,7 @@ serve(async (req: Request) => {
     // 10. Generate transaction ID
     const txnId = `PO${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-    // 11. Create payout record
+    // 11. Create payout record (both bank and UPI details stored, trader chooses method)
     const { data: payout, error: payoutError } = await supabase
       .from('payouts')
       .insert({
@@ -210,11 +196,11 @@ serve(async (req: Request) => {
         amount: amountNum,
         commission: fee,
         status: 'pending',
-        // Bank transfer fields (null if UPI mode)
-        account_number: accountNumber || null,
-        ifsc: ifscCode || null,
-        // UPI field (null if bank mode)
-        upi_id: upiId || null,
+        // Bank transfer fields
+        account_number: accountNumber,
+        ifsc: ifscCode,
+        // UPI field
+        upi_id: upiId,
         // Common fields
         account_name: accountName,
         // Metadata with all extra info
@@ -223,7 +209,6 @@ serve(async (req: Request) => {
           order_id: orderId || null,
           user_id: userId || null,
           bank_name: bankName || null,
-          payout_mode: payoutMode,
           description: description || null,
         },
       })
@@ -241,9 +226,7 @@ serve(async (req: Request) => {
     // 12. Queue webhook
     if (merchant.webhook_url) {
       // Mask sensitive data
-      const maskedAccount = accountNumber 
-        ? accountNumber.slice(-4).padStart(accountNumber.length, '*')
-        : null;
+      const maskedAccount = accountNumber.slice(-4).padStart(accountNumber.length, '*');
 
       await supabase
         .from('payout_webhook_queue')
@@ -258,14 +241,13 @@ serve(async (req: Request) => {
             user_id: userId || null,
             amount: amountNum,
             fee,
-            payout_mode: payoutMode,
             status: 'pending',
             // Bank details (masked)
             account_number: maskedAccount,
-            ifsc_code: ifscCode || null,
+            ifsc_code: ifscCode,
             bank_name: bankName || null,
             // UPI details
-            upi_id: upiId || null,
+            upi_id: upiId,
             // Common
             account_name: accountName,
           },
@@ -285,9 +267,8 @@ serve(async (req: Request) => {
         amount: amountNum,
         fee,
         total_on_completion: totalRequired,
-        payout_mode: payoutMode,
         status: 'pending',
-        message: 'Payout request created. Balance will be deducted on completion.',
+        message: 'Payout request created. Trader will choose Bank or UPI method.',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
