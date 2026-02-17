@@ -73,7 +73,7 @@ const navGroups = [
     label: 'Integration',
     items: [
       { to: '/merchant/api', icon: Code, label: 'API & Webhooks', shortLabel: 'API' },
-      { to: '/merchant/api-docs', icon: BookOpen, label: 'API Documentation', shortLabel: 'Docs' },
+      { to: '/merchant/api-guide', icon: BookOpen, label: 'API Guide', shortLabel: 'Guide' },
     ],
   },
   {

@@ -359,7 +359,7 @@ function App() {
           
           {/* API & Integration */}
           <Route path="api" element={<MerchantAPI />} />
-          <Route path="api-docs" element={<MerchantApiDocs />} />
+          <Route path="api-guide" element={<MerchantApiDocs />} />
           
           {/* Reports */}
           <Route path="reports" element={<MerchantReports />} />

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { 
-  BookOpen, 
   Copy, 
   Check, 
   ChevronDown, 
@@ -181,7 +180,7 @@ const ApiDocs = () => {
         <div className="text-center space-y-6">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-100 border border-violet-200">
             <Sparkles className="w-4 h-4 text-violet-500" />
-            <span className="text-violet-700 text-sm font-medium">Developer Documentation</span>
+            <span className="text-violet-700 text-sm font-medium">API Reference</span>
           </div>
           
           <h1 className="text-5xl font-black text-gray-900">

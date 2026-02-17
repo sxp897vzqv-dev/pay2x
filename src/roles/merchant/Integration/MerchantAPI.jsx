@@ -3,8 +3,8 @@ import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../../supabase';
 import { logMerchantActivity, MERCHANT_ACTIONS } from '../../../utils/merchantActivityLogger';
 import {
-  Key, Copy, CheckCircle, RefreshCw, AlertCircle, Code, Book, Download,
-  Globe, Shield, Eye, EyeOff, Terminal, FileText, Zap, X, ExternalLink,
+  Key, Copy, CheckCircle, RefreshCw, AlertCircle, Code,
+  Globe, Shield, Eye, EyeOff, Terminal, Zap,
 } from 'lucide-react';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
@@ -279,10 +279,6 @@ export default function MerchantAPI() {
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Integration settings</p>
         </div>
-        <a href="https://docs.yourapi.com" target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-100 text-sm font-semibold">
-          <Book className="w-4 h-4" /> Documentation
-        </a>
       </div>
 
       {/* Tabs */}
@@ -291,7 +287,6 @@ export default function MerchantAPI() {
           { key: 'keys', label: 'API Keys', icon: Key },
           { key: 'webhooks', label: 'Webhooks', icon: Zap },
           { key: 'logs', label: 'Logs', icon: Terminal },
-          { key: 'docs', label: 'Docs', icon: Book },
         ].map(tab => {
           const Icon = tab.icon;
           return (
@@ -439,72 +434,6 @@ export default function MerchantAPI() {
         </div>
       )}
 
-      {/* Docs Tab */}
-      {activeTab === 'docs' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Quick Start</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold text-slate-700 mb-2">1. Authentication</p>
-                <pre className="bg-slate-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
-{`curl https://api.yourpayment.com/v1/payins \\
-  -H "Authorization: Bearer YOUR_API_KEY"`}
-                </pre>
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-slate-700 mb-2">2. Create Payin</p>
-                <pre className="bg-slate-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
-{`curl -X POST https://api.yourpayment.com/v1/payins \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "amount": 1000,
-    "currency": "INR",
-    "customerId": "user_123",
-    "orderId": "order_456"
-  }'`}
-                </pre>
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-slate-700 mb-2">3. Handle Webhook</p>
-                <pre className="bg-slate-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
-{`// Node.js example
-const crypto = require('crypto');
-
-app.post('/webhook', (req, res) => {
-  const signature = req.headers['x-webhook-signature'];
-  const payload = JSON.stringify(req.body);
-  
-  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
-  const digest = hmac.update(payload).digest('hex');
-  
-  if (signature === digest) {
-    // Webhook verified
-    console.log('Event:', req.body.event);
-  }
-  
-  res.status(200).send('OK');
-});`}
-                </pre>
-              </div>
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <a href="https://docs.yourapi.com" target="_blank" rel="noopener noreferrer"
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-semibold text-sm">
-                <ExternalLink className="w-4 h-4" /> Full Documentation
-              </a>
-              <button className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-100 font-semibold text-sm">
-                <Download className="w-4 h-4" /> Postman Collection
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
