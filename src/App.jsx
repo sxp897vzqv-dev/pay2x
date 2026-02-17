@@ -78,6 +78,7 @@ const MerchantPayout = React.lazy(() => import('./roles/merchant/Transactions/Me
 const MerchantDispute = React.lazy(() => import('./roles/merchant/Transactions/MerchantDispute'));
 const MerchantBalance = React.lazy(() => import('./roles/merchant/Finance/MerchantBalance'));
 const MerchantAPI = React.lazy(() => import('./roles/merchant/Integration/MerchantAPI'));
+const MerchantApiTest = React.lazy(() => import('./roles/merchant/Integration/ApiTest'));
 const MerchantApiDocs = React.lazy(() => import('./roles/merchant/Integration/ApiDocs'));
 const MerchantReports = React.lazy(() => import('./roles/merchant/Reports/MerchantReports'));
 const MerchantSettings = React.lazy(() => import('./roles/merchant/Settings/MerchantSettings'));
@@ -359,6 +360,7 @@ function App() {
           
           {/* API & Integration */}
           <Route path="api" element={<MerchantAPI />} />
+          <Route path="api-test" element={<MerchantApiTest />} />
           <Route path="api-guide" element={<MerchantApiDocs />} />
           
           {/* Reports */}

@@ -6,7 +6,7 @@ import { logMerchantActivity, MERCHANT_ACTIONS } from '../../utils/merchantActiv
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Wallet, Code, BarChart3,
   AlertCircle, Settings, LogOut, Menu, X, Shield, ChevronDown, ChevronRight,
-  FileText, CreditCard, BookOpen,
+  FileText, CreditCard, BookOpen, Play,
 } from 'lucide-react';
 
 /* ─── Fonts (injected once) ─── */
@@ -73,6 +73,7 @@ const navGroups = [
     label: 'Integration',
     items: [
       { to: '/merchant/api', icon: Code, label: 'API & Webhooks', shortLabel: 'API' },
+      { to: '/merchant/api-test', icon: Play, label: 'API Playground', shortLabel: 'Test' },
       { to: '/merchant/api-guide', icon: BookOpen, label: 'API Guide', shortLabel: 'Guide' },
     ],
   },
