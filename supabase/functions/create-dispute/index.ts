@@ -3,7 +3,18 @@
  * 
  * POST /create-dispute
  * Authorization: Bearer <live_api_key>
- * Body: { payinId?, payoutId?, type, reason, utr?, amount?, proofUrl? }
+ * 
+ * Two types of disputes:
+ * 
+ * 1. PAYIN DISPUTE (payment_not_received, wrong_amount, duplicate_payment)
+ *    - User paid but merchant says not credited
+ *    - Required: upiId OR payinId, amount, utr
+ *    - Optional: userId, paymentDate, receiptUrl, comment
+ * 
+ * 2. PAYOUT DISPUTE (payout_not_received)
+ *    - Trader marked complete but user didn't receive
+ *    - Required: payoutId OR orderId, amount
+ *    - Optional: userId, accountNumber, accountName, comment
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -13,16 +24,44 @@ import { corsHeaders, handleCors } from '../_shared/cors.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+// Dispute types
+type DisputeType = 
+  | 'payment_not_received'  // Payin: paid but not credited
+  | 'wrong_amount'          // Payin: credited wrong amount
+  | 'duplicate_payment'     // Payin: paid twice
+  | 'payout_not_received'   // Payout: trader says sent but user didn't get
+  | 'refund_request'        // Request refund
+  | 'other';
+
+const PAYIN_DISPUTE_TYPES: DisputeType[] = ['payment_not_received', 'wrong_amount', 'duplicate_payment'];
+const PAYOUT_DISPUTE_TYPES: DisputeType[] = ['payout_not_received'];
+
 interface CreateDisputeRequest {
+  // Dispute type
+  type: DisputeType;
+  
+  // Payin dispute fields
   payinId?: string;
-  payoutId?: string;
-  upiId?: string;  // Can lookup by UPI ID
-  orderId?: string; // Can lookup by order ID
-  type: 'payment_not_received' | 'wrong_amount' | 'duplicate_payment' | 'refund_request' | 'payout_not_received' | 'other';
-  reason: string;
+  upiId?: string;
   utr?: string;
-  amount?: number;
-  proofUrl?: string;
+  
+  // Payout dispute fields
+  payoutId?: string;
+  orderId?: string;
+  
+  // Common fields
+  amount: number;
+  userId?: string;
+  comment?: string;
+  receiptUrl?: string;
+  paymentDate?: string;
+  
+  // Account details (for payout disputes)
+  accountNumber?: string;
+  accountName?: string;
+  ifscCode?: string;
+  
+  // Extra data
   metadata?: Record<string, any>;
 }
 
@@ -84,144 +123,208 @@ serve(async (req: Request) => {
       );
     }
 
-    let { payinId, payoutId, upiId: lookupUpiId, orderId, type, reason, utr, amount, proofUrl, metadata } = body;
+    const { 
+      type, 
+      payinId, 
+      payoutId, 
+      upiId, 
+      orderId, 
+      utr,
+      amount, 
+      userId,
+      comment,
+      receiptUrl,
+      paymentDate,
+      accountNumber,
+      accountName,
+      ifscCode,
+      metadata 
+    } = body;
 
     // 4. Validate required fields
-    if (!type || !reason) {
+    if (!type) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { code: 'MISSING_FIELDS', message: 'type and reason are required' } 
-        }),
+        JSON.stringify({ success: false, error: { code: 'MISSING_TYPE', message: 'Dispute type is required' } }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 5. Lookup by UPI ID or Order ID if no direct ID provided
-    if (!payinId && !payoutId && lookupUpiId) {
-      // Find most recent payin with this UPI for this merchant
-      const { data: foundPayin } = await supabase
-        .from('payins')
-        .select('id')
-        .eq('merchant_id', merchant.id)
-        .eq('upi_id', lookupUpiId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (foundPayin) {
-        payinId = foundPayin.id;
-      }
+    if (!amount || amount <= 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: { code: 'MISSING_AMOUNT', message: 'Amount is required and must be positive' } }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    if (!payinId && !payoutId && orderId) {
-      // Find payin by order_id
-      const { data: foundPayin } = await supabase
-        .from('payins')
-        .select('id')
-        .eq('merchant_id', merchant.id)
-        .eq('order_id', orderId)
-        .single();
-      
-      if (foundPayin) {
-        payinId = foundPayin.id;
-      } else {
-        // Try payout by order_id in metadata
-        const { data: foundPayout } = await supabase
-          .from('payouts')
-          .select('id')
+    // Determine dispute category
+    const isPayinDispute = PAYIN_DISPUTE_TYPES.includes(type);
+    const isPayoutDispute = PAYOUT_DISPUTE_TYPES.includes(type);
+
+    // 5. Validate based on dispute type
+    let resolvedPayinId: string | null = null;
+    let resolvedPayoutId: string | null = null;
+    let traderId: string | null = null;
+    let resolvedUpiId: string | null = upiId || null;
+    let resolvedOrderId: string | null = orderId || null;
+
+    if (isPayinDispute) {
+      // For payin disputes, need either payinId, upiId, or orderId
+      if (!payinId && !upiId && !orderId) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: { 
+              code: 'MISSING_REFERENCE', 
+              message: 'For payin disputes, provide payinId, upiId, or orderId' 
+            } 
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // UTR is recommended for payin disputes
+      if (!utr) {
+        console.log('Warning: No UTR provided for payin dispute');
+      }
+
+      // Lookup payin if we have reference
+      if (payinId) {
+        const { data: payin } = await supabase
+          .from('payins')
+          .select('id, merchant_id, trader_id, upi_id, order_id')
+          .eq('id', payinId)
           .eq('merchant_id', merchant.id)
-          .contains('metadata', { order_id: orderId })
           .single();
-        
-        if (foundPayout) {
-          payoutId = foundPayout.id;
+
+        if (payin) {
+          resolvedPayinId = payin.id;
+          traderId = payin.trader_id;
+          resolvedUpiId = payin.upi_id;
+          resolvedOrderId = payin.order_id;
+        }
+      } else if (upiId) {
+        // Find by UPI ID (most recent)
+        const { data: payin } = await supabase
+          .from('payins')
+          .select('id, trader_id, order_id')
+          .eq('merchant_id', merchant.id)
+          .eq('upi_id', upiId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (payin) {
+          resolvedPayinId = payin.id;
+          traderId = payin.trader_id;
+          resolvedOrderId = payin.order_id;
+        }
+      } else if (orderId) {
+        const { data: payin } = await supabase
+          .from('payins')
+          .select('id, trader_id, upi_id')
+          .eq('merchant_id', merchant.id)
+          .eq('order_id', orderId)
+          .single();
+
+        if (payin) {
+          resolvedPayinId = payin.id;
+          traderId = payin.trader_id;
+          resolvedUpiId = payin.upi_id;
         }
       }
     }
 
-    // Allow dispute creation even without matching transaction (manual routing)
-    const hasReference = payinId || payoutId || lookupUpiId || orderId;
-    if (!hasReference) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { code: 'MISSING_REFERENCE', message: 'Provide payinId, payoutId, upiId, or orderId' } 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (isPayoutDispute) {
+      // For payout disputes, need either payoutId or orderId
+      if (!payoutId && !orderId) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: { 
+              code: 'MISSING_REFERENCE', 
+              message: 'For payout disputes, provide payoutId or orderId' 
+            } 
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Lookup payout
+      if (payoutId) {
+        const { data: payout } = await supabase
+          .from('payouts')
+          .select('id, merchant_id, trader_id, metadata')
+          .eq('id', payoutId)
+          .eq('merchant_id', merchant.id)
+          .single();
+
+        if (payout) {
+          resolvedPayoutId = payout.id;
+          traderId = payout.trader_id;
+          resolvedOrderId = payout.metadata?.order_id || null;
+        }
+      } else if (orderId) {
+        const { data: payout } = await supabase
+          .from('payouts')
+          .select('id, trader_id')
+          .eq('merchant_id', merchant.id)
+          .contains('metadata', { order_id: orderId })
+          .single();
+
+        if (payout) {
+          resolvedPayoutId = payout.id;
+          traderId = payout.trader_id;
+        }
+      }
     }
 
-    // 6. Validate transaction belongs to merchant and get amount
-    let transactionAmount = amount;
-    let traderId: string | null = null;
-    let upiId: string | null = lookupUpiId || null;
+    // For 'other' or 'refund_request', allow flexible reference
+    if (!isPayinDispute && !isPayoutDispute) {
+      // Try to find any matching transaction
+      if (payinId) resolvedPayinId = payinId;
+      if (payoutId) resolvedPayoutId = payoutId;
+      
+      if (orderId && !resolvedPayinId && !resolvedPayoutId) {
+        // Try payin first
+        const { data: payin } = await supabase
+          .from('payins')
+          .select('id, trader_id')
+          .eq('merchant_id', merchant.id)
+          .eq('order_id', orderId)
+          .single();
 
-    if (payinId) {
-      const { data: payin, error: payinError } = await supabase
-        .from('payins')
-        .select('id, merchant_id, amount, status, trader_id, upi_id')
-        .eq('id', payinId)
-        .single();
+        if (payin) {
+          resolvedPayinId = payin.id;
+          traderId = payin.trader_id;
+        } else {
+          // Try payout
+          const { data: payout } = await supabase
+            .from('payouts')
+            .select('id, trader_id')
+            .eq('merchant_id', merchant.id)
+            .contains('metadata', { order_id: orderId })
+            .single();
 
-      if (payinError || !payin) {
-        return new Response(
-          JSON.stringify({ success: false, error: { code: 'PAYIN_NOT_FOUND', message: 'Payin not found' } }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+          if (payout) {
+            resolvedPayoutId = payout.id;
+            traderId = payout.trader_id;
+          }
+        }
       }
-
-      if (payin.merchant_id !== merchant.id) {
-        return new Response(
-          JSON.stringify({ success: false, error: { code: 'NOT_AUTHORIZED', message: 'Not authorized for this transaction' } }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Get amount and trader from payin
-      if (!transactionAmount) transactionAmount = payin.amount;
-      traderId = payin.trader_id;
-      upiId = payin.upi_id;
     }
 
-    if (payoutId) {
-      const { data: payout, error: payoutError } = await supabase
-        .from('payouts')
-        .select('id, merchant_id, amount, status, trader_id')
-        .eq('id', payoutId)
-        .single();
-
-      if (payoutError || !payout) {
-        return new Response(
-          JSON.stringify({ success: false, error: { code: 'PAYOUT_NOT_FOUND', message: 'Payout not found' } }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      if (payout.merchant_id !== merchant.id) {
-        return new Response(
-          JSON.stringify({ success: false, error: { code: 'NOT_AUTHORIZED', message: 'Not authorized for this transaction' } }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Get amount and trader from payout
-      if (!transactionAmount) transactionAmount = payout.amount;
-      traderId = payout.trader_id;
-    }
-
-    // 7. Check for existing open dispute (only if we have a specific transaction)
-    if (payinId || payoutId) {
+    // 6. Check for existing open dispute
+    if (resolvedPayinId || resolvedPayoutId) {
       const existingQuery = supabase
         .from('disputes')
         .select('id, status')
         .eq('merchant_id', merchant.id)
         .in('status', ['pending', 'routed_to_trader', 'trader_accepted']);
 
-      if (payinId) {
-        existingQuery.eq('payin_id', payinId);
-      } else {
-        existingQuery.eq('payout_id', payoutId);
+      if (resolvedPayinId) {
+        existingQuery.eq('payin_id', resolvedPayinId);
+      } else if (resolvedPayoutId) {
+        existingQuery.eq('payout_id', resolvedPayoutId);
       }
 
       const { data: existingDispute } = await existingQuery.single();
@@ -241,26 +344,44 @@ serve(async (req: Request) => {
       }
     }
 
-    // 8. Create dispute record
+    // 7. Generate dispute reference
+    const disputeRef = `DSP${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+    // 8. Build metadata
+    const disputeMetadata = {
+      ...metadata,
+      user_id: userId || null,
+      payment_date: paymentDate || null,
+      // For payout disputes, include account details
+      account_number: accountNumber || null,
+      account_name: accountName || null,
+      ifsc_code: ifscCode || null,
+    };
+
+    // 9. Create dispute record
     const { data: dispute, error: disputeError } = await supabase
       .from('disputes')
       .insert({
         merchant_id: merchant.id,
-        payin_id: payinId || null,
-        payout_id: payoutId || null,
+        payin_id: resolvedPayinId,
+        payout_id: resolvedPayoutId,
         type,
-        reason,
+        reason: comment || `${type} dispute`,
+        description: JSON.stringify(disputeMetadata),
         transaction_id: utr || null,
-        amount: transactionAmount,
-        proof_url: proofUrl || null,
+        order_id: resolvedOrderId,
+        upi_id: resolvedUpiId,
+        amount: amount,
+        proof_url: receiptUrl || null,
         status: traderId ? 'routed_to_trader' : 'pending',
         trader_id: traderId,
-        upi_id: upiId,
         routed_at: traderId ? new Date().toISOString() : null,
         route_reason: traderId ? 'auto_from_transaction' : null,
-        description: metadata ? JSON.stringify(metadata) : null,
+        dispute_id: disputeRef,
+        // SLA: 48 hours to respond
+        sla_deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
       })
-      .select('id')
+      .select('id, dispute_id')
       .single();
 
     if (disputeError) {
@@ -271,52 +392,48 @@ serve(async (req: Request) => {
           error: { 
             code: 'CREATE_ERROR', 
             message: 'Failed to create dispute',
-            detail: disputeError.message,
-            hint: disputeError.hint 
+            detail: disputeError.message 
           } 
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 9. Try to auto-route dispute to trader
-    try {
-      const routeResponse = await fetch(`${SUPABASE_URL}/functions/v1/route-dispute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-        },
-        body: JSON.stringify({ disputeId: dispute.id }),
-      });
-      
-      if (routeResponse.ok) {
-        const routeData = await routeResponse.json();
-        if (routeData.routed) {
-          // Update dispute status
-          await supabase
-            .from('disputes')
-            .update({ 
-              status: 'routed_to_trader',
-              trader_id: routeData.traderId,
-              routed_at: new Date().toISOString(),
-              route_reason: routeData.reason,
-            })
-            .eq('id', dispute.id);
+    // 10. If not auto-routed, try to route
+    if (!traderId) {
+      try {
+        const routeResponse = await fetch(`${SUPABASE_URL}/functions/v1/route-dispute`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          },
+          body: JSON.stringify({ disputeId: dispute.id }),
+        });
+        
+        if (routeResponse.ok) {
+          const routeData = await routeResponse.json();
+          if (routeData.routed) {
+            traderId = routeData.traderId;
+          }
         }
+      } catch (routeError) {
+        console.error('Auto-route failed:', routeError);
       }
-    } catch (routeError) {
-      console.error('Auto-route failed:', routeError);
-      // Continue - dispute is created, will be manually routed
     }
 
-    // 10. Return success
+    // 11. Return success
     return new Response(
       JSON.stringify({
         success: true,
         dispute_id: dispute.id,
-        status: 'pending',
-        message: 'Dispute created. You will be notified when it is resolved.',
+        dispute_ref: dispute.dispute_id,
+        type,
+        status: traderId ? 'routed_to_trader' : 'pending',
+        routed: !!traderId,
+        message: traderId 
+          ? 'Dispute created and sent to trader for review.' 
+          : 'Dispute created. Our team will review and route it shortly.',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
