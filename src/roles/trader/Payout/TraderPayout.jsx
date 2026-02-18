@@ -169,8 +169,8 @@ export default function TraderPayout() {
   const handleSubmitRequest = async () => {
     const amount = Number(requestAmount);
     if (!amount || amount <= 0) { setToast({ msg: 'Please enter a valid amount', success: false }); return; }
-    if (amount > 100000)        { setToast({ msg: 'Maximum request is ₹1,00,000', success: false }); return; }
-    if (amount > workingBalance){ setToast({ msg: `Insufficient balance. Available: ₹${workingBalance.toLocaleString()}`, success: false }); return; }
+    if (amount > 250000)        { setToast({ msg: 'Maximum request is ₹2,50,000', success: false }); return; }
+    // Note: No balance check - traders can request up to ₹2.5L regardless of balance
     if (!canCreateRequest) {
       if (hasPendingVerification) {
         setToast({ msg: 'Submit verification for your completed payouts first', success: false });
@@ -263,7 +263,8 @@ export default function TraderPayout() {
   };
 
   const handleCancelPayout = async (payout, reason) => {
-    if (!reason || reason.trim().length < 10) { setToast({ msg: 'Reason must be at least 10 characters', success: false }); return; }
+    const wordCount = reason?.trim().split(/\s+/).filter(w => w.length > 0).length || 0;
+    if (!reason || wordCount < 3) { setToast({ msg: 'Reason must be at least 3 words', success: false }); return; }
     setProcessingPayout(payout.id);
     try {
       await cancelPayoutByTrader(payout.id, reason);

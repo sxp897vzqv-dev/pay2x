@@ -6,8 +6,8 @@
 -- 1. Max assignment = 120% of requested (never over-assign more than 20%)
 -- 2. Try single payout match first (within ±20% of requested)
 -- 3. Stop at 80% fill threshold
--- 4. Max request amount: ₹2,50,000
--- 5. No balance check - traders can request up to ₹2.5L regardless of balance
+-- 4. Max request amount: ₹1,00,000 (traders can request multiple times up to ₹2,50,000 total)
+-- 5. No balance check - traders can request regardless of balance
 --
 -- Run this in Supabase Dashboard → SQL Editor
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -41,7 +41,7 @@ DECLARE
   v_fully_assigned BOOLEAN;
   
   -- Configuration constants
-  c_max_request_amount CONSTANT NUMERIC := 250000;  -- ₹2.5 lakhs max request
+  c_max_request_amount CONSTANT NUMERIC := 100000;  -- ₹1 lakh max per request
   c_max_cap_percent CONSTANT NUMERIC := 1.20;       -- 120% max assignment (Rule 1)
   c_stop_threshold_percent CONSTANT NUMERIC := 0.80; -- Stop at 80% fill (Rule 5)
   c_single_match_tolerance CONSTANT NUMERIC := 0.20; -- ±20% for single match (Rule 2)
@@ -59,11 +59,11 @@ BEGIN
     );
   END IF;
 
-  -- Rule: Max request is ₹2,50,000
+  -- Rule: Max request is ₹1,00,000 per request
   IF p_requested_amount > c_max_request_amount THEN
     RETURN jsonb_build_object(
       'success', false,
-      'error', 'Maximum request amount is ₹2,50,000'
+      'error', 'Maximum request amount is ₹1,00,000'
     );
   END IF;
 
@@ -240,8 +240,8 @@ COMMENT ON FUNCTION assign_payouts_to_trader IS
 1. Max assignment = 120% of requested (never over-assign more than 20%)
 2. Try single payout match first (within ±20% of requested)
 3. Stop at 80% fill threshold
-4. Max request amount: ₹2,50,000
-5. No balance check - traders can request up to ₹2.5L regardless of balance';
+4. Max request amount: ₹1,00,000 per request
+5. No balance check required';
 
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -424,5 +424,5 @@ CREATE TRIGGER trigger_auto_assign_on_reassign
 -- ✅ Rule 1: Max 120% of requested amount
 -- ✅ Rule 2: Single payout match preferred (±20%)
 -- ✅ Rule 5: Stop at 80% threshold
--- ✅ Max request: ₹2,50,000
+-- ✅ Max request: ₹1,00,000 per request (total cap ₹2,50,000)
 -- ✅ No balance check required

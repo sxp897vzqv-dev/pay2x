@@ -63,11 +63,11 @@ export default function RequestTab({ canCreate, requestAmount, setRequestAmount,
               value={requestAmount}
               onChange={e => setRequestAmount(e.target.value)}
               placeholder="Enter amount"
-              min="1" max="100000"
+              min="1" max="250000"
               className="w-full pl-8 pr-3 py-3 border border-slate-300 rounded-xl text-base font-bold focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent"
             />
           </div>
-          <p className="text-xs text-slate-400 mt-1">Max ₹1,00,000 · Available ₹{workingBalance.toLocaleString()}</p>
+          <p className="text-xs text-slate-400 mt-1">Max ₹2,50,000 · Balance ₹{workingBalance.toLocaleString()}</p>
         </div>
 
         {/* how-it-works */}
