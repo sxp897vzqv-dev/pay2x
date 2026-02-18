@@ -6,9 +6,26 @@ import {
 import { StatusBadge } from '../../../../components/trader';
 import { formatINR } from '../../../../utils/format';
 
+/* ─── Preset Cancel Reasons ─── */
+const CANCEL_REASONS = [
+  'Bank limit reached',
+  'Payment failed',
+  'UPI not working',
+  'Incorrect details',
+  'Beneficiary issue',
+  'Server down',
+  'Technical error',
+  'Daily limit exceeded',
+];
+
 /* ─── Cancel Bottom Sheet ─── */
 function CancelSheet({ payout, onClose, onCancel }) {
   const [reason, setReason] = useState('');
+  
+  // Count words (minimum 3)
+  const wordCount = reason.trim().split(/\s+/).filter(w => w.length > 0).length;
+  const isValid = wordCount >= 3;
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -28,21 +45,54 @@ function CancelSheet({ payout, onClose, onCancel }) {
           </div>
         </div>
         {/* body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">Reason *</label>
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
-            className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent resize-none"
-            placeholder="Explain why you're cancelling… (min 10 chars)" />
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2 flex items-start gap-2">
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {/* Quick Reasons */}
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-2 uppercase tracking-wide">Quick Select</label>
+            <div className="flex flex-wrap gap-2">
+              {CANCEL_REASONS.map(preset => (
+                <button
+                  key={preset}
+                  onClick={() => setReason(preset)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                    reason === preset
+                      ? 'bg-red-500 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Custom Reason */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">Reason *</label>
+              <span className={`text-xs ${isValid ? 'text-green-600' : 'text-slate-400'}`}>
+                {wordCount}/3 words
+              </span>
+            </div>
+            <textarea 
+              value={reason} 
+              onChange={e => setReason(e.target.value)} 
+              rows={2}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent resize-none"
+              placeholder="Select above or type reason (min 3 words)" 
+            />
+          </div>
+          
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 flex items-start gap-2">
             <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-amber-700">This payout will be returned to the pool for another trader.</p>
           </div>
         </div>
         {/* footer */}
         <div className="px-4 py-3 border-t border-slate-100 flex gap-2.5">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-slate-300 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 active:bg-slate-100">Cancel</button>
-          <button onClick={() => { onCancel(payout, reason); onClose(); }} disabled={reason.trim().length < 10}
-            className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-bold disabled:opacity-40 active:scale-[0.97]">Confirm</button>
+          <button onClick={onClose} className="flex-1 py-2.5 border border-slate-300 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 active:bg-slate-100">Back</button>
+          <button onClick={() => { onCancel(payout, reason); onClose(); }} disabled={!isValid}
+            className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-bold disabled:opacity-40 active:scale-[0.97]">Confirm Cancel</button>
         </div>
       </div>
     </div>

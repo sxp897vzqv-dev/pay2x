@@ -207,7 +207,7 @@ function AddUpiModal({ traderId, banks, onClose, onSuccess, editUpi }) {
   }, [editUpi, banks]);
 
   const canStep1 = provider && accountType && qrType;
-  const canStep2 = upiId && holderName && bankCode;
+  const canStep2 = upiId && holderName && bankCode && accountNumber && ifscCode && ifscCode.length === 11;
   const canSubmit = canStep1 && canStep2 && dailyLimit && perTxnLimit;
 
   const fetchGeoFromIFSC = async (ifsc) => {
@@ -404,20 +404,20 @@ function AddUpiModal({ traderId, banks, onClose, onSuccess, editUpi }) {
                   className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent" />
               </div>
 
-              {/* Bank Account Details for Geo */}
+              {/* Bank Account Details - Required */}
               <div className="pt-3 border-t border-slate-200">
                 <p className="text-xs text-slate-500 mb-3 flex items-center gap-1">
-                  <Shield className="w-3.5 h-3.5" /> Bank details help with faster payments in your region
+                  <Shield className="w-3.5 h-3.5" /> Bank details required for payouts and dispute resolution
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1.5">Account Number</label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1.5">Account Number *</label>
                     <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)}
                       placeholder="1234567890"
                       className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono" />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1.5">IFSC Code</label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1.5">IFSC Code *</label>
                     <input type="text" value={ifscCode} onChange={e => setIfscCode(e.target.value.toUpperCase())}
                       placeholder="HDFC0001234" maxLength={11}
                       className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono uppercase" />

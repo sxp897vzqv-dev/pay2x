@@ -4,6 +4,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { supabase } from './supabase';
 import { initIPCapture } from './utils/ipCapture';
 
+// Global Context Providers
+import { UploadProvider } from './context/UploadContext';
+import UploadToast from './components/UploadToast';
+
 // Initialize IP capture on app load (for audit logging)
 initIPCapture();
 
@@ -244,8 +248,10 @@ function App() {
   }
 
   return (
+    <UploadProvider>
     <Router>
       <React.Suspense fallback={<PageLoader />}>
+      <UploadToast />
       <Routes>
         {/* Public Route - Sign In */}
         <Route 
@@ -410,6 +416,7 @@ function App() {
       </Routes>
       </React.Suspense>
     </Router>
+    </UploadProvider>
   );
 }
 
