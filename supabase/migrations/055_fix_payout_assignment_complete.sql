@@ -140,14 +140,8 @@ BEGIN
     LOOP
       -- Check if adding this payout would exceed 120% cap
       IF (v_total_amount + COALESCE(v_payout.amount, 0)) > v_max_assignable THEN
-        -- Would exceed cap
-        IF array_length(v_payouts_to_assign, 1) > 0 THEN
-          -- Already have some assigned, stop here (don't over-assign)
-          EXIT;
-        ELSE
-          -- Nothing assigned yet, skip this big payout and try smaller ones
-          CONTINUE;
-        END IF;
+        -- Would exceed cap, skip and try next smaller payout
+        CONTINUE;
       END IF;
       
       -- Add this payout
