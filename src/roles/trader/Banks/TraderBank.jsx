@@ -556,35 +556,71 @@ export default function TraderBank() {
     fetchData();
   }, [fetchData]);
 
+  // Realtime: refresh when saved_banks or traders change (server may auto-remove UPIs)
+  useEffect(() => {
+    if (!traderId) return;
+    
+    const channel = supabase.channel('trader-bank-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'saved_banks', filter: `trader_id=eq.${traderId}` }, () => {
+        fetchData();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'traders', filter: `id=eq.${traderId}` }, () => {
+        fetchData();
+      })
+      .subscribe();
+    
+    return () => { supabase.removeChannel(channel); };
+  }, [traderId, fetchData]);
+
   // Toggle: ON = add to pool, OFF = remove from pool
   const handleToggle = async (upi) => {
+    // Prevent turning ON if balance is low
     if (workingBalance < 30000 && !upi.is_active) {
       setToast({ msg: '❌ Balance below ₹30,000. Cannot activate UPI.', success: false });
       return;
     }
 
+    // Prevent double-click
+    if (togglingId === upi.id) return;
+    
     setTogglingId(upi.id);
     
     try {
       if (upi.is_active) {
         // Turn OFF: Remove from upi_pool
-        await supabase.rpc('remove_upi_from_pool', { p_saved_bank_id: upi.id });
-        await supabase.from('saved_banks').update({ is_active: false }).eq('id', upi.id);
+        const { error: rpcErr } = await supabase.rpc('remove_upi_from_pool', { p_saved_bank_id: upi.id });
+        if (rpcErr) throw rpcErr;
+        
+        const { error: updateErr } = await supabase.from('saved_banks').update({ is_active: false }).eq('id', upi.id);
+        if (updateErr) throw updateErr;
+        
+        setUpis(prev => prev.map(u => u.id === upi.id ? { ...u, is_active: false } : u));
         setToast({ msg: '✅ UPI removed from active pool', success: true });
       } else {
-        // Turn ON: Add to upi_pool
-        await supabase.rpc('sync_upi_to_pool', { p_saved_bank_id: upi.id });
-        await supabase.from('saved_banks').update({ is_active: true }).eq('id', upi.id);
+        // Turn ON: Add to upi_pool (only if balance >= 30k)
+        if (workingBalance < 30000) {
+          setToast({ msg: '❌ Balance below ₹30,000. Cannot activate UPI.', success: false });
+          setTogglingId(null);
+          return;
+        }
+        
+        const { error: rpcErr } = await supabase.rpc('sync_upi_to_pool', { p_saved_bank_id: upi.id });
+        if (rpcErr) throw rpcErr;
+        
+        const { error: updateErr } = await supabase.from('saved_banks').update({ is_active: true }).eq('id', upi.id);
+        if (updateErr) throw updateErr;
+        
+        setUpis(prev => prev.map(u => u.id === upi.id ? { ...u, is_active: true } : u));
         setToast({ msg: '✅ UPI added to active pool', success: true });
       }
-      
-      setUpis(prev => prev.map(u => u.id === upi.id ? { ...u, is_active: !upi.is_active } : u));
     } catch (e) {
       console.error('Toggle error:', e);
-      setToast({ msg: `Error: ${e.message}`, success: false });
+      setToast({ msg: `Error: ${e.message || 'Failed to toggle UPI'}`, success: false });
+      // Refresh to get actual state
+      fetchData();
+    } finally {
+      setTogglingId(null);
     }
-    
-    setTogglingId(null);
   };
 
   // Delete: Soft delete in saved_banks, remove from pool
