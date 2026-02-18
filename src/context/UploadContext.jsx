@@ -1,16 +1,20 @@
 import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
-import { supabase } from '../supabase';
+import { supabase, SUPABASE_URL } from '../supabase';
+import * as tus from 'tus-js-client';
 
 // ═══════════════════════════════════════════════════════════════════
-// UPLOAD CONTEXT - Global Background Upload Manager
+// UPLOAD CONTEXT - Global Background Upload Manager with TUS Support
 // ═══════════════════════════════════════════════════════════════════
 
 const UploadContext = createContext(null);
+
+const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks for TUS
 
 // Upload status enum
 export const UploadStatus = {
   QUEUED: 'queued',
   UPLOADING: 'uploading',
+  PAUSED: 'paused',
   PROCESSING: 'processing',
   COMPLETED: 'completed',
   FAILED: 'failed',
@@ -23,9 +27,112 @@ const generateId = () => `upload_${Date.now()}_${Math.random().toString(36).subs
 export function UploadProvider({ children }) {
   const [uploads, setUploads] = useState([]); // Array of upload items
   const [isMinimized, setIsMinimized] = useState(false);
-  const abortControllers = useRef({}); // Store abort controllers by upload ID
+  const tusUploads = useRef({}); // Store TUS upload instances by ID
+  const callbacks = useRef({}); // Store callbacks by ID
 
-  // Add file(s) to queue
+  // Update single upload (memoized)
+  const updateUpload = useCallback((id, updates) => {
+    setUploads(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
+  }, []);
+
+  // TUS upload function
+  const uploadWithTus = useCallback(async (uploadItem) => {
+    const { id, file, bucket, path, metadata } = uploadItem;
+
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        updateUpload(id, { status: UploadStatus.FAILED, error: 'Session expired' });
+        return;
+      }
+
+      updateUpload(id, { status: UploadStatus.UPLOADING, progress: 0 });
+
+      const upload = new tus.Upload(file, {
+        endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+        retryDelays: [0, 1000, 3000, 5000, 10000],
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          'x-upsert': 'true',
+        },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        metadata: {
+          bucketName: bucket,
+          objectName: path,
+          contentType: file.type,
+          cacheControl: '3600',
+        },
+        chunkSize: CHUNK_SIZE,
+
+        onError: (err) => {
+          console.error(`TUS upload error (${id}):`, err);
+          updateUpload(id, { status: UploadStatus.FAILED, error: err.message || 'Upload failed' });
+          
+          // Call error callback
+          if (callbacks.current[id]?.onError) {
+            callbacks.current[id].onError({ id, error: err.message, fileName: file.name });
+          }
+        },
+
+        onProgress: (bytesUploaded, bytesTotal) => {
+          const progress = Math.round((bytesUploaded / bytesTotal) * 100);
+          updateUpload(id, { progress });
+        },
+
+        onSuccess: () => {
+          const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+          const publicUrl = data.publicUrl;
+
+          updateUpload(id, {
+            status: UploadStatus.COMPLETED,
+            progress: 100,
+            url: publicUrl,
+          });
+
+          // Call success callback
+          if (callbacks.current[id]?.onComplete) {
+            callbacks.current[id].onComplete({
+              id,
+              url: publicUrl,
+              path,
+              bucket,
+              fileName: file.name,
+              fileSize: file.size,
+              metadata,
+            });
+          }
+
+          // Cleanup
+          delete tusUploads.current[id];
+          delete callbacks.current[id];
+        },
+
+        onShouldRetry: (err, retryAttempt) => {
+          const status = err.originalResponse?.getStatus?.();
+          if (status === 403) return false;
+          if (!status || status >= 500) return true;
+          return retryAttempt < 3;
+        },
+      });
+
+      tusUploads.current[id] = upload;
+
+      // Check for previous uploads to resume
+      const previousUploads = await upload.findPreviousUploads();
+      if (previousUploads.length > 0) {
+        console.log(`Resuming previous upload for ${id}`);
+        upload.resumeFromPreviousUpload(previousUploads[0]);
+      }
+
+      upload.start();
+    } catch (err) {
+      console.error('TUS setup error:', err);
+      updateUpload(id, { status: UploadStatus.FAILED, error: err.message });
+    }
+  }, [updateUpload]);
+
+  // Add file(s) to queue with TUS support
   const addToQueue = useCallback((files, options = {}) => {
     const {
       bucket = 'uploads',
@@ -33,180 +140,173 @@ export function UploadProvider({ children }) {
       onComplete,
       onError,
       metadata = {},
-      maxRetries = 2,
+      useTus = true, // Default to TUS for large files
     } = options;
 
     const fileArray = Array.isArray(files) ? files : [files];
-    const newUploads = fileArray.map(file => ({
-      id: generateId(),
-      file,
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      bucket,
-      folder,
-      status: UploadStatus.QUEUED,
-      progress: 0,
-      error: null,
-      url: null,
-      path: null,
-      metadata,
-      onComplete,
-      onError,
-      retries: 0,
-      maxRetries,
-      createdAt: Date.now(),
-    }));
+    const timestamp = Date.now();
+
+    const newUploads = fileArray.map((file, idx) => {
+      const id = generateId();
+      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const path = folder ? `${folder}/${timestamp}_${idx}_${safeName}` : `${timestamp}_${idx}_${safeName}`;
+
+      // Store callbacks
+      callbacks.current[id] = { onComplete, onError };
+
+      return {
+        id,
+        file,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        bucket,
+        folder,
+        path,
+        status: UploadStatus.QUEUED,
+        progress: 0,
+        error: null,
+        url: null,
+        metadata,
+        useTus: useTus && file.size > 1024 * 1024, // Use TUS for files > 1MB
+        createdAt: Date.now(),
+      };
+    });
 
     setUploads(prev => [...prev, ...newUploads]);
 
-    // Start processing queue
+    // Start processing
     newUploads.forEach(upload => {
-      processUpload(upload);
+      if (upload.useTus) {
+        uploadWithTus(upload);
+      } else {
+        processSimpleUpload(upload);
+      }
     });
 
     return newUploads.map(u => u.id);
-  }, []);
+  }, [uploadWithTus]);
 
-  // Process single upload
-  const processUpload = async (uploadItem) => {
-    const { id, file, bucket, folder, metadata, onComplete, onError, maxRetries } = uploadItem;
-    
-    // Create abort controller
-    const controller = new AbortController();
-    abortControllers.current[id] = controller;
+  // Simple upload for small files
+  const processSimpleUpload = async (uploadItem) => {
+    const { id, file, bucket, path, metadata } = uploadItem;
 
-    // Update status to uploading
-    updateUpload(id, { status: UploadStatus.UPLOADING, progress: 0 });
+    updateUpload(id, { status: UploadStatus.UPLOADING, progress: 10 });
 
     try {
-      // Generate unique path
-      const timestamp = Date.now();
-      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const filePath = folder ? `${folder}/${timestamp}_${safeName}` : `${timestamp}_${safeName}`;
-
-      // Upload to Supabase Storage with progress tracking
-      // Note: Supabase JS doesn't support progress natively, we'll simulate it
-      // For real progress, use XHR or fetch with ReadableStream
-      
-      updateUpload(id, { progress: 10 });
-
-      const { data, error } = await supabase.storage
+      const { error } = await supabase.storage
         .from(bucket)
-        .upload(filePath, file, {
+        .upload(path, file, {
           cacheControl: '3600',
-          upsert: false,
+          upsert: true,
           contentType: file.type,
         });
 
       if (error) throw error;
 
-      updateUpload(id, { progress: 80, status: UploadStatus.PROCESSING });
+      updateUpload(id, { progress: 80 });
 
-      // Get public URL
-      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
       const publicUrl = urlData?.publicUrl;
 
-      // Complete
       updateUpload(id, {
         status: UploadStatus.COMPLETED,
         progress: 100,
         url: publicUrl,
-        path: filePath,
       });
 
-      // Callback
-      if (onComplete) {
-        onComplete({
+      if (callbacks.current[id]?.onComplete) {
+        callbacks.current[id].onComplete({
           id,
           url: publicUrl,
-          path: filePath,
+          path,
           bucket,
           fileName: file.name,
           fileSize: file.size,
           metadata,
         });
       }
-
-    } catch (error) {
-      console.error('Upload error:', error);
-      
-      // Check if cancelled
-      if (error.name === 'AbortError') {
-        updateUpload(id, { status: UploadStatus.CANCELLED, error: 'Upload cancelled' });
-        return;
-      }
-
-      // Check retries
-      const currentUpload = uploads.find(u => u.id === id);
-      if (currentUpload && currentUpload.retries < maxRetries) {
-        updateUpload(id, { retries: currentUpload.retries + 1, status: UploadStatus.QUEUED });
-        setTimeout(() => processUpload({ ...uploadItem, retries: currentUpload.retries + 1 }), 2000);
-        return;
-      }
-
-      updateUpload(id, {
-        status: UploadStatus.FAILED,
-        error: error.message || 'Upload failed',
-        progress: 0,
-      });
-
-      if (onError) {
-        onError({ id, error: error.message, fileName: file.name });
+    } catch (err) {
+      updateUpload(id, { status: UploadStatus.FAILED, error: err.message });
+      if (callbacks.current[id]?.onError) {
+        callbacks.current[id].onError({ id, error: err.message, fileName: file.name });
       }
     } finally {
-      delete abortControllers.current[id];
+      delete callbacks.current[id];
     }
   };
 
-  // Update single upload
-  const updateUpload = useCallback((id, updates) => {
-    setUploads(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
-  }, []);
+  // Pause TUS upload
+  const pauseUpload = useCallback((id) => {
+    if (tusUploads.current[id]) {
+      tusUploads.current[id].abort();
+      updateUpload(id, { status: UploadStatus.PAUSED });
+    }
+  }, [updateUpload]);
+
+  // Resume TUS upload
+  const resumeUpload = useCallback((id) => {
+    if (tusUploads.current[id]) {
+      updateUpload(id, { status: UploadStatus.UPLOADING });
+      tusUploads.current[id].start();
+    }
+  }, [updateUpload]);
 
   // Cancel upload
   const cancelUpload = useCallback((id) => {
-    if (abortControllers.current[id]) {
-      abortControllers.current[id].abort();
+    if (tusUploads.current[id]) {
+      tusUploads.current[id].abort();
+      delete tusUploads.current[id];
     }
     updateUpload(id, { status: UploadStatus.CANCELLED, error: 'Cancelled by user' });
+    delete callbacks.current[id];
   }, [updateUpload]);
 
   // Retry failed upload
   const retryUpload = useCallback((id) => {
     const upload = uploads.find(u => u.id === id);
     if (upload && upload.status === UploadStatus.FAILED) {
-      updateUpload(id, { status: UploadStatus.QUEUED, error: null, retries: 0 });
-      processUpload(upload);
+      if (upload.useTus) {
+        uploadWithTus(upload);
+      } else {
+        processSimpleUpload(upload);
+      }
     }
-  }, [uploads, updateUpload]);
+  }, [uploads, uploadWithTus]);
 
-  // Remove from list (completed/failed/cancelled)
+  // Remove from list
   const removeUpload = useCallback((id) => {
+    if (tusUploads.current[id]) {
+      tusUploads.current[id].abort();
+      delete tusUploads.current[id];
+    }
+    delete callbacks.current[id];
     setUploads(prev => prev.filter(u => u.id !== id));
   }, []);
 
-  // Clear all completed
+  // Clear all completed/cancelled
   const clearCompleted = useCallback(() => {
-    setUploads(prev => prev.filter(u => 
-      u.status !== UploadStatus.COMPLETED && 
+    setUploads(prev => prev.filter(u =>
+      u.status !== UploadStatus.COMPLETED &&
       u.status !== UploadStatus.CANCELLED
     ));
   }, []);
 
   // Clear all
   const clearAll = useCallback(() => {
-    // Cancel active uploads
-    Object.values(abortControllers.current).forEach(controller => controller.abort());
-    abortControllers.current = {};
+    Object.keys(tusUploads.current).forEach(id => {
+      tusUploads.current[id].abort();
+    });
+    tusUploads.current = {};
+    callbacks.current = {};
     setUploads([]);
   }, []);
 
   // Computed values
-  const activeUploads = uploads.filter(u => 
-    u.status === UploadStatus.QUEUED || 
-    u.status === UploadStatus.UPLOADING || 
-    u.status === UploadStatus.PROCESSING
+  const activeUploads = uploads.filter(u =>
+    u.status === UploadStatus.QUEUED ||
+    u.status === UploadStatus.UPLOADING ||
+    u.status === UploadStatus.PAUSED
   );
   const completedUploads = uploads.filter(u => u.status === UploadStatus.COMPLETED);
   const failedUploads = uploads.filter(u => u.status === UploadStatus.FAILED);
@@ -224,9 +324,11 @@ export function UploadProvider({ children }) {
     hasActiveUploads,
     totalProgress,
     isMinimized,
-    
+
     // Actions
     addToQueue,
+    pauseUpload,
+    resumeUpload,
     cancelUpload,
     retryUpload,
     removeUpload,
@@ -243,12 +345,15 @@ export function UploadProvider({ children }) {
 }
 
 // Hook to use upload context
-export function useUpload() {
+export function useUploadContext() {
   const context = useContext(UploadContext);
   if (!context) {
-    throw new Error('useUpload must be used within an UploadProvider');
+    throw new Error('useUploadContext must be used within an UploadProvider');
   }
   return context;
 }
+
+// Alias for backwards compatibility
+export const useUpload = useUploadContext;
 
 export default UploadContext;

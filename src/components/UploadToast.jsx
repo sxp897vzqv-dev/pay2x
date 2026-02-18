@@ -1,8 +1,9 @@
 import React from 'react';
-import { useUpload, UploadStatus } from '../context/UploadContext';
+import { useUploadContext, UploadStatus } from '../context/UploadContext';
 import {
   Upload, X, CheckCircle, AlertCircle, Loader2, ChevronUp, ChevronDown,
   Trash2, RotateCcw, FileText, Film, Image, File, Minimize2, Maximize2,
+  Pause, Play,
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -25,26 +26,30 @@ function formatSize(bytes) {
 }
 
 // Single upload item
-function UploadItem({ upload, onCancel, onRetry, onRemove }) {
+function UploadItem({ upload, onCancel, onRetry, onRemove, onPause, onResume }) {
   const FileIcon = getFileIcon(upload.fileType);
-  const isActive = [UploadStatus.QUEUED, UploadStatus.UPLOADING, UploadStatus.PROCESSING].includes(upload.status);
+  const isActive = [UploadStatus.QUEUED, UploadStatus.UPLOADING, UploadStatus.PAUSED].includes(upload.status);
+  const isPaused = upload.status === UploadStatus.PAUSED;
   
   return (
     <div className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
       upload.status === UploadStatus.COMPLETED ? 'bg-green-50' :
       upload.status === UploadStatus.FAILED ? 'bg-red-50' :
       upload.status === UploadStatus.CANCELLED ? 'bg-slate-50' :
+      upload.status === UploadStatus.PAUSED ? 'bg-amber-50' :
       'bg-white'
     }`}>
       {/* File Icon */}
       <div className={`p-2 rounded-lg flex-shrink-0 ${
         upload.status === UploadStatus.COMPLETED ? 'bg-green-100' :
         upload.status === UploadStatus.FAILED ? 'bg-red-100' :
+        upload.status === UploadStatus.PAUSED ? 'bg-amber-100' :
         'bg-blue-100'
       }`}>
         <FileIcon className={`w-4 h-4 ${
           upload.status === UploadStatus.COMPLETED ? 'text-green-600' :
           upload.status === UploadStatus.FAILED ? 'text-red-600' :
+          upload.status === UploadStatus.PAUSED ? 'text-amber-600' :
           'text-blue-600'
         }`} />
       </div>
@@ -57,7 +62,9 @@ function UploadItem({ upload, onCancel, onRetry, onRemove }) {
           {isActive && (
             <>
               <span>•</span>
-              <span className="text-blue-600 font-medium">{upload.progress}%</span>
+              <span className={`font-medium ${isPaused ? 'text-amber-600' : 'text-blue-600'}`}>
+                {isPaused ? 'Paused' : `${upload.progress}%`}
+              </span>
             </>
           )}
           {upload.status === UploadStatus.COMPLETED && (
@@ -76,7 +83,7 @@ function UploadItem({ upload, onCancel, onRetry, onRemove }) {
           <div className="mt-1.5 h-1.5 bg-slate-200 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-300 rounded-full ${
-                upload.status === UploadStatus.PROCESSING ? 'bg-amber-500 animate-pulse' : 'bg-blue-500'
+                isPaused ? 'bg-amber-500' : 'bg-blue-500'
               }`}
               style={{ width: `${upload.progress}%` }}
             />
@@ -86,6 +93,24 @@ function UploadItem({ upload, onCancel, onRetry, onRemove }) {
       
       {/* Actions */}
       <div className="flex items-center gap-1 flex-shrink-0">
+        {upload.status === UploadStatus.UPLOADING && upload.useTus && (
+          <button 
+            onClick={() => onPause(upload.id)}
+            className="p-1.5 text-slate-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors"
+            title="Pause"
+          >
+            <Pause className="w-4 h-4" />
+          </button>
+        )}
+        {isPaused && (
+          <button 
+            onClick={() => onResume(upload.id)}
+            className="p-1.5 text-amber-500 hover:text-green-500 hover:bg-green-50 rounded-lg transition-colors"
+            title="Resume"
+          >
+            <Play className="w-4 h-4" />
+          </button>
+        )}
         {isActive && (
           <button 
             onClick={() => onCancel(upload.id)}
@@ -129,12 +154,14 @@ export default function UploadToast() {
     totalProgress,
     isMinimized,
     setIsMinimized,
+    pauseUpload,
+    resumeUpload,
     cancelUpload,
     retryUpload,
     removeUpload,
     clearCompleted,
     clearAll,
-  } = useUpload();
+  } = useUploadContext();
 
   // Don't render if no uploads
   if (uploads.length === 0) return null;
@@ -201,6 +228,8 @@ export default function UploadToast() {
                 <UploadItem
                   key={upload.id}
                   upload={upload}
+                  onPause={pauseUpload}
+                  onResume={resumeUpload}
                   onCancel={cancelUpload}
                   onRetry={retryUpload}
                   onRemove={removeUpload}
