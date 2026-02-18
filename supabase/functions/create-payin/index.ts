@@ -17,7 +17,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, handleCors } from '../_shared/cors.ts';
-import { PayinEngineV4 } from '../_shared/payin-engine-v4.ts';
+import { PayinEngineV5 } from '../_shared/payin-engine-v5.ts';
 import { 
   createError, 
   errorResponse, 
@@ -333,7 +333,7 @@ serve(async (req: Request) => {
 
     // 10. Smart UPI selection via PayinEngine v4 (with geo)
     log('info', 'Selecting UPI', ctx, { amount: amountNum, userId, userCity: userGeo.city });
-    const engine = new PayinEngineV4(supabase);
+    const engine = new PayinEngineV5(supabase);
     const selection = await engine.selectUpi(amountNum, merchant.id, userId, userGeo);
 
     if (!selection.success) {
