@@ -115,7 +115,7 @@ export class PayinEngineV5 {
     return 'mismatch';
   }
 
-  private scoreUpi(upi: UpiCandidate, amount: number): ScoredUpi | null {
+  private scoreUpi(upi: UpiCandidate, amount: number, allowTierMismatch: boolean = false): ScoredUpi | null {
     const requestedTier = this.getAmountTier(amount);
     const breakdown: Record<string, number> = {};
     let totalScore = 0;
@@ -132,9 +132,11 @@ export class PayinEngineV5 {
       upi.min_amount || 0,
       upi.max_amount || 999999
     );
-    if (tierMatch === 'mismatch' && amount > 10000) return null;
+    
+    // Only reject tier mismatch if NOT in fallback mode
+    if (tierMatch === 'mismatch' && amount > 10000 && !allowTierMismatch) return null;
 
-    // Daily limit check
+    // Daily limit check (always required)
     const effectiveLimit = upi.daily_limit * (upi.performance_multiplier || 1);
     const limitLeft = Math.max(0, effectiveLimit - upi.daily_volume);
     if (limitLeft < amount) return null;
@@ -166,10 +168,11 @@ export class PayinEngineV5 {
     breakdown.cooldown = Math.round(cooldownScore * 10) / 10;
     totalScore += cooldownScore;
 
-    // 4. Amount Match (0-10)
+    // 4. Amount Match (0-10) - give partial score even for mismatch in fallback mode
     let amountScore = 0;
     if (tierMatch === 'exact') amountScore = this.weights.amountMatch;
     else if (tierMatch === 'adjacent') amountScore = this.weights.amountMatch * 0.6;
+    else if (allowTierMismatch) amountScore = this.weights.amountMatch * 0.2; // Fallback: small score
     breakdown.amountMatch = Math.round(amountScore * 10) / 10;
     totalScore += amountScore;
 
@@ -324,10 +327,22 @@ export class PayinEngineV5 {
       bank_state: u.bank_state || null,
     }));
 
-    const scored = candidates
-      .map(c => this.scoreUpi(c, amount))
+    // First try: strict tier matching
+    let scored = candidates
+      .map(c => this.scoreUpi(c, amount, false))
       .filter((c): c is ScoredUpi => c !== null)
       .sort((a, b) => b.score - a.score);
+
+    // Fallback: if no tier-matched UPIs, try ANY UPI that can handle the amount
+    let usedFallback = false;
+    if (scored.length === 0) {
+      console.log(`[Engine v5] No tier match for ${amount}, trying fallback...`);
+      scored = candidates
+        .map(c => this.scoreUpi(c, amount, true)) // allowTierMismatch = true
+        .filter((c): c is ScoredUpi => c !== null)
+        .sort((a, b) => b.score - a.score);
+      usedFallback = true;
+    }
 
     if (scored.length === 0) {
       return { success: false, error: 'No suitable UPIs', errorCode: 'NO_MATCH' };
@@ -343,7 +358,7 @@ export class PayinEngineV5 {
     const fallbackChain = this.buildFallbackChain(scored, 3);
 
     // Log selection
-    await this.logSelection(selected, amount, merchantId, tier, fallbackChain.map(u => u.id));
+    await this.logSelection(selected, amount, merchantId, tier, fallbackChain.map(u => u.id), usedFallback);
 
     return {
       success: true,
@@ -354,6 +369,7 @@ export class PayinEngineV5 {
       traderName: selected.trader_name,
       score: selected.score,
       tier,
+      usedTierFallback: usedFallback,
       fallbackChain: fallbackChain.map(u => u.id),
       maxAttempts: fallbackChain.length,
       geoMatch: selected.geoMatch,
@@ -403,7 +419,7 @@ export class PayinEngineV5 {
     (data || []).forEach((a: any) => this.merchantAffinities.set(a.upi_pool_id, a.affinity_score));
   }
 
-  private async logSelection(selected: ScoredUpi, amount: number, merchantId: string, tier: string, fallbackChain: string[]) {
+  private async logSelection(selected: ScoredUpi, amount: number, merchantId: string, tier: string, fallbackChain: string[], usedFallback: boolean = false) {
     try {
       await this.supabase.from('selection_logs').insert({
         upi_pool_id: selected.id,
@@ -412,11 +428,11 @@ export class PayinEngineV5 {
         merchant_id: merchantId,
         amount,
         amount_tier: tier,
-        tier_match: selected.tierMatch,
+        tier_match: usedFallback ? 'fallback' : selected.tierMatch,
         score: selected.score,
         score_breakdown: selected.breakdown,
         bank_name: selected.bank_name,
-        engine_version: 'v5',
+        engine_version: 'v5.1',
         geo_match: selected.geoMatch,
         geo_boost: selected.geoBoost,
         user_city: this.userGeo?.city || null,
