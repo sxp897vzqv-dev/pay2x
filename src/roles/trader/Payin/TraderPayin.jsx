@@ -296,6 +296,12 @@ export default function TraderPayin() {
     if (dateTo)   r=r.filter(p => (p.requestedAt?.seconds||0)*1000 <= new Date(dateTo).getTime()+86399999);
     if (amountFilter==="high") r=r.filter(p => Number(p.amount)>10000);
     else if (amountFilter==="low") r=r.filter(p => Number(p.amount)<=10000);
+    // Sort: completed by completedAt desc, rejected by rejectedAt desc, pending by requestedAt desc
+    r.sort((a, b) => {
+      if (activeTab === 'completed') return (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0);
+      if (activeTab === 'rejected') return (b.rejectedAt?.seconds || 0) - (a.rejectedAt?.seconds || 0);
+      return (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0);
+    });
     return r;
   }, [payins, activeTab, debouncedSearch, dateFrom, dateTo, amountFilter]);
 
