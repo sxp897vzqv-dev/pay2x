@@ -11,6 +11,7 @@
 4. [Processing Payins](#4-processing-payins)
 5. [Handling Payouts](#5-handling-payouts)
 6. [Balance Management](#6-balance-management)
+   - [USDT Deposits](#61-usdt-deposits-adding-balance)
 7. [Disputes](#7-disputes)
 8. [Important Rules](#8-important-rules)
 9. [FAQs](#9-faqs)
@@ -270,7 +271,67 @@ Click **Cancel Request** on the active request banner.
 
 # 6. Balance Management
 
-## 6.1 Balance Types
+## 6.1 USDT Deposits (Adding Balance)
+
+You can add funds to your trader balance by depositing USDT (Tether).
+
+### How USDT Deposits Work
+
+1. Go to **Balance** section
+2. Click **Deposit USDT** button
+3. You'll see:
+   - **USDT Address:** Platform's TRC-20 wallet address
+   - **Current USDT Rate:** Live INR rate (updates from Binance P2P)
+   - **Minimum Deposit:** 10 USDT
+
+### Deposit Steps
+
+1. **Copy the USDT Address** (TRC-20 network only!)
+2. **Send USDT** from your wallet (Binance, Trust Wallet, etc.)
+3. **Enter Transaction Hash (TXID)** after sending
+4. **Submit** and wait for confirmation
+
+### Rate Calculation
+
+| Item | Value |
+|------|-------|
+| **Admin Rate** | Average of top 5 Binance P2P sellers |
+| **Trader Rate** | Admin Rate - ₹1 (platform fee) |
+| **Your Credit** | USDT Amount × Trader Rate |
+
+**Example:**
+- You deposit: 100 USDT
+- Admin rate: ₹93
+- Trader rate: ₹92 (93 - 1)
+- You receive: ₹9,200 in balance
+
+### Important Rules
+
+- ⚠️ **TRC-20 Network Only** - Do not send on other networks (ERC-20, BEP-20)
+- ⏱️ Confirmation takes 5-30 minutes depending on network
+- 📊 Rate is locked at time of submission
+- ❌ Wrong network = funds may be lost permanently
+- ✅ Minimum deposit: 10 USDT
+
+### Deposit Status
+
+| Status | Meaning |
+|--------|---------|
+| **Pending** | Waiting for blockchain confirmation |
+| **Confirming** | Transaction found, waiting for confirmations |
+| **Completed** | Balance credited to your account |
+| **Failed** | Transaction not found or invalid |
+
+### Tips
+
+- Always double-check the wallet address before sending
+- Save your TXID as proof
+- Don't close the page until you submit the TXID
+- Contact admin if deposit not credited within 1 hour
+
+---
+
+## 6.2 Balance Types
 
 | Type | Description |
 |------|-------------|
@@ -278,7 +339,7 @@ Click **Cancel Request** on the active request banner.
 | **Security Hold** | Amount held for security (set by admin) |
 | **Working Balance** | Total - Security Hold (available for operations) |
 
-## 6.2 Balance Flow
+## 6.3 Balance Flow
 
 ### Payin Completed:
 - Your balance **decreases** by payin amount
@@ -290,7 +351,7 @@ Click **Cancel Request** on the active request banner.
 - Your commission **adds** to balance
 - Net effect: Balance increases by (Amount + Commission)
 
-## 6.3 Commission Tracking
+## 6.4 Commission Tracking
 
 View your earnings in the Balance section:
 - Today's commission
@@ -418,5 +479,5 @@ For technical issues or disputes, contact your Pay2X administrator.
 
 ---
 
-*Pay2X Trader Manual v1.0*  
-*Last Updated: February 2026*
+*Pay2X Trader Manual v1.1*  
+*Last Updated: 18 February 2026*

@@ -153,11 +153,15 @@ serve(async (req: Request) => {
       return createErrorResponse(error, ctx);
     }
 
-    // 2. Validate API key and get merchant  
+    // 2. Validate API key and get merchant
+    // Check both live and test API keys
+    const isTestKey = apiKey.startsWith('test_');
+    const keyColumn = isTestKey ? 'test_api_key' : 'live_api_key';
+    
     const { data: merchantData, error: merchantError } = await supabase
       .from('merchants')
       .select('id, name, business_name, is_active, webhook_url, webhook_secret')
-      .eq('live_api_key', apiKey)
+      .eq(keyColumn, apiKey)
       .single();
 
     if (merchantError || !merchantData) {
@@ -166,7 +170,7 @@ serve(async (req: Request) => {
       errorMessage = error.message;
       responseStatus = error.httpStatus;
       
-      log('warn', 'Invalid API key', ctx, { keyPrefix: apiKey.slice(0, 10), dbError: merchantError?.message });
+      log('warn', 'Invalid API key', ctx, { keyPrefix: apiKey.slice(0, 10), keyType: isTestKey ? 'test' : 'live', dbError: merchantError?.message });
       await logRequest(supabase, ctx, req, { status: error.httpStatus, errorCode, errorMessage });
       return createErrorResponse(error, ctx);
     }

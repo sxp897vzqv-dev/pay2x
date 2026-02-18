@@ -50,11 +50,14 @@ serve(async (req: Request) => {
     // 3. Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    // 4. Validate API key and get merchant
+    // 4. Validate API key and get merchant (supports both live and test keys)
+    const isTestKey = apiKey.startsWith('test_');
+    const keyColumn = isTestKey ? 'test_api_key' : 'live_api_key';
+    
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
       .select('id')
-      .eq('live_api_key', apiKey)
+      .eq(keyColumn, apiKey)
       .single();
 
     if (merchantError || !merchant) {

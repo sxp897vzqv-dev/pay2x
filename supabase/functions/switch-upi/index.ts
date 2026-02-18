@@ -105,11 +105,14 @@ serve(async (req: Request) => {
       return errorResponse(createError('AUTH_MISSING_KEY'), ctx);
     }
 
-    // 2. Get merchant
+    // 2. Get merchant (supports both live and test keys)
+    const isTestKey = apiKey.startsWith('test_');
+    const keyColumn = isTestKey ? 'test_api_key' : 'live_api_key';
+    
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
       .select('id, name, is_active')
-      .eq('live_api_key', apiKey)
+      .eq(keyColumn, apiKey)
       .single();
 
     if (merchantError || !merchant) {

@@ -71,11 +71,14 @@ serve(async (req: Request) => {
       );
     }
 
-    // 2. Validate API key and get merchant
+    // 2. Validate API key and get merchant (supports both live and test keys)
+    const isTestKey = apiKey.startsWith('test_');
+    const keyColumn = isTestKey ? 'test_api_key' : 'live_api_key';
+    
     const { data: merchant, error: merchantError } = await supabase
       .from('merchants')
       .select('id, name, is_active, available_balance, payout_commission_rate, webhook_url, webhook_secret')
-      .eq('live_api_key', apiKey)
+      .eq(keyColumn, apiKey)
       .single();
 
     if (merchantError || !merchant) {
