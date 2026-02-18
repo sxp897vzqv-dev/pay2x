@@ -190,7 +190,7 @@ BEGIN
       WHEN array_length(v_payouts_to_assign, 1) > 0 THEN 'partially_assigned'
       ELSE 'waiting'
     END,
-    v_payouts_to_assign,
+    to_jsonb(v_payouts_to_assign),
     v_fully_assigned,
     NOT v_fully_assigned,
     NOW()
