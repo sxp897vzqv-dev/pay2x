@@ -58,8 +58,8 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
   useEffect(() => {
     if (payin.status === 'pending' && !payin.utrId && payin.requestedAt?.seconds) {
       const update = () => {
-        const rem = (25 * 60 * 1000) - (Date.now() - payin.requestedAt.seconds * 1000);
-        if (rem > 0) setRemainingTime({ min: Math.floor(rem/60000), sec: Math.floor((rem%60000)/1000), expiring: rem < 300000 });
+        const rem = (15 * 60 * 1000) - (Date.now() - payin.requestedAt.seconds * 1000);
+        if (rem > 0) setRemainingTime({ min: Math.floor(rem/60000), sec: Math.floor((rem%60000)/1000), expiring: rem < 180000 });
         else         setRemainingTime({ min: 0, sec: 0, expiring: true });
       };
       update();
@@ -266,17 +266,17 @@ export default function TraderPayin() {
     },
   });
 
-  /* Auto-reject expired */
+  /* Auto-reject expired (client-side backup - server cron handles this too) */
   useEffect(() => {
     const check = async () => {
       const now = Date.now();
       for (const p of payins.filter(p => p.status==='pending' && !p.utrId)) {
-        if (p.requestedAt?.seconds && (now - p.requestedAt.seconds*1000)/60000 >= 25) {
+        if (p.requestedAt?.seconds && (now - p.requestedAt.seconds*1000)/60000 >= 15) {
           try {
             const ts = new Date().toISOString();
             await supabase.from('payins').update({
               status: 'rejected', rejected_at: ts,
-              rejection_reason: 'Time expired – UTR not submitted within 25 minutes',
+              rejection_reason: 'Time expired – UTR not submitted within 15 minutes',
               auto_rejected: true, expired_at: ts,
             }).eq('id', p.id);
             setPayins(prev => prev.map(x => x.id === p.id ? { ...x, status: 'rejected', autoRejected: true } : x));
@@ -285,7 +285,7 @@ export default function TraderPayin() {
       }
     };
     check();
-    const iv = setInterval(check, 60000);
+    const iv = setInterval(check, 30000);
     return () => clearInterval(iv);
   }, [payins]);
 

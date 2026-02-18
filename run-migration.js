@@ -6,7 +6,7 @@ const supabase = createClient(
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyenluZHRvd3d3Y3lkZ2NhZ2NyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDI5ODU0OSwiZXhwIjoyMDg1ODc0NTQ5fQ.2qF6QqtZ_KK_VCuixbIzGq5so1_e3c17gmx83NfpEPo'
 );
 
-const sql = fs.readFileSync('./supabase/migrations/027_auto_assign_trigger.sql', 'utf8');
+const sql = fs.readFileSync('./supabase/migrations/055_fix_payout_assignment_complete.sql', 'utf8');
 
 // Split by semicolon and run each statement
 const statements = sql.split(/;\s*$/m).filter(s => s.trim() && !s.trim().startsWith('--'));
