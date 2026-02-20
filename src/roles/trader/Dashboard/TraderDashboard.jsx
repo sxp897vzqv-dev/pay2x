@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, memo, useMemo } from "react";
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../supabase';
 import {
@@ -10,7 +10,7 @@ import { SkeletonStats, RelativeTime } from '../../../components/trader';
 import { formatINR } from '../../../utils/format';
 
 /* ─── Alert Card ─── */
-const AlertCard = ({ alert }) => {
+const AlertCard = memo(({ alert }) => {
   const typeStyles = {
     critical: { bg: 'bg-red-50', border: 'border-red-200', icon: XCircle, iconColor: 'text-red-600' },
     warning: { bg: 'bg-amber-50', border: 'border-amber-200', icon: AlertTriangle, iconColor: 'text-amber-600' },
@@ -29,10 +29,10 @@ const AlertCard = ({ alert }) => {
       </div>
     </Link>
   );
-};
+});
 
 /* ─── Recent Transaction ─── */
-function RecentTransaction({ tx }) {
+const RecentTransaction = memo(function RecentTransaction({ tx }) {
   const isPayin = tx.type === 'payin';
   const statusColors = {
     success: 'bg-green-100 text-green-700',
@@ -64,7 +64,7 @@ function RecentTransaction({ tx }) {
       </div>
     </div>
   );
-}
+});
 
 /* ─── Date Presets ─── */
 const DATE_PRESETS = [

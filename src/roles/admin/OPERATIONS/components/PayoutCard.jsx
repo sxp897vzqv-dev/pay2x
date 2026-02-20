@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Eye, User, Clock, Hash, CreditCard, Building, Copy, Check,
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 /* ─── Payout Card ─── */
-export default function PayoutCard({ 
+const PayoutCard = memo(function PayoutCard({ 
   payout, 
   traderName,
   selected = false,
@@ -193,10 +193,10 @@ export default function PayoutCard({
       </div>
     </div>
   );
-}
+});
 
 /* ─── Waiting Request Card ─── */
-export function WaitingRequestCard({ request, onView, onCancel }) {
+export const WaitingRequestCard = memo(function WaitingRequestCard({ request, onView, onCancel }) {
   const traderId = request.trader_id;
   const traderName = request.trader?.name;
   const requestedAmount = request.requested_amount || request.amount || 0;
@@ -259,4 +259,6 @@ export function WaitingRequestCard({ request, onView, onCancel }) {
       </div>
     </div>
   );
-}
+});
+
+export default PayoutCard;

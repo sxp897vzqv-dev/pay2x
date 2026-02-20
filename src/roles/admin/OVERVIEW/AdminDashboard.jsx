@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, memo, useMemo } from 'react';
 import { supabase } from '../../../supabase';
 import { useRealtimeRefresh } from '../../../hooks/useRealtimeSubscription';
 import { Link } from 'react-router-dom';
@@ -12,7 +12,7 @@ import {
 import { StatCard } from '../../../components/admin';
 
 /* ─── Alert Card ─── */
-const AlertCard = ({ alert, onView }) => {
+const AlertCard = memo(({ alert, onView }) => {
   const typeStyles = {
     critical: { bg: 'bg-red-50', border: 'border-red-200', icon: XCircle, iconColor: 'text-red-600' },
     warning: { bg: 'bg-amber-50', border: 'border-amber-200', icon: AlertTriangle, iconColor: 'text-amber-600' },
@@ -35,7 +35,7 @@ const AlertCard = ({ alert, onView }) => {
       )}
     </div>
   );
-};
+});
 
 /* ─── Date Presets ─── */
 const DATE_PRESETS = [

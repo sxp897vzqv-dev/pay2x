@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Eye, CheckCircle, AlertCircle, Globe, Key, Copy, Wallet,
   MoreVertical, Edit, Trash2, EyeOff,
 } from 'lucide-react';
 
-export default function MerchantCard({ merchant, onEdit, onDelete, onToggleStatus }) {
+const MerchantCard = memo(function MerchantCard({ merchant, onEdit, onDelete, onToggleStatus }) {
   const [showMenu, setShowMenu] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -118,4 +118,6 @@ export default function MerchantCard({ merchant, onEdit, onDelete, onToggleStatu
       </div>
     </div>
   );
-}
+});
+
+export default MerchantCard;

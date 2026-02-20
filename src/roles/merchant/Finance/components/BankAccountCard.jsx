@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Building, Edit, Trash2 } from 'lucide-react';
 
-export default function BankAccountCard({ account, onEdit, onDelete, isPrimary, onSetPrimary }) {
+const BankAccountCard = memo(function BankAccountCard({ account, onEdit, onDelete, isPrimary, onSetPrimary }) {
   return (
     <div className={`rounded-xl border-2 p-4 ${isPrimary ? 'border-green-300 bg-green-50' : 'border-slate-200 bg-white'}`}>
       <div className="flex items-start justify-between mb-3">
@@ -37,4 +37,6 @@ export default function BankAccountCard({ account, onEdit, onDelete, isPrimary, 
       </div>
     </div>
   );
-}
+});
+
+export default BankAccountCard;

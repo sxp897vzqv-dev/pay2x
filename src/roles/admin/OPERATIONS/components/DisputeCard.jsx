@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Clock, CheckCircle, XCircle, User, Eye, ArrowDownCircle, ArrowUpCircle,
   MessageSquare, AlertTriangle, UserCheck, UserX
 } from 'lucide-react';
 
-export default function DisputeCard({ dispute, onResolve }) {
+const DisputeCard = memo(function DisputeCard({ dispute, onResolve }) {
   // Status styles for all possible statuses
   const statusStyles = {
     pending: { bg: 'bg-amber-100', text: 'text-amber-700', stripe: 'bg-amber-500', label: 'PENDING' },
@@ -154,4 +154,6 @@ export default function DisputeCard({ dispute, onResolve }) {
       </div>
     </div>
   );
-}
+});
+
+export default DisputeCard;

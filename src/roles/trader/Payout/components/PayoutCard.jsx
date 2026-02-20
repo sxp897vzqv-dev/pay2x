@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import {
   CheckCircle, XCircle, Clock, CreditCard, Building2, User, Hash,
   IndianRupee, AlertCircle, X,
@@ -100,7 +100,7 @@ function CancelSheet({ payout, onClose, onCancel }) {
 }
 
 /* ─── Payout Card ─── */
-export default function PayoutCard({ payout, onProcess, onCancel, isProcessing }) {
+const PayoutCard = memo(function PayoutCard({ payout, onProcess, onCancel, isProcessing }) {
   const [showCancel, setShowCancel] = useState(false);
 
   return (
@@ -176,4 +176,6 @@ export default function PayoutCard({ payout, onProcess, onCancel, isProcessing }
       )}
     </>
   );
-}
+});
+
+export default PayoutCard;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Eye, CheckCircle, AlertCircle, Wallet, Phone, RefreshCw, X,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 
-export default function TraderCard({ trader, onEdit, onDelete, onToggleStatus, onRegenerateAddress }) {
+const TraderCard = memo(function TraderCard({ trader, onEdit, onDelete, onToggleStatus, onRegenerateAddress }) {
   const [showMenu, setShowMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -203,4 +203,6 @@ export default function TraderCard({ trader, onEdit, onDelete, onToggleStatus, o
       )}
     </>
   );
-}
+});
+
+export default TraderCard;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   User, CreditCard, Clock, Hash, ChevronDown, ChevronUp, Copy, Timer, Eye,
@@ -47,7 +47,7 @@ function PendingTimer({ createdAt }) {
 }
 
 /* ─── Payin Card ─── */
-export default function PayinCard({ payin, onExpand, expanded }) {
+const PayinCard = memo(function PayinCard({ payin, onExpand, expanded }) {
   const statusStyles = {
     completed: { bg: 'bg-green-100', text: 'text-green-700', stripe: 'bg-green-500', amountColor: 'text-green-600' },
     pending: { bg: 'bg-amber-100', text: 'text-amber-700', stripe: 'bg-amber-500', amountColor: 'text-amber-600' },
@@ -192,4 +192,6 @@ export default function PayinCard({ payin, onExpand, expanded }) {
       </div>
     </div>
   );
-}
+});
+
+export default PayinCard;

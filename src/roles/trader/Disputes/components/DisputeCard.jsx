@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   AlertCircle, CheckCircle, XCircle, Clock,
   ArrowDownCircle, ArrowUpCircle, MessageSquare, Eye,
 } from 'lucide-react';
 
-export default function DisputeCard({ dispute, onViewConversation, unreadCount }) {
+const DisputeCard = memo(function DisputeCard({ dispute, onViewConversation, unreadCount }) {
   const isPayin = dispute.type === 'payin';
 
   return (
@@ -84,4 +84,6 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
       </div>
     </div>
   );
-}
+});
+
+export default DisputeCard;

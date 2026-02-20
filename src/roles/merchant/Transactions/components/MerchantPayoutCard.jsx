@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   CheckCircle, XCircle, Clock, AlertCircle, Building, CreditCard, User, Hash,
   Loader2, Ban, Eye, ArrowUpRight, ShieldCheck, Copy, Check,
 } from 'lucide-react';
 
-export default function PayoutCard({ payout, onCancel, isNew }) {
+const PayoutCard = memo(function PayoutCard({ payout, onCancel, isNew }) {
   const [copied, setCopied] = React.useState(false);
   
   // Handle column name variations (DB has both old and new names)
@@ -257,4 +257,6 @@ export default function PayoutCard({ payout, onCancel, isNew }) {
       </div>
     </div>
   );
-}
+});
+
+export default PayoutCard;

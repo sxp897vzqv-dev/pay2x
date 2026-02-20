@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { CheckCircle, XCircle, Clock, RefreshCw, AlertCircle, Eye } from 'lucide-react';
 
-export default function DisputeCard({ dispute, onViewDetails, isNew }) {
+const DisputeCard = memo(function DisputeCard({ dispute, onViewDetails, isNew }) {
   const statusColors = {
     pending: { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', icon: Clock, label: 'Pending' },
     routed_to_trader: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: RefreshCw, label: 'Routed' },
@@ -121,4 +121,6 @@ export default function DisputeCard({ dispute, onViewDetails, isNew }) {
       </div>
     </div>
   );
-}
+});
+
+export default DisputeCard;
