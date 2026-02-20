@@ -54,12 +54,10 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
         </div>
 
         {/* UTR row */}
-        {dispute.utr && (
-          <div className="mb-2 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
-            <p className="text-xs text-slate-400">UTR</p>
-            <p className="font-mono font-bold text-slate-900 text-sm">{dispute.utr}</p>
-          </div>
-        )}
+        <div className="mb-2 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
+          <p className="text-xs text-slate-400">UTR</p>
+          <p className="font-mono font-bold text-slate-900 text-sm">{dispute.utr || dispute.transaction_id || dispute.customer_utr || '-'}</p>
+        </div>
 
         {dispute.merchant_name && (
           <p className="text-xs text-slate-500 mb-1"><span className="font-semibold text-slate-600">Merchant:</span> {dispute.merchant_name}</p>

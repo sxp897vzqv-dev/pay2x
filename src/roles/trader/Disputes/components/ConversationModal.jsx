@@ -120,7 +120,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
             <h3 className="text-base font-bold text-slate-900">Dispute Conversation</h3>
             <p className="text-xs text-slate-400" style={{ fontFamily: 'var(--font-mono)' }}>
               {isPayin ? (dispute.upi_id || '-') : (dispute.order_id || '-')}
-              {dispute.utr && <span className="ml-2 text-slate-500">UTR: {dispute.utr}</span>}
+              {(dispute.utr || dispute.transaction_id) && <span className="ml-2 text-slate-500">UTR: {dispute.utr || dispute.transaction_id}</span>}
             </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
@@ -148,10 +148,10 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
                 <p className="font-mono font-bold text-slate-800 truncate">{dispute.upi_id}</p>
               </div>
             )}
-            {dispute.utr && (
+            {(dispute.utr || dispute.transaction_id) && (
               <div className="p-2 bg-white rounded-lg border border-slate-200">
                 <p className="text-slate-400">UTR</p>
-                <p className="font-mono font-bold text-slate-800 truncate">{dispute.utr}</p>
+                <p className="font-mono font-bold text-slate-800 truncate">{dispute.utr || dispute.transaction_id}</p>
               </div>
             )}
             {dispute.order_id && (
