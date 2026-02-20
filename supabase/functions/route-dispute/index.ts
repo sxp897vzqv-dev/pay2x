@@ -61,12 +61,25 @@ serve(async (req: Request) => {
 
     console.log(`🚀 Routing dispute: ${disputeId}, type: ${dispute.type}`);
 
+    // Determine if payin or payout based on type
+    const PAYIN_TYPES = ['payin', 'payment_not_received', 'wrong_amount', 'duplicate_payment'];
+    const PAYOUT_TYPES = ['payout', 'payout_not_received'];
+    
+    const isPayinDispute = PAYIN_TYPES.includes(dispute.type) || dispute.payin_id;
+    const isPayoutDispute = PAYOUT_TYPES.includes(dispute.type) || dispute.payout_id;
+
     let result: RouteResult;
 
-    if (dispute.type === 'payin') {
+    if (isPayinDispute && !isPayoutDispute) {
       result = await routePayinDispute(supabase, dispute);
-    } else {
+    } else if (isPayoutDispute) {
       result = await routePayoutDispute(supabase, dispute);
+    } else {
+      // Try payin first, then payout
+      result = await routePayinDispute(supabase, dispute);
+      if (!result.success) {
+        result = await routePayoutDispute(supabase, dispute);
+      }
     }
 
     if (!result.success) {

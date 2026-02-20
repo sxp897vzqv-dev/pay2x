@@ -81,9 +81,15 @@ serve(async (req: Request) => {
     let adjustmentAmount = 0;
     let adjustmentType = '';
 
+    // Determine dispute category
+    const PAYIN_TYPES = ['payin', 'payment_not_received', 'wrong_amount', 'duplicate_payment'];
+    const PAYOUT_TYPES = ['payout', 'payout_not_received'];
+    const isPayinDispute = PAYIN_TYPES.includes(dispute.type) || dispute.payin_id;
+    const isPayoutDispute = PAYOUT_TYPES.includes(dispute.type) || dispute.payout_id;
+
     // Balance adjustments only happen when admin approves AND trader has responded
     if (decision === 'approved' && traderResponded) {
-      if (dispute.type === 'payin') {
+      if (isPayinDispute && !isPayoutDispute) {
         // Payin dispute approved = payment was actually made but not processed
         // If trader_accepted: they confirm receipt → process like normal payin
         // Trader: deduct amount (got cash), add commission
@@ -121,7 +127,7 @@ serve(async (req: Request) => {
           adjustmentType = 'debit_trader_credit_merchant';
           console.log(`💸 Processed payin dispute: Trader -₹${amount} +₹${commission} commission`);
         }
-      } else if (dispute.type === 'payout') {
+      } else if (isPayoutDispute) {
         // Payout dispute approved = payout was NOT received by customer
         // If trader_rejected (claimed they sent but actually didn't): deduct from trader
         if (dispute.status === 'trader_rejected') {
