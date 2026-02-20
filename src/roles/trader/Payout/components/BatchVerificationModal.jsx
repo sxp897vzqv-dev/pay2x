@@ -106,6 +106,8 @@ export default function BatchVerificationModal({ request, completedPayouts, onCl
   const finalizeVerification = async (statementUrl, videoUrl) => {
     try {
       // Update payout request with verification
+      // IMPORTANT: Cancel waiting list when submitting verification
+      // Trader is done with this request cycle, don't assign more payouts
       const { error: updateError } = await supabase
         .from('payout_requests')
         .update({
@@ -114,6 +116,9 @@ export default function BatchVerificationModal({ request, completedPayouts, onCl
           video_proof_url: videoUrl,
           verification_submitted_at: new Date().toISOString(),
           status: 'pending_verification',
+          // Cancel waiting list - trader is done with this request
+          in_waiting_list: false,
+          remaining_amount: 0,
         })
         .eq('id', request.id);
 
