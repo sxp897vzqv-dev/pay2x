@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
-  AlertCircle, RefreshCw, Search, Filter, Bell, BellOff, Calendar, X, Download,
+  AlertCircle, RefreshCw, Search, Filter, Bell, BellOff, Volume2, VolumeX, Calendar, X, Download,
 } from "lucide-react";
 import Toast from '../../../components/admin/Toast';
 import DisputeNotifications from './components/DisputeNotifications';
@@ -26,8 +26,14 @@ export default function TraderDispute() {
   const [selectedDispute, setSelectedDispute] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('disputeSoundEnabled');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [toast, setToast] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [newDisputeAlert, setNewDisputeAlert] = useState(false);
+  const isFirstLoad = useRef(true);
 
   // Debounce search
   useEffect(() => {
@@ -36,7 +42,7 @@ export default function TraderDispute() {
   }, [search]);
 
   // Fetch disputes
-  const fetchDisputes = useCallback(async (isRefresh = false) => {
+  const fetchDisputes = useCallback(async (isRefresh = false, checkForNew = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     
     const { data: { user } } = await supabase.auth.getUser();
@@ -53,8 +59,20 @@ export default function TraderDispute() {
     setDisputes(data || []);
     setLoading(false);
     setRefreshing(false);
-    if (notificationsEnabled) notificationManager.checkNewDisputes(data || []);
-  }, [notificationsEnabled]);
+    
+    // Check for new disputes (sound + notification)
+    // Skip on first load to avoid sounds for existing disputes
+    if (checkForNew && !isFirstLoad.current) {
+      const hasNew = notificationManager.checkNewDisputes(data || []);
+      if (hasNew) {
+        setToast({ type: 'warning', message: '🔔 New dispute received!' });
+        setNewDisputeAlert(true);
+        // Clear alert animation after 3 seconds
+        setTimeout(() => setNewDisputeAlert(false), 3000);
+      }
+    }
+    isFirstLoad.current = false;
+  }, []);
 
   // Initial fetch
   useEffect(() => { fetchDisputes(); }, [fetchDisputes]);
@@ -62,9 +80,15 @@ export default function TraderDispute() {
   // Realtime subscription
   useRealtimeSubscription('disputes', {
     filter: traderId ? `trader_id=eq.${traderId}` : undefined,
-    onInsert: () => fetchDisputes(true),
-    onUpdate: () => fetchDisputes(true),
+    onInsert: () => fetchDisputes(true, true), // checkForNew=true on insert
+    onUpdate: () => fetchDisputes(true, false),
   });
+
+  // Sync sound toggle with notification manager + persist
+  useEffect(() => {
+    notificationManager.toggleSound(soundEnabled);
+    localStorage.setItem('disputeSoundEnabled', String(soundEnabled));
+  }, [soundEnabled]);
 
   // Load unread message counts
   useEffect(() => {
@@ -224,6 +248,17 @@ export default function TraderDispute() {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
           <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold ${
+              soundEnabled
+                ? 'bg-green-50 border border-green-200 text-green-700'
+                : 'bg-slate-100 border border-slate-200 text-slate-500'
+            }`}
+            title={soundEnabled ? 'Sound alerts on' : 'Sound alerts off'}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+          <button
             onClick={handleEnableNotifications}
             disabled={notificationsEnabled}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold ${
@@ -239,26 +274,45 @@ export default function TraderDispute() {
       </div>
 
       {/* Mobile buttons */}
-      <div className="flex sm:hidden justify-between items-center">
+      <div className="flex sm:hidden justify-between items-center gap-2">
         <button onClick={() => fetchDisputes(true)} disabled={refreshing}
           className="p-2 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 text-slate-600 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
-        {!notificationsEnabled && (
-          <button onClick={handleEnableNotifications}
-            className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-xl text-xs font-bold">
-            <Bell className="w-3.5 h-3.5" /> Enable Alerts
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`p-2 rounded-xl ${
+              soundEnabled
+                ? 'bg-green-50 border border-green-200 text-green-600'
+                : 'bg-slate-100 border border-slate-200 text-slate-400'
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
-        )}
+          {!notificationsEnabled && (
+            <button onClick={handleEnableNotifications}
+              className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-xl text-xs font-bold">
+              <Bell className="w-3.5 h-3.5" /> Alerts
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary card */}
       {stats.pending > 0 && (
-        <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl p-4 text-white">
+        <div className={`bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl p-4 text-white transition-all ${
+          newDisputeAlert ? 'ring-4 ring-amber-300 ring-opacity-75 animate-pulse' : ''
+        }`}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-amber-100 text-xs font-semibold">Awaiting Response</p>
-              <p className="text-2xl font-bold">{stats.pending}</p>
+              <p className="text-2xl font-bold flex items-center gap-2">
+                {stats.pending}
+                {newDisputeAlert && (
+                  <span className="text-xs bg-white/30 px-2 py-0.5 rounded-full animate-bounce">NEW!</span>
+                )}
+              </p>
             </div>
             <div className="text-right">
               <p className="text-amber-100 text-xs">Total</p>
