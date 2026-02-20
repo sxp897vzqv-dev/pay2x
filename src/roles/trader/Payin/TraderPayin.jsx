@@ -237,7 +237,8 @@ export default function TraderPayin() {
         traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
         userId: r.merchant_id, transactionId: r.transaction_id,
         screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
-        requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+        // Use requested_at, fallback to created_at for timer
+        requestedAt: (r.requested_at || r.created_at) ? { seconds: new Date(r.requested_at || r.created_at).getTime() / 1000 } : null,
         completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
         rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
       })));
@@ -259,7 +260,8 @@ export default function TraderPayin() {
         ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
         userId: r.merchant_id, transactionId: r.transaction_id,
         screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
-        requestedAt: r.requested_at ? { seconds: new Date(r.requested_at).getTime() / 1000 } : null,
+        // Use requested_at, fallback to created_at for timer
+        requestedAt: (r.requested_at || r.created_at) ? { seconds: new Date(r.requested_at || r.created_at).getTime() / 1000 } : null,
         completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
         rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
       })));
