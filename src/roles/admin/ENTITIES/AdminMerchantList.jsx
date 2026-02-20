@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../supabase';
-import { createMerchant } from '../../../supabaseAdmin';
+import { createMerchant } from '../../../utils/adminApi';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Store, Search, Filter, Plus, Eye, CheckCircle, AlertCircle,

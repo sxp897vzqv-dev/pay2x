@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { supabase } from '../../../supabase';
-import { createTrader } from '../../../supabaseAdmin';
+import { supabase, SUPABASE_URL } from '../../../supabase';
+import { createTrader } from '../../../utils/adminApi';
 import { Link, useNavigate } from 'react-router-dom';
 import TwoFactorModal, { useTwoFactorVerification } from '../../../components/TwoFactorModal';
 import { TwoFactorActions } from '../../../hooks/useTwoFactor';
@@ -96,8 +96,6 @@ export default function AdminTraderList() {
   // Generate USDT address using Edge Function (includes auto 20 TRX topup)
   const generateTatumAddress = async (traderId) => {
     try {
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
-      
       const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-trader-wallet`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
-import { createAffiliate } from '../../supabaseAdmin';
+import { createAffiliate } from '../../utils/adminApi';
 import { 
   Users, Plus, Search, Filter, MoreVertical, Eye, Edit2, 
   Ban, CheckCircle, TrendingUp, IndianRupee, Calendar,

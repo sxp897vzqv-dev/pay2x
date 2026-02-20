@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabase';
-import { createWorker, deleteWorker } from '../../supabaseAdmin';
+import { createWorker, deleteWorker } from '../../utils/adminApi';
 import {
   Users, Plus, X, Shield, Check, Edit2, Trash2,
   ToggleLeft, ToggleRight, CheckSquare, Square,

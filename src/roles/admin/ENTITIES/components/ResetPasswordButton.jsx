@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Key, RefreshCw, Check, AlertCircle, Shield } from 'lucide-react';
-import { resetUserPassword } from '../../../../supabaseAdmin';
+import { resetUserPassword } from '../../../../utils/adminApi';
 import TwoFactorModal, { useTwoFactorVerification } from '../../../../components/TwoFactorModal';
 import { TwoFactorActions } from '../../../../hooks/useTwoFactor';
 
