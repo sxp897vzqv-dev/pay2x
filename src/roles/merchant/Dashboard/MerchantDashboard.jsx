@@ -3,41 +3,28 @@ import { useOutletContext, Link } from 'react-router-dom';
 import { supabase } from '../../../supabase';
 import { useMultipleRealtimeSubscriptions } from '../../../hooks/useRealtimeSubscription';
 import {
-  TrendingUp, TrendingDown, IndianRupee, Activity, RefreshCw,
-  AlertCircle, CheckCircle, Clock, AlertTriangle, ArrowRight,
-  XCircle, Calendar, ArrowUpRight, ArrowDownRight, Zap,
-  CreditCard, Banknote, Timer, BarChart3, Percent, Hash,
+  TrendingUp, TrendingDown, Activity, RefreshCw,
+  AlertTriangle, ArrowRight, ArrowDownRight, ArrowUpRight,
+  Calendar, CheckCircle, XCircle, Clock, Timer, Percent,
+  CreditCard, Banknote, BarChart3, AlertCircle, Hourglass,
+  IndianRupee, Hash, ShieldCheck,
 } from 'lucide-react';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
-/* ─── Compact Stat Card ─── */
-const StatBox = ({ label, value, sub, icon: Icon, color = 'purple', trend, trendLabel }) => {
+/* ─── Mini Stat ─── */
+const MiniStat = ({ label, value, color = 'slate' }) => {
   const colors = {
-    green: 'bg-green-50 text-green-600 border-green-100',
-    blue: 'bg-blue-50 text-blue-600 border-blue-100',
-    purple: 'bg-purple-50 text-purple-600 border-purple-100',
-    red: 'bg-red-50 text-red-600 border-red-100',
-    amber: 'bg-amber-50 text-amber-600 border-amber-100',
-    slate: 'bg-slate-50 text-slate-600 border-slate-100',
+    green: 'text-green-700 bg-green-50',
+    blue: 'text-blue-700 bg-blue-50',
+    red: 'text-red-700 bg-red-50',
+    amber: 'text-amber-700 bg-amber-50',
+    purple: 'text-purple-700 bg-purple-50',
+    slate: 'text-slate-700 bg-slate-50',
   };
-
   return (
-    <div className={`${colors[color]} border rounded-xl p-3`}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</span>
-        {Icon && <Icon className="w-4 h-4 opacity-50" />}
-      </div>
-      <p className="text-xl font-bold">{value}</p>
-      <div className="flex items-center justify-between mt-0.5">
-        {sub && <span className="text-xs opacity-60">{sub}</span>}
-        {trend !== undefined && trend !== null && (
-          <span className={`text-xs font-semibold flex items-center gap-0.5 ${trend >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {trend >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-            {Math.abs(trend)}%
-            {trendLabel && <span className="opacity-60 ml-0.5">{trendLabel}</span>}
-          </span>
-        )}
-      </div>
+    <div className={`${colors[color]} rounded-lg p-2 text-center`}>
+      <p className="text-lg font-bold">{value}</p>
+      <p className="text-[10px] font-semibold uppercase opacity-70">{label}</p>
     </div>
   );
 };
@@ -138,59 +125,33 @@ export default function MerchantDashboard() {
       if (!merchant) return;
 
       const { from: fromDate, to: toDate } = getDateRange(datePreset, customFrom, customTo);
-      
-      // Get yesterday's range for comparison
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const yesterdayStart = new Date(todayStart.getTime() - 86400000);
-      const yesterdayEnd = todayStart.toISOString();
 
       // Parallel fetch all data
       const [
         payinsRes,
         payoutsRes,
-        yesterdayPayinsRes,
-        pendingPayinsRes,
-        pendingPayoutsRes,
         disputesRes,
         recentPayinsRes,
         recentPayoutsRes,
         lastSettlementRes,
       ] = await Promise.all([
-        // Current period payins
+        // Current period payins with all statuses
         supabase.from('payins')
           .select('amount, status, commission, created_at, completed_at')
           .eq('merchant_id', merchant.id)
           .gte('created_at', fromDate)
           .lte('created_at', toDate),
-        // Current period payouts
+        // Current period payouts with all statuses
         supabase.from('payouts')
-          .select('amount, status, commission')
+          .select('amount, status, commission, verification_status, created_at, completed_at')
           .eq('merchant_id', merchant.id)
           .gte('created_at', fromDate)
           .lte('created_at', toDate),
-        // Yesterday's payins for comparison
-        supabase.from('payins')
-          .select('amount, status')
-          .eq('merchant_id', merchant.id)
-          .gte('created_at', yesterdayStart.toISOString())
-          .lt('created_at', yesterdayEnd),
-        // Pending payins (all time)
-        supabase.from('payins')
-          .select('id', { count: 'exact', head: true })
-          .eq('merchant_id', merchant.id)
-          .eq('status', 'pending'),
-        // Pending payouts (all time)
-        supabase.from('payouts')
-          .select('id', { count: 'exact', head: true })
-          .eq('merchant_id', merchant.id)
-          .in('status', ['pending', 'assigned', 'processing']),
         // Open disputes
         supabase.from('disputes')
-          .select('id, amount, reason', { count: 'exact' })
+          .select('id', { count: 'exact', head: true })
           .eq('merchant_id', merchant.id)
-          .eq('status', 'pending')
-          .limit(3),
+          .in('status', ['pending', 'routed_to_trader']),
         // Recent payins
         supabase.from('payins')
           .select('id, order_id, amount, status, created_at')
@@ -214,82 +175,79 @@ export default function MerchantDashboard() {
 
       const payins = payinsRes.data || [];
       const payouts = payoutsRes.data || [];
-      const yesterdayPayins = yesterdayPayinsRes.data || [];
 
-      // Calculate stats
-      const completedPayins = payins.filter(p => p.status === 'completed' || p.status === 'success');
-      const failedPayins = payins.filter(p => ['failed', 'rejected', 'expired'].includes(p.status));
-      const completedPayouts = payouts.filter(p => p.status === 'completed');
-
-      const payinVolume = completedPayins.reduce((s, p) => s + Number(p.amount || 0), 0);
-      const payoutVolume = completedPayouts.reduce((s, p) => s + Number(p.amount || 0), 0);
-      const payinFees = completedPayins.reduce((s, p) => s + Number(p.commission || 0), 0);
-      const payoutFees = completedPayouts.reduce((s, p) => s + Number(p.commission || 0), 0);
-
-      // Yesterday comparison
-      const yesterdayCompleted = yesterdayPayins.filter(p => p.status === 'completed' || p.status === 'success');
-      const yesterdayVolume = yesterdayCompleted.reduce((s, p) => s + Number(p.amount || 0), 0);
-      const volumeTrend = yesterdayVolume > 0 ? Math.round(((payinVolume - yesterdayVolume) / yesterdayVolume) * 100) : null;
-      const countTrend = yesterdayCompleted.length > 0 
-        ? Math.round(((completedPayins.length - yesterdayCompleted.length) / yesterdayCompleted.length) * 100) 
-        : null;
-
-      // Success rate
-      const successRate = payins.length > 0 ? Math.round((completedPayins.length / payins.length) * 100) : 0;
-
-      // Average completion time
-      let avgTime = 0;
-      const withTime = completedPayins.filter(p => p.completed_at);
-      if (withTime.length > 0) {
-        const totalMs = withTime.reduce((s, p) => s + (new Date(p.completed_at) - new Date(p.created_at)), 0);
-        avgTime = Math.round(totalMs / withTime.length / 60000); // minutes
+      // ─── PAYIN STATS ───
+      const payinTotal = payins.length;
+      const payinCompleted = payins.filter(p => p.status === 'completed' || p.status === 'success');
+      const payinPending = payins.filter(p => p.status === 'pending');
+      const payinRejected = payins.filter(p => p.status === 'rejected');
+      const payinExpired = payins.filter(p => p.status === 'expired');
+      const payinVolume = payinCompleted.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const payinFees = payinCompleted.reduce((s, p) => s + Number(p.commission || 0), 0);
+      const payinConversionRate = payinTotal > 0 ? Math.round((payinCompleted.length / payinTotal) * 100) : 0;
+      
+      // Avg approval time (minutes)
+      let payinAvgTime = 0;
+      const payinWithTime = payinCompleted.filter(p => p.completed_at);
+      if (payinWithTime.length > 0) {
+        const totalMs = payinWithTime.reduce((s, p) => s + (new Date(p.completed_at) - new Date(p.created_at)), 0);
+        payinAvgTime = Math.round(totalMs / payinWithTime.length / 60000);
       }
 
-      // Average transaction
-      const avgTxn = completedPayins.length > 0 ? Math.round(payinVolume / completedPayins.length) : 0;
+      // ─── PAYOUT STATS ───
+      const payoutTotal = payouts.length;
+      const payoutCompleted = payouts.filter(p => p.status === 'completed' && p.verification_status === 'verified');
+      const payoutProcessing = payouts.filter(p => ['assigned', 'processing'].includes(p.status));
+      const payoutPendingVerification = payouts.filter(p => p.status === 'completed' && p.verification_status !== 'verified');
+      const payoutRejected = payouts.filter(p => ['rejected', 'failed', 'cancelled'].includes(p.status));
+      const payoutVolume = payoutCompleted.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const payoutFees = payoutCompleted.reduce((s, p) => s + Number(p.commission || 0), 0);
+      const payoutConversionRate = payoutTotal > 0 ? Math.round((payoutCompleted.length / payoutTotal) * 100) : 0;
+      
+      // Avg processing time (minutes)
+      let payoutAvgTime = 0;
+      const payoutWithTime = payoutCompleted.filter(p => p.completed_at);
+      if (payoutWithTime.length > 0) {
+        const totalMs = payoutWithTime.reduce((s, p) => s + (new Date(p.completed_at) - new Date(p.created_at)), 0);
+        payoutAvgTime = Math.round(totalMs / payoutWithTime.length / 60000);
+      }
 
       // Last settlement
       const lastSettlement = lastSettlementRes.data?.[0];
 
       setStats({
-        // Balances
+        // Balance
         available: Number(merchant.available_balance || 0),
-        pending: Number(merchant.pending_settlement || merchant.pending_balance || 0),
-        reserved: Number(merchant.reserved_amount || 0),
-        
-        // Period stats
-        payinVolume,
-        payoutVolume,
-        payinCount: completedPayins.length,
-        payoutCount: completedPayouts.length,
-        totalTxns: payins.length,
-        failedCount: failedPayins.length,
-        successRate,
-        
-        // Fees
-        payinFees,
-        payoutFees,
-        totalFees: payinFees + payoutFees,
-        
-        // Pending (all time)
-        pendingPayins: pendingPayinsRes.count || 0,
-        pendingPayouts: pendingPayoutsRes.count || 0,
-        
-        // Disputes
-        openDisputes: disputesRes.count || 0,
-        disputes: disputesRes.data || [],
-        
-        // Insights
-        avgTime,
-        avgTxn,
-        volumeTrend,
-        countTrend,
-        
-        // Settlement
         lastSettlement: lastSettlement ? {
           amount: Number(lastSettlement.amount),
           date: lastSettlement.created_at,
         } : null,
+        
+        // Payin stats
+        payinTotal,
+        payinCompleted: payinCompleted.length,
+        payinPending: payinPending.length,
+        payinRejected: payinRejected.length,
+        payinExpired: payinExpired.length,
+        payinVolume,
+        payinFees,
+        payinConversionRate,
+        payinAvgTime,
+        
+        // Payout stats
+        payoutTotal,
+        payoutCompleted: payoutCompleted.length,
+        payoutProcessing: payoutProcessing.length,
+        payoutPendingVerification: payoutPendingVerification.length,
+        payoutRejected: payoutRejected.length,
+        payoutVolume,
+        payoutFees,
+        payoutConversionRate,
+        payoutAvgTime,
+        
+        // Combined
+        totalFees: payinFees + payoutFees,
+        openDisputes: disputesRes.count || 0,
       });
 
       // Merge recent transactions
@@ -397,22 +355,6 @@ export default function MerchantDashboard() {
         </div>
       )}
 
-      {/* Alerts */}
-      {s.openDisputes > 0 && (
-        <Link to="/merchant/disputes" className="block bg-amber-50 border border-amber-200 rounded-xl p-3 hover:bg-amber-100 transition-colors">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
-            <div className="flex-1">
-              <p className="font-semibold text-amber-900 text-sm">
-                {s.openDisputes} Open Dispute{s.openDisputes > 1 ? 's' : ''}
-              </p>
-              <p className="text-xs text-amber-700">Requires your response</p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-amber-500" />
-          </div>
-        </Link>
-      )}
-
       {/* Balance Hero */}
       <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-4 text-white">
         <div className="flex items-start justify-between">
@@ -430,90 +372,144 @@ export default function MerchantDashboard() {
         </div>
       </div>
 
-      {/* Volume Stats */}
+      {/* ═══════════════════════ PAYINS SECTION ═══════════════════════ */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-green-50 px-4 py-3 border-b border-green-100 flex items-center gap-2">
+          <TrendingUp className="w-5 h-5 text-green-600" />
+          <h3 className="font-bold text-green-900">Payins</h3>
+          <span className="ml-auto text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+            {s.payinTotal} Total
+          </span>
+        </div>
+        <div className="p-4 space-y-3">
+          {/* Volume & Fees */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-green-50 rounded-xl p-3">
+              <p className="text-xs text-green-600 font-semibold">Total Volume</p>
+              <p className="text-2xl font-bold text-green-700">₹{s.payinVolume?.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 font-semibold">Platform Fees</p>
+              <p className="text-2xl font-bold text-slate-700">₹{s.payinFees?.toLocaleString()}</p>
+            </div>
+          </div>
+          
+          {/* Status counts */}
+          <div className="grid grid-cols-4 gap-2">
+            <MiniStat label="Completed" value={s.payinCompleted} color="green" />
+            <MiniStat label="Pending" value={s.payinPending} color="amber" />
+            <MiniStat label="Rejected" value={s.payinRejected} color="red" />
+            <MiniStat label="Expired" value={s.payinExpired} color="slate" />
+          </div>
+          
+          {/* Metrics */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                <Percent className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Conversion Rate</p>
+                <p className="text-lg font-bold text-slate-900">{s.payinConversionRate}%</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <Timer className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Avg Approval Time</p>
+                <p className="text-lg font-bold text-slate-900">{s.payinAvgTime || '—'} min</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════ PAYOUTS SECTION ═══════════════════════ */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center gap-2">
+          <TrendingDown className="w-5 h-5 text-blue-600" />
+          <h3 className="font-bold text-blue-900">Payouts</h3>
+          <span className="ml-auto text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+            {s.payoutTotal} Total
+          </span>
+        </div>
+        <div className="p-4 space-y-3">
+          {/* Volume & Fees */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-blue-50 rounded-xl p-3">
+              <p className="text-xs text-blue-600 font-semibold">Total Volume</p>
+              <p className="text-2xl font-bold text-blue-700">₹{s.payoutVolume?.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 font-semibold">Platform Fees</p>
+              <p className="text-2xl font-bold text-slate-700">₹{s.payoutFees?.toLocaleString()}</p>
+            </div>
+          </div>
+          
+          {/* Status counts */}
+          <div className="grid grid-cols-4 gap-2">
+            <MiniStat label="Completed" value={s.payoutCompleted} color="green" />
+            <MiniStat label="Processing" value={s.payoutProcessing} color="blue" />
+            <MiniStat label="Pending Verify" value={s.payoutPendingVerification} color="amber" />
+            <MiniStat label="Rejected" value={s.payoutRejected} color="red" />
+          </div>
+          
+          {/* Metrics */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                <Percent className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Conversion Rate</p>
+                <p className="text-lg font-bold text-slate-900">{s.payoutConversionRate}%</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <Timer className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Avg Processing Time</p>
+                <p className="text-lg font-bold text-slate-900">{s.payoutAvgTime || '—'} min</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════ BOTTOM STATS ═══════════════════════ */}
       <div className="grid grid-cols-2 gap-3">
-        <StatBox
-          label="Payin Volume"
-          value={`₹${s.payinVolume?.toLocaleString()}`}
-          sub={`${s.payinCount} completed`}
-          icon={TrendingUp}
-          color="green"
-          trend={s.volumeTrend}
-          trendLabel="vs yesterday"
-        />
-        <StatBox
-          label="Payout Volume"
-          value={`₹${s.payoutVolume?.toLocaleString()}`}
-          sub={`${s.payoutCount} completed`}
-          icon={TrendingDown}
-          color="blue"
-        />
-      </div>
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-4 gap-2">
-        <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-          <Percent className="w-4 h-4 text-emerald-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{s.successRate}%</p>
-          <p className="text-xs text-slate-500">Success</p>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-          <Hash className="w-4 h-4 text-purple-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{s.totalTxns}</p>
-          <p className="text-xs text-slate-500">Total Txns</p>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-          <Timer className="w-4 h-4 text-blue-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">{s.avgTime || '—'}m</p>
-          <p className="text-xs text-slate-500">Avg Time</p>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-          <IndianRupee className="w-4 h-4 text-amber-500 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-900">₹{s.avgTxn?.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">Avg Txn</p>
-        </div>
-      </div>
-
-      {/* Pending & Failed */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Link to="/merchant/payins?status=pending" className="bg-amber-50 border border-amber-100 rounded-xl p-3 hover:shadow-md transition-all">
-          <div className="flex items-center justify-between mb-1">
-            <Clock className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold text-amber-700">Payins</span>
+        {/* Open Disputes */}
+        <Link to="/merchant/disputes" className={`rounded-xl p-4 border ${s.openDisputes > 0 ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-50 border-slate-200'} transition-all`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${s.openDisputes > 0 ? 'bg-amber-100' : 'bg-slate-100'}`}>
+              <AlertTriangle className={`w-5 h-5 ${s.openDisputes > 0 ? 'text-amber-600' : 'text-slate-400'}`} />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Open Disputes</p>
+              <p className={`text-xl font-bold ${s.openDisputes > 0 ? 'text-amber-700' : 'text-slate-700'}`}>{s.openDisputes}</p>
+            </div>
           </div>
-          <p className="text-xl font-bold text-amber-700">{s.pendingPayins}</p>
-          <p className="text-xs text-amber-600">Pending</p>
         </Link>
         
-        <Link to="/merchant/payouts?status=pending" className="bg-blue-50 border border-blue-100 rounded-xl p-3 hover:shadow-md transition-all">
-          <div className="flex items-center justify-between mb-1">
-            <Clock className="w-4 h-4 text-blue-500" />
-            <span className="text-xs font-bold text-blue-700">Payouts</span>
+        {/* Total Fees */}
+        <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+              <IndianRupee className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Today's Total Fees</p>
+              <p className="text-xl font-bold text-purple-700">₹{s.totalFees?.toLocaleString()}</p>
+            </div>
           </div>
-          <p className="text-xl font-bold text-blue-700">{s.pendingPayouts}</p>
-          <p className="text-xs text-blue-600">In Progress</p>
-        </Link>
-        
-        <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-          <div className="flex items-center justify-between mb-1">
-            <XCircle className="w-4 h-4 text-red-500" />
-            <span className="text-xs font-bold text-red-700">Failed</span>
-          </div>
-          <p className="text-xl font-bold text-red-700">{s.failedCount}</p>
-          <p className="text-xs text-red-600">This period</p>
-        </div>
-        
-        <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
-          <div className="flex items-center justify-between mb-1">
-            <Banknote className="w-4 h-4 text-purple-500" />
-            <span className="text-xs font-bold text-purple-700">Fees</span>
-          </div>
-          <p className="text-xl font-bold text-purple-700">₹{s.totalFees?.toLocaleString()}</p>
-          <p className="text-xs text-purple-600">Platform fees</p>
         </div>
       </div>
 
-      {/* Recent Transactions */}
+      {/* ═══════════════════════ RECENT ACTIVITY ═══════════════════════ */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
