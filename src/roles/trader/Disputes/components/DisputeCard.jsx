@@ -44,7 +44,7 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
           <div className="flex-1 min-w-0">
             <p className="text-xs text-slate-400">{isPayin ? 'UPI ID' : 'Order ID'}</p>
             <p className="font-mono font-bold text-slate-900 text-sm truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-              {isPayin ? dispute.upiId : dispute.orderId}
+              {isPayin ? (dispute.upi_id || '-') : (dispute.order_id || '-')}
             </p>
           </div>
           <div className="text-right flex-shrink-0">
@@ -53,22 +53,30 @@ export default function DisputeCard({ dispute, onViewConversation, unreadCount }
           </div>
         </div>
 
-        {dispute.merchantName && (
-          <p className="text-xs text-slate-500 mb-1"><span className="font-semibold text-slate-600">Merchant:</span> {dispute.merchantName}</p>
+        {/* UTR row */}
+        {dispute.utr && (
+          <div className="mb-2 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="text-xs text-slate-400">UTR</p>
+            <p className="font-mono font-bold text-slate-900 text-sm">{dispute.utr}</p>
+          </div>
+        )}
+
+        {dispute.merchant_name && (
+          <p className="text-xs text-slate-500 mb-1"><span className="font-semibold text-slate-600">Merchant:</span> {dispute.merchant_name}</p>
         )}
         {dispute.reason && <p className="text-xs text-slate-500 line-clamp-2 mb-2">{dispute.reason}</p>}
 
         {/* Messages indicator */}
-        {(dispute.messageCount || 0) > 0 && (
+        {(dispute.message_count || 0) > 0 && (
           <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-blue-50 rounded-lg border border-blue-200 text-xs">
             <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
-            <span className="font-semibold text-blue-900">{dispute.messageCount} message{dispute.messageCount !== 1 ? 's' : ''}</span>
+            <span className="font-semibold text-blue-900">{dispute.message_count} message{dispute.message_count !== 1 ? 's' : ''}</span>
           </div>
         )}
 
         <div className="flex items-center gap-1 text-xs text-slate-400 mb-2.5">
           <Clock size={11} />
-          {new Date((dispute.createdAt?.seconds || 0) * 1000).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+          {dispute.created_at ? new Date(dispute.created_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '-'}
         </div>
 
         <button onClick={() => onViewConversation(dispute)}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase, SUPABASE_URL } from '../../supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../supabase';
 import {
   Cpu, Activity, RefreshCw, CheckCircle, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Clock, ArrowDownCircle, ArrowUpCircle,
@@ -121,10 +121,15 @@ export default function AdminDisputeEngine() {
   const doResolve = async (disputeId, decision) => {
     setResolving(disputeId);
     try {
+      // Get current session for auth
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const response = await fetch(`${FUNCTIONS_URL}/admin-resolve-dispute`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({
           disputeId,

@@ -59,7 +59,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
         read_by_trader: true,
       });
       await supabase.from('disputes').update({
-        message_count: (dispute.messageCount || 0) + 1,
+        message_count: (dispute.message_count || 0) + 1,
         last_message_at: ts,
         last_message_from: 'trader',
       }).eq('id', dispute.id);
@@ -119,7 +119,8 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
           <div>
             <h3 className="text-base font-bold text-slate-900">Dispute Conversation</h3>
             <p className="text-xs text-slate-400" style={{ fontFamily: 'var(--font-mono)' }}>
-              {isPayin ? dispute.upiId : dispute.orderId}
+              {isPayin ? (dispute.upi_id || '-') : (dispute.order_id || '-')}
+              {dispute.utr && <span className="ml-2 text-slate-500">UTR: {dispute.utr}</span>}
             </p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded-lg">
@@ -132,12 +133,39 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
           <div className="flex justify-between items-center" style={{ gap: 12 }}>
             <div className="min-w-0">
               <p className="text-xs text-slate-500">Dispute Type: <span className="font-bold capitalize">{dispute.type}</span></p>
-              <p className="text-xs text-slate-500 mt-0.5">Status: <span className={`font-bold ${dispute.status === 'pending' ? 'text-amber-600' : dispute.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{dispute.status?.toUpperCase()}</span></p>
+              <p className="text-xs text-slate-500 mt-0.5">Status: <span className={`font-bold ${dispute.status === 'pending' || dispute.status === 'routed_to_trader' ? 'text-amber-600' : dispute.status === 'approved' || dispute.status === 'trader_accepted' ? 'text-green-600' : 'text-red-600'}`}>{dispute.status?.toUpperCase()}</span></p>
             </div>
             <div className="text-right flex-shrink-0">
               <p className="text-xs text-slate-400">Amount</p>
-              <p className="text-lg font-bold text-green-700">₹{dispute.amount?.toLocaleString()}</p>
+              <p className="text-lg font-bold text-green-700">₹{(dispute.amount || 0).toLocaleString()}</p>
             </div>
+          </div>
+          {/* Key details */}
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+            {dispute.upi_id && (
+              <div className="p-2 bg-white rounded-lg border border-slate-200">
+                <p className="text-slate-400">UPI ID</p>
+                <p className="font-mono font-bold text-slate-800 truncate">{dispute.upi_id}</p>
+              </div>
+            )}
+            {dispute.utr && (
+              <div className="p-2 bg-white rounded-lg border border-slate-200">
+                <p className="text-slate-400">UTR</p>
+                <p className="font-mono font-bold text-slate-800 truncate">{dispute.utr}</p>
+              </div>
+            )}
+            {dispute.order_id && (
+              <div className="p-2 bg-white rounded-lg border border-slate-200">
+                <p className="text-slate-400">Order ID</p>
+                <p className="font-mono font-bold text-slate-800 truncate">{dispute.order_id}</p>
+              </div>
+            )}
+            {dispute.txn_id && (
+              <div className="p-2 bg-white rounded-lg border border-slate-200">
+                <p className="text-slate-400">Txn ID</p>
+                <p className="font-mono font-bold text-slate-800 truncate">{dispute.txn_id}</p>
+              </div>
+            )}
           </div>
           {dispute.reason && (
             <div className="mt-2 p-2 bg-white rounded-lg border border-slate-200">
