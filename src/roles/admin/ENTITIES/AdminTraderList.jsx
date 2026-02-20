@@ -93,81 +93,31 @@ export default function AdminTraderList() {
     totalBalance: traders.reduce((sum, t) => sum + (t.balance || 0), 0),
   }), [traders]);
 
-  // Generate USDT address using Tatum (via Edge Function or direct API)
+  // Generate USDT address using Edge Function (includes auto 20 TRX topup)
   const generateTatumAddress = async (traderId) => {
     try {
-      // Read from tatum_config table (matches Edge Functions schema)
-      const { data: configRow, error: configError } = await supabase
-        .from('tatum_config')
-        .select('*')
-        .eq('id', 'main')
-        .single();
-
-      if (configError || !configRow?.master_xpub) {
-        throw new Error('Master wallet not configured. Please set up Tatum config (master_xpub) in the database first.');
-      }
-
-      if (!configRow.tatum_api_key) {
-        throw new Error('Tatum API key not configured');
-      }
-
-      // Get and increment derivation index manually (RPC function has issues)
-      const { data: metaRow } = await supabase
-        .from('address_meta')
-        .select('last_index')
-        .eq('id', 'main')
-        .single();
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
       
-      const nextIndex = (metaRow?.last_index || 0) + 1;
-
-      console.log(`Generating address for trader ${traderId} at index ${nextIndex}`);
-
-      // Derive address from XPUB using Tatum API
-      const response = await fetch(`https://api.tatum.io/v3/tron/address/${configRow.master_xpub}/${nextIndex}`, {
-        method: 'GET',
-        headers: { 'x-api-key': configRow.tatum_api_key },
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-trader-wallet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ traderId }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to generate address from Tatum');
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to generate address');
       }
 
-      const addressData = await response.json();
-      console.log('✅ Address generated:', addressData.address);
-
-      // Update trader with new address
-      const { error: traderError } = await supabase.from('traders').update({
-        usdt_deposit_address: addressData.address,
-        derivation_index: nextIndex,
-        address_generated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq('id', traderId);
-
-      if (traderError) {
-        console.error('Trader update error:', traderError);
-        throw new Error('Failed to update trader');
+      console.log('✅ Address generated:', data.address);
+      if (data.activated) {
+        console.log('✅ Address activated with TRX, txId:', data.activationTxId);
+      } else if (data.activationError) {
+        console.warn('⚠️ Address activation failed:', data.activationError);
       }
 
-      // Create address mapping
-      const { error: mappingError } = await supabase.from('address_mapping').upsert({
-        address: addressData.address,
-        trader_id: traderId,
-        derivation_index: nextIndex,
-      });
-
-      if (mappingError) {
-        console.error('Mapping error:', mappingError);
-        // Non-fatal, continue
-      }
-
-      // Update the derivation index counter
-      await supabase.from('address_meta').update({
-        last_index: nextIndex,
-        last_updated: new Date().toISOString(),
-      }).eq('id', 'main');
-
-      return addressData.address;
+      return data.address;
     } catch (error) {
       console.error('Error generating Tatum address:', error);
       throw error;
