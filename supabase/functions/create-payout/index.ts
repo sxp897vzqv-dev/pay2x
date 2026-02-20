@@ -153,7 +153,8 @@ serve(async (req: Request) => {
     }
 
     // 6. Calculate fee (balance deducted only on completion, not on creation)
-    const payoutRate = merchant.payout_commission_rate ?? 2; // Default 2%
+    // Commission rate from merchant's settings (no hardcoded default)
+    const payoutRate = Number(merchant.payout_commission_rate) || 0;
     const fee = Math.round(amountNum * payoutRate / 100);
     const totalRequired = amountNum + fee;
 

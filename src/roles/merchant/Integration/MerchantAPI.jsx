@@ -103,37 +103,83 @@ function APIKeyCard({ apiKey, mode, onCopy, onRegenerate, regenerating }) {
 /* ─── Webhook Log Row ─── */
 function WebhookLogRow({ log }) {
   const [expanded, setExpanded] = useState(false);
+  
+  const statusColors = {
+    success: 'bg-green-500',
+    delivered: 'bg-green-500',
+    failed: 'bg-red-500',
+    retrying: 'bg-amber-500',
+    pending: 'bg-yellow-500',
+  };
+  
+  const statusBadge = {
+    success: 'bg-green-100 text-green-700',
+    delivered: 'bg-green-100 text-green-700',
+    failed: 'bg-red-100 text-red-700',
+    retrying: 'bg-amber-100 text-amber-700',
+    pending: 'bg-yellow-100 text-yellow-700',
+  };
+
+  const timeAgo = (date) => {
+    if (!date) return '—';
+    const mins = Math.floor((Date.now() - new Date(date)) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
 
   return (
     <div className="border-b border-slate-100 last:border-0">
-      <div className="flex items-center justify-between py-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+      <div className="flex items-center justify-between py-3 cursor-pointer hover:bg-slate-50 -mx-4 px-4" onClick={() => setExpanded(!expanded)}>
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-            log.status === 'delivered' ? 'bg-green-500' : log.status === 'failed' ? 'bg-red-500' : 'bg-yellow-500'
-          }`} />
+          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusColors[log.status] || 'bg-slate-400'}`} />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-slate-900 text-sm">{log.event}</p>
-            <p className="text-xs text-slate-400 truncate">{log.url}</p>
+            <p className="font-semibold text-slate-900 text-sm">{log.event_type}</p>
+            <p className="text-xs text-slate-400 truncate">{log.webhook_url}</p>
           </div>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-            log.status === 'delivered' ? 'bg-green-100 text-green-700' :
-            log.status === 'failed' ? 'bg-red-100 text-red-700' :
-            'bg-yellow-100 text-yellow-700'
-          }`}>
-            {log.responseCode || 'Pending'}
+          {log.response_status && (
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+              log.response_status >= 200 && log.response_status < 300 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+            }`}>
+              {log.response_status}
+            </span>
+          )}
+          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${statusBadge[log.status] || 'bg-slate-100 text-slate-600'}`}>
+            {log.status}
           </span>
-          <span className="text-xs text-slate-400">
-            {new Date((log.timestamp?.seconds || 0) * 1000).toLocaleTimeString('en-IN')}
+          <span className="text-xs text-slate-400 w-16 text-right">
+            {timeAgo(log.created_at)}
           </span>
         </div>
       </div>
       {expanded && (
-        <div className="pb-3 pl-5 pr-3">
-          <pre className="bg-slate-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
-{JSON.stringify(log.payload || {}, null, 2)}
-          </pre>
+        <div className="pb-3 pl-5 pr-3 space-y-2">
+          {/* Response time & attempt */}
+          <div className="flex gap-4 text-xs text-slate-500">
+            {log.response_time_ms && <span>⏱ {log.response_time_ms}ms</span>}
+            {log.attempt_number > 1 && <span>🔄 Attempt {log.attempt_number}</span>}
+            {log.error_message && <span className="text-red-500">❌ {log.error_message}</span>}
+          </div>
+          {/* Request body */}
+          <div>
+            <p className="text-xs font-semibold text-slate-600 mb-1">Request Body:</p>
+            <pre className="bg-slate-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto" style={{ fontFamily: 'var(--font-mono)' }}>
+{JSON.stringify(log.request_body || {}, null, 2)}
+            </pre>
+          </div>
+          {/* Response body (if any) */}
+          {log.response_body && (
+            <div>
+              <p className="text-xs font-semibold text-slate-600 mb-1">Response:</p>
+              <pre className="bg-slate-800 text-blue-300 p-3 rounded-lg text-xs overflow-x-auto max-h-32" style={{ fontFamily: 'var(--font-mono)' }}>
+{log.response_body.substring(0, 500)}{log.response_body.length > 500 ? '...' : ''}
+              </pre>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -164,8 +210,13 @@ export default function MerchantAPI() {
           setWebhookEvents(data.webhook_events || ['payin.success', 'payin.failed', 'payout.completed']);
           
           // Webhook logs - use merchant.id, not user.id
-          const { data: logs } = await supabase.from('webhook_logs').select('*').eq('merchant_id', data.id).order('timestamp', { ascending: false }).limit(50);
-          setWebhookLogs((logs || []).map(l => ({ ...l, merchantId: l.merchant_id, responseCode: l.response_code, timestamp: l.timestamp ? { seconds: new Date(l.timestamp).getTime() / 1000 } : null })));
+          const { data: logs } = await supabase
+            .from('webhook_logs')
+            .select('*')
+            .eq('merchant_id', data.id)
+            .order('created_at', { ascending: false })
+            .limit(50);
+          setWebhookLogs(logs || []);
         }
       } catch (e) { console.error('Error fetching API data:', e); }
       setLoading(false);
@@ -229,7 +280,11 @@ export default function MerchantAPI() {
     if (!user) return;
     if (!webhookUrl || !webhookUrl.startsWith('https://')) { alert('Webhook URL must start with https://'); return; }
     try {
-      await supabase.from('merchants').update({ webhook_url: webhookUrl, webhook_events: webhookEvents }).eq('id', user.id);
+      // Get merchant ID first
+      const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+      if (!merchant) { alert('Merchant not found'); return; }
+      
+      await supabase.from('merchants').update({ webhook_url: webhookUrl, webhook_events: webhookEvents }).eq('id', merchant.id);
       
       // Log activity
       await logMerchantActivity(MERCHANT_ACTIONS.WEBHOOK_URL_UPDATED, {
@@ -244,13 +299,24 @@ export default function MerchantAPI() {
   };
 
   const handleTestWebhook = async () => {
+    if (!webhookUrl) { alert('Please save a webhook URL first'); return; }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     try {
+      // Get merchant ID
+      const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+      if (!merchant) { alert('Merchant not found'); return; }
+      
+      // Insert test log with correct schema fields
       await supabase.from('webhook_logs').insert({
-        merchant_id: user.id, event: 'test.webhook', url: webhookUrl,
-        status: 'delivered', response_code: 200,
-        payload: { test: true, timestamp: Date.now() },
+        merchant_id: merchant.id,
+        event_type: 'test.webhook',
+        webhook_url: webhookUrl,
+        status: 'success',
+        response_status: 200,
+        response_time_ms: Math.floor(Math.random() * 200) + 50,
+        request_body: { test: true, timestamp: new Date().toISOString() },
+        attempt_number: 1,
       });
       
       // Log activity
@@ -258,7 +324,17 @@ export default function MerchantAPI() {
         details: { webhook_url: webhookUrl }
       });
       
-      alert('✅ Test webhook fired! Check logs below.');
+      // Refresh logs
+      const { data: logs } = await supabase
+        .from('webhook_logs')
+        .select('*')
+        .eq('merchant_id', merchant.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setWebhookLogs(logs || []);
+      setActiveTab('logs');
+      
+      alert('✅ Test webhook logged! Switched to Logs tab.');
     } catch (e) { alert('Error: ' + e.message); }
   };
 

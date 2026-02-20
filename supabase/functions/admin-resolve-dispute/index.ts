@@ -47,10 +47,10 @@ serve(async (req: Request) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    // Get dispute with trader info
+    // Get dispute with trader info (commission rates from traders table)
     const { data: dispute, error: disputeError } = await supabase
       .from('disputes')
-      .select('*, traders(id, name, balance, payout_rate)')
+      .select('*, traders(id, name, balance, overall_commission, payin_commission, payout_commission)')
       .eq('id', disputeId)
       .single();
 
@@ -89,7 +89,7 @@ serve(async (req: Request) => {
         // Trader: deduct amount (got cash), add commission
         // Merchant: credit (amount - merchant_fee)
         if (dispute.status === 'trader_accepted') {
-          const traderRate = dispute.traders?.payin_commission || 4;
+          const traderRate = Number(dispute.traders?.payin_commission) || 0;
           const commission = Math.round((amount * traderRate) / 100);
           
           // Deduct amount, add commission (same as payin flow)
@@ -107,7 +107,7 @@ serve(async (req: Request) => {
               .eq('id', dispute.merchant_id)
               .single();
             
-            const merchantRate = merchantData?.payin_commission || merchantData?.payin_commission_rate || 6;
+            const merchantRate = Number(merchantData?.payin_commission_rate) || 0;
             const merchantFee = Math.round((amount * merchantRate) / 100);
             const merchantCredit = amount - merchantFee;
             
@@ -125,7 +125,7 @@ serve(async (req: Request) => {
         // Payout dispute approved = payout was NOT received by customer
         // If trader_rejected (claimed they sent but actually didn't): deduct from trader
         if (dispute.status === 'trader_rejected') {
-          const traderRate = dispute.traders?.payout_rate || 1;
+          const traderRate = Number(dispute.traders?.payout_commission) || 0;
           const commission = Math.round((amount * traderRate) / 100);
           adjustmentAmount = amount + commission;
           

@@ -197,6 +197,7 @@ export default function MerchantDashboard() {
       // ─── PAYOUT STATS ───
       const payoutTotal = payouts.length;
       const payoutCompleted = payouts.filter(p => p.status === 'completed' && p.verification_status === 'verified');
+      const payoutPending = payouts.filter(p => p.status === 'pending');
       const payoutProcessing = payouts.filter(p => ['assigned', 'processing'].includes(p.status));
       const payoutPendingVerification = payouts.filter(p => p.status === 'completed' && p.verification_status !== 'verified');
       const payoutRejected = payouts.filter(p => ['rejected', 'failed', 'cancelled'].includes(p.status));
@@ -223,6 +224,10 @@ export default function MerchantDashboard() {
           date: lastSettlement.created_at,
         } : null,
         
+        // Commission rates (from merchant settings)
+        payinCommissionRate: Number(merchant.payin_commission_rate || 0),
+        payoutCommissionRate: Number(merchant.payout_commission_rate || 0),
+        
         // Payin stats
         payinTotal,
         payinCompleted: payinCompleted.length,
@@ -237,6 +242,7 @@ export default function MerchantDashboard() {
         // Payout stats
         payoutTotal,
         payoutCompleted: payoutCompleted.length,
+        payoutPending: payoutPending.length,
         payoutProcessing: payoutProcessing.length,
         payoutPendingVerification: payoutPendingVerification.length,
         payoutRejected: payoutRejected.length,
@@ -355,125 +361,175 @@ export default function MerchantDashboard() {
         </div>
       )}
 
-      {/* Balance Hero */}
-      <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-4 text-white">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-purple-200 text-xs font-semibold uppercase tracking-wide">Available Balance</p>
-            <h2 className="text-3xl font-bold">₹{s.available?.toLocaleString()}</h2>
-          </div>
-          {s.lastSettlement && (
-            <div className="text-right">
-              <p className="text-purple-200 text-xs">Last Settlement</p>
-              <p className="text-sm font-semibold">₹{s.lastSettlement.amount.toLocaleString()}</p>
-              <p className="text-purple-300 text-xs">{new Date(s.lastSettlement.date).toLocaleDateString()}</p>
+      {/* Balance Hero + Commission Rates */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Balance */}
+        <div className="sm:col-span-2 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-4 text-white">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-purple-200 text-xs font-semibold uppercase tracking-wide">Available Balance</p>
+              <h2 className="text-3xl font-bold">₹{s.available?.toLocaleString()}</h2>
             </div>
-          )}
+            {s.lastSettlement && (
+              <div className="text-right">
+                <p className="text-purple-200 text-xs">Last Settlement</p>
+                <p className="text-sm font-semibold">₹{s.lastSettlement.amount.toLocaleString()}</p>
+                <p className="text-purple-300 text-xs">{new Date(s.lastSettlement.date).toLocaleDateString()}</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* ═══════════════════════ PAYINS SECTION ═══════════════════════ */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="bg-green-50 px-4 py-3 border-b border-green-100 flex items-center gap-2">
-          <TrendingUp className="w-5 h-5 text-green-600" />
-          <h3 className="font-bold text-green-900">Payins</h3>
-          <span className="ml-auto text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-            {s.payinTotal} Total
-          </span>
-        </div>
-        <div className="p-4 space-y-3">
-          {/* Volume & Fees */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-green-50 rounded-xl p-3">
-              <p className="text-xs text-green-600 font-semibold">Total Volume</p>
-              <p className="text-2xl font-bold text-green-700">₹{s.payinVolume?.toLocaleString()}</p>
+        
+        {/* Commission Rates */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Your Commission Rates</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-green-100 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="w-3.5 h-3.5 text-green-600" />
+                </div>
+                <span className="text-sm text-slate-600">Payin Fee</span>
+              </div>
+              <span className="text-lg font-bold text-slate-900">{s.payinCommissionRate || 0}%</span>
             </div>
-            <div className="bg-slate-50 rounded-xl p-3">
-              <p className="text-xs text-slate-500 font-semibold">Platform Fees</p>
-              <p className="text-2xl font-bold text-slate-700">₹{s.payinFees?.toLocaleString()}</p>
-            </div>
-          </div>
-          
-          {/* Status counts */}
-          <div className="grid grid-cols-4 gap-2">
-            <MiniStat label="Completed" value={s.payinCompleted} color="green" />
-            <MiniStat label="Pending" value={s.payinPending} color="amber" />
-            <MiniStat label="Rejected" value={s.payinRejected} color="red" />
-            <MiniStat label="Expired" value={s.payinExpired} color="slate" />
-          </div>
-          
-          {/* Metrics */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <Percent className="w-5 h-5 text-emerald-600" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <TrendingDown className="w-3.5 h-3.5 text-blue-600" />
+                </div>
+                <span className="text-sm text-slate-600">Payout Fee</span>
               </div>
-              <div>
-                <p className="text-xs text-slate-500">Conversion Rate</p>
-                <p className="text-lg font-bold text-slate-900">{s.payinConversionRate}%</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Timer className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Avg Approval Time</p>
-                <p className="text-lg font-bold text-slate-900">{s.payinAvgTime || '—'} min</p>
-              </div>
+              <span className="text-lg font-bold text-slate-900">{s.payoutCommissionRate || 0}%</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ═══════════════════════ PAYOUTS SECTION ═══════════════════════ */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center gap-2">
-          <TrendingDown className="w-5 h-5 text-blue-600" />
-          <h3 className="font-bold text-blue-900">Payouts</h3>
-          <span className="ml-auto text-xs font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-            {s.payoutTotal} Total
-          </span>
+      {/* ═══════════════════════ PAYINS & PAYOUTS SIDE BY SIDE ═══════════════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        
+        {/* PAYINS */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900">Payins</h3>
+                  <p className="text-xs text-slate-500">{s.payinTotal} transactions</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-green-600">₹{s.payinVolume?.toLocaleString()}</p>
+                <p className="text-xs text-slate-500">Volume</p>
+              </div>
+            </div>
+          </div>
+          
+          {/* Stats Grid */}
+          <div className="p-4">
+            {/* Status Row */}
+            <div className="flex items-center gap-1 mb-4">
+              <div className="flex-1 text-center py-2 bg-green-50 rounded-l-lg border-r border-green-100">
+                <p className="text-lg font-bold text-green-600">{s.payinCompleted}</p>
+                <p className="text-[10px] text-green-600 font-medium">Done</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-amber-50 border-r border-amber-100">
+                <p className="text-lg font-bold text-amber-600">{s.payinPending}</p>
+                <p className="text-[10px] text-amber-600 font-medium">Pending</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-red-50 border-r border-red-100">
+                <p className="text-lg font-bold text-red-500">{s.payinRejected}</p>
+                <p className="text-[10px] text-red-500 font-medium">Failed</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-slate-50 rounded-r-lg">
+                <p className="text-lg font-bold text-slate-500">{s.payinExpired}</p>
+                <p className="text-[10px] text-slate-500 font-medium">Expired</p>
+              </div>
+            </div>
+            
+            {/* Metrics */}
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <p className="text-xl font-bold text-slate-900">{s.payinConversionRate}%</p>
+                <p className="text-xs text-slate-500">Success Rate</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-900">{s.payinAvgTime || '—'}<span className="text-sm">m</span></p>
+                <p className="text-xs text-slate-500">Avg Time</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-500">₹{s.payinFees?.toLocaleString()}</p>
+                <p className="text-xs text-slate-500">Fees Paid</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="p-4 space-y-3">
-          {/* Volume & Fees */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-blue-50 rounded-xl p-3">
-              <p className="text-xs text-blue-600 font-semibold">Total Volume</p>
-              <p className="text-2xl font-bold text-blue-700">₹{s.payoutVolume?.toLocaleString()}</p>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-3">
-              <p className="text-xs text-slate-500 font-semibold">Platform Fees</p>
-              <p className="text-2xl font-bold text-slate-700">₹{s.payoutFees?.toLocaleString()}</p>
+
+        {/* PAYOUTS */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                  <TrendingDown className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900">Payouts</h3>
+                  <p className="text-xs text-slate-500">{s.payoutTotal} transactions</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-blue-600">₹{s.payoutVolume?.toLocaleString()}</p>
+                <p className="text-xs text-slate-500">Volume</p>
+              </div>
             </div>
           </div>
           
-          {/* Status counts */}
-          <div className="grid grid-cols-4 gap-2">
-            <MiniStat label="Completed" value={s.payoutCompleted} color="green" />
-            <MiniStat label="Processing" value={s.payoutProcessing} color="blue" />
-            <MiniStat label="Pending Verify" value={s.payoutPendingVerification} color="amber" />
-            <MiniStat label="Rejected" value={s.payoutRejected} color="red" />
-          </div>
-          
-          {/* Metrics */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-              <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-                <Percent className="w-5 h-5 text-emerald-600" />
+          {/* Stats Grid */}
+          <div className="p-4">
+            {/* Status Row */}
+            <div className="flex items-center gap-1 mb-4">
+              <div className="flex-1 text-center py-2 bg-green-50 rounded-l-lg border-r border-green-100">
+                <p className="text-lg font-bold text-green-600">{s.payoutCompleted}</p>
+                <p className="text-[10px] text-green-600 font-medium">Done</p>
               </div>
-              <div>
-                <p className="text-xs text-slate-500">Conversion Rate</p>
-                <p className="text-lg font-bold text-slate-900">{s.payoutConversionRate}%</p>
+              <div className="flex-1 text-center py-2 bg-amber-50 border-r border-amber-100">
+                <p className="text-lg font-bold text-amber-600">{s.payoutPending}</p>
+                <p className="text-[10px] text-amber-600 font-medium">Queue</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-blue-50 border-r border-blue-100">
+                <p className="text-lg font-bold text-blue-600">{s.payoutProcessing}</p>
+                <p className="text-[10px] text-blue-600 font-medium">Active</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-purple-50 border-r border-purple-100">
+                <p className="text-lg font-bold text-purple-600">{s.payoutPendingVerification}</p>
+                <p className="text-[10px] text-purple-600 font-medium">Verify</p>
+              </div>
+              <div className="flex-1 text-center py-2 bg-red-50 rounded-r-lg">
+                <p className="text-lg font-bold text-red-500">{s.payoutRejected}</p>
+                <p className="text-[10px] text-red-500 font-medium">Failed</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Timer className="w-5 h-5 text-blue-600" />
+            
+            {/* Metrics */}
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <p className="text-xl font-bold text-slate-900">{s.payoutConversionRate}%</p>
+                <p className="text-xs text-slate-500">Success Rate</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Avg Processing Time</p>
-                <p className="text-lg font-bold text-slate-900">{s.payoutAvgTime || '—'} min</p>
+                <p className="text-xl font-bold text-slate-900">{s.payoutAvgTime || '—'}<span className="text-sm">m</span></p>
+                <p className="text-xs text-slate-500">Avg Time</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-500">₹{s.payoutFees?.toLocaleString()}</p>
+                <p className="text-xs text-slate-500">Fees Paid</p>
               </div>
             </div>
           </div>

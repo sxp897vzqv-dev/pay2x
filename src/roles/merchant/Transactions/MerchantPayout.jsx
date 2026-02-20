@@ -54,7 +54,7 @@ export default function MerchantPayout() {
       if (merchant) {
         setMerchantId(merchant.id);
         setAvailableBalance(merchant.available_balance || 0);
-        setPayoutRate(merchant.payout_commission_rate ?? 2);
+        setPayoutRate(merchant.payout_commission_rate ?? 0);
       }
 
       // Get payouts
