@@ -73,20 +73,12 @@ export function useRealtimeSubscription(table, options = {}) {
     );
 
     // Subscribe
-    channelConfig.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        console.log(`📡 Realtime subscribed to ${table}`);
-      } else if (status === 'CHANNEL_ERROR') {
-        console.error(`❌ Realtime error on ${table}`);
-      }
-    });
-
+    channelConfig.subscribe();
     channelRef.current = channelConfig;
 
     // Cleanup on unmount
     return () => {
       if (channelRef.current) {
-        console.log(`🔌 Unsubscribing from ${table}`);
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }

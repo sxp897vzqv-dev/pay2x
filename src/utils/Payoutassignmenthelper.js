@@ -6,23 +6,18 @@ import { supabase } from '../supabase';
  */
 export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
   try {
-    console.log(`🚀 Starting auto-assignment for trader ${traderId}, amount: ₹${requestedAmount}`);
-
     const { data, error } = await supabase.rpc('assign_payouts_to_trader', {
       p_trader_id: traderId,
       p_requested_amount: requestedAmount
     });
 
     if (error) {
-      console.error('❌ RPC error:', error);
       throw new Error(error.message || 'Assignment failed');
     }
 
     if (!data.success) {
       throw new Error(data.error || 'Assignment failed');
     }
-
-    console.log(`✅ Assignment result:`, data);
 
     const message = data.fullyAssigned
       ? `✅ Fully assigned! ${data.assignedCount} payouts ready to process.`
@@ -42,7 +37,6 @@ export async function immediateAutoAssignPayouts(traderId, requestedAmount) {
       message,
     };
   } catch (error) {
-    console.error('❌ ERROR in auto-assignment:', error);
     throw error;
   }
 }
@@ -58,7 +52,6 @@ export async function cancelPayoutByTrader(payoutId, reason) {
     });
 
     if (error) {
-      console.error('❌ RPC error:', error);
       throw new Error(error.message || 'Cancel failed');
     }
 
@@ -66,10 +59,8 @@ export async function cancelPayoutByTrader(payoutId, reason) {
       throw new Error(data.error || 'Cancel failed');
     }
 
-    console.log(`✅ Payout ${payoutId} cancelled successfully`);
     return { success: true };
   } catch (error) {
-    console.error('❌ Error cancelling payout:', error);
     throw error;
   }
 }
@@ -84,7 +75,6 @@ export async function cancelPayoutRequestByTrader(requestId) {
     });
 
     if (error) {
-      console.error('❌ RPC error:', error);
       throw new Error(error.message || 'Cancel failed');
     }
 
@@ -92,10 +82,8 @@ export async function cancelPayoutRequestByTrader(requestId) {
       throw new Error(data.error || 'Cancel failed');
     }
 
-    console.log(`✅ Request ${requestId} cancelled successfully`);
     return { success: true };
   } catch (error) {
-    console.error('Error cancelling request:', error);
     throw error;
   }
 }
@@ -105,8 +93,6 @@ export async function cancelPayoutRequestByTrader(requestId) {
  */
 export async function processWaitingList() {
   try {
-    console.log('🔄 Processing waiting list...');
-
     const { data: waitingRequests } = await supabase
       .from('payout_requests')
       .select('*')
@@ -114,7 +100,6 @@ export async function processWaitingList() {
       .order('created_at', { ascending: true });
 
     if (!waitingRequests?.length) {
-      console.log('No requests in waiting list');
       return { processed: 0 };
     }
 
@@ -169,13 +154,10 @@ export async function processWaitingList() {
       }).eq('id', request.id);
 
       processedCount++;
-      if (nowFullyAssigned) console.log(`✅ Request ${request.id} now fully assigned!`);
     }
 
-    console.log(`🎉 Processed ${processedCount} waiting requests`);
     return { processed: processedCount };
   } catch (error) {
-    console.error('❌ Error processing waiting list:', error);
     throw error;
   }
 }
@@ -199,7 +181,6 @@ export async function getPayoutsPendingOverOneHour() {
       pendingDuration: Math.floor((Date.now() - new Date(p.assigned_at).getTime()) / (1000 * 60)),
     }));
   } catch (error) {
-    console.error('Error fetching overdue:', error);
     throw error;
   }
 }
@@ -217,7 +198,6 @@ export async function getCancelledPayouts() {
 
     return data || [];
   } catch (error) {
-    console.error('Error fetching cancelled:', error);
     throw error;
   }
 }
@@ -234,7 +214,6 @@ export async function removePayoutByAdmin(payoutId, adminId) {
     }).eq('id', payoutId);
     return { success: true };
   } catch (error) {
-    console.error('Error removing payout:', error);
     throw error;
   }
 }
@@ -254,11 +233,9 @@ export async function reassignPayoutToPool(payoutId) {
       cancelled_by: null,
     }).eq('id', payoutId);
 
-    console.log(`✅ Payout reassigned to pool`);
-    processWaitingList().catch(err => console.error('Error processing waiting list:', err));
+    processWaitingList().catch(() => {}); // Fire and forget
     return { success: true };
   } catch (error) {
-    console.error('Error reassigning:', error);
     throw error;
   }
 }

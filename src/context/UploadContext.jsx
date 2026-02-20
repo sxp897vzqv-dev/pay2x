@@ -66,7 +66,6 @@ export function UploadProvider({ children }) {
         chunkSize: CHUNK_SIZE,
 
         onError: (err) => {
-          console.error(`TUS upload error (${id}):`, err);
           updateUpload(id, { status: UploadStatus.FAILED, error: err.message || 'Upload failed' });
           
           // Call error callback
@@ -121,13 +120,11 @@ export function UploadProvider({ children }) {
       // Check for previous uploads to resume
       const previousUploads = await upload.findPreviousUploads();
       if (previousUploads.length > 0) {
-        console.log(`Resuming previous upload for ${id}`);
         upload.resumeFromPreviousUpload(previousUploads[0]);
       }
 
       upload.start();
     } catch (err) {
-      console.error('TUS setup error:', err);
       updateUpload(id, { status: UploadStatus.FAILED, error: err.message });
     }
   }, [updateUpload]);

@@ -15,8 +15,6 @@ const SessionManager = ({ children, onSessionExpired }) => {
     const { valid, reason } = await checkSessionValidity();
     
     if (!valid) {
-      console.log('Session invalid:', reason);
-      
       // Log the session expiry
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {

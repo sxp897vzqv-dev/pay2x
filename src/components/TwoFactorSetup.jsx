@@ -42,13 +42,10 @@ export default function TwoFactorSetup() {
 
   const fetchStatus = async () => {
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      console.log('2FA fetchStatus - Session:', session ? 'exists' : 'null', sessionError);
+      const { data: { session } } = await supabase.auth.getSession();
       
       // If no session, user not logged in - show not enabled state
       if (!session?.access_token) {
-        console.log('2FA: No access token, showing not enabled');
         setStatus({ enabled: false });
         setStep('status');
         setLoading(false);
@@ -83,7 +80,6 @@ export default function TwoFactorSetup() {
       setStatus(data);
       setStep(data.enabled ? 'enabled' : 'status');
     } catch (err) {
-      console.error('2FA status error:', err);
       // Default to not enabled on error
       setStatus({ enabled: false });
       setStep('status');

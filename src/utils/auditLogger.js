@@ -89,16 +89,13 @@ export async function logAuditEvent({
 
     if (error) throw error;
 
-    console.log(`✅ Audit log created: ${action} [${category}]`, {
-      entity: entityType ? `${entityType}:${entityId}` : 'none',
-      performer: performerName,
-    });
-
     return { success: true };
   } catch (error) {
     // CRITICAL: Never break app functionality if logging fails
-    console.error('❌ Failed to create audit log:', error);
-    console.error('Log details:', { action, category, entityType, entityId });
+    // Keep error logging for debugging production issues
+    if (import.meta.env.DEV) {
+      console.error('❌ Failed to create audit log:', error);
+    }
 
     // Return error but don't throw (silent failure)
     return { success: false, error: error.message };

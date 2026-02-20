@@ -29,7 +29,6 @@ export async function getClientIP() {
       cachedIP = data.ip || 'unknown';
       return cachedIP;
     } catch (error) {
-      console.warn('Failed to fetch IP address:', error.message);
       cachedIP = 'unknown';
       return cachedIP;
     } finally {
@@ -45,9 +44,7 @@ export async function getClientIP() {
  * Call this in your App.jsx or index.jsx
  */
 export function initIPCapture() {
-  getClientIP().then(ip => {
-    console.log('📍 Client IP captured:', ip);
-  });
+  getClientIP(); // Silent capture
 }
 
 /**
