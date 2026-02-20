@@ -415,7 +415,7 @@ export default function MerchantDashboard() {
 
       {/* Balance Hero */}
       <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-4 text-white">
-        <div className="flex items-start justify-between mb-4">
+        <div className="flex items-start justify-between">
           <div>
             <p className="text-purple-200 text-xs font-semibold uppercase tracking-wide">Available Balance</p>
             <h2 className="text-3xl font-bold">₹{s.available?.toLocaleString()}</h2>
@@ -427,21 +427,6 @@ export default function MerchantDashboard() {
               <p className="text-purple-300 text-xs">{new Date(s.lastSettlement.date).toLocaleDateString()}</p>
             </div>
           )}
-        </div>
-        
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-white/10 rounded-lg p-2.5 text-center">
-            <p className="text-purple-200 text-xs">Pending</p>
-            <p className="font-bold">₹{s.pending?.toLocaleString()}</p>
-          </div>
-          <div className="bg-white/10 rounded-lg p-2.5 text-center">
-            <p className="text-purple-200 text-xs">Reserved</p>
-            <p className="font-bold">₹{s.reserved?.toLocaleString()}</p>
-          </div>
-          <div className="bg-white/10 rounded-lg p-2.5 text-center">
-            <p className="text-purple-200 text-xs">Net</p>
-            <p className="font-bold">₹{(s.payinVolume - s.payoutVolume)?.toLocaleString()}</p>
-          </div>
         </div>
       </div>
 
