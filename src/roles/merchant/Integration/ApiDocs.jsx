@@ -256,6 +256,27 @@ const ApiDocs = () => {
     "orderId": "ORDER-001"
   }'`} />
               
+              <p className="font-semibold text-gray-900 mt-4 mb-2">Response:</p>
+              <CodeBlock id="payin-create-response" language="json" code={`{
+  "success": true,
+  "payment_id": "abc-123-uuid",
+  "txn_id": "TXN1708612345ABC",
+  "order_id": "ORDER-001",
+  "upi_id": "merchant@okaxis",
+  "holder_name": "Rajesh Kumar",
+  "amount": 5000,
+  "status": "pending",
+  "timer": 600,
+  "expires_at": "2026-02-22T16:30:00.000Z",
+  "attempt_number": 1,
+  "max_attempts": 3,
+  "fallback_available": true,
+  "commission_pct": 2,
+  "commission_amount": 100,
+  "net_amount": 4900,
+  "net_amount_usdt": 51.58
+}`} />
+              
               <div className="p-4 rounded-xl bg-violet-100 border border-violet-200">
                 <h5 className="text-violet-800 font-semibold mb-2">📱 Display to Customer</h5>
                 <div className="grid grid-cols-2 gap-4 text-sm">
@@ -336,6 +357,24 @@ const ApiDocs = () => {
     "upiId": "johndoe@okaxis",
     "orderId": "WITHDRAW-001"
   }'`} />
+
+              <p className="font-semibold text-gray-900 mt-4 mb-2">Response:</p>
+              <CodeBlock id="payout-create-response" language="json" code={`{
+  "success": true,
+  "payout_id": "xyz-456-uuid",
+  "txn_id": "PO1708612345XYZ",
+  "order_id": "WITHDRAW-001",
+  "amount": 10000,
+  "fee": 100,
+  "total_on_completion": 10100,
+  "status": "pending",
+  "commission_pct": 1,
+  "commission_amount": 100,
+  "net_amount": 10000,
+  "amount_usdt": 105.26,
+  "total_usdt": 106.32,
+  "message": "Payout request created"
+}`} />
               
               <div className="p-4 rounded-xl bg-amber-100 border border-amber-200">
                 <p className="text-amber-800 font-medium">
