@@ -13,7 +13,8 @@ import {
   Clock,
   Zap,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Wallet
 } from 'lucide-react';
 
 const ApiDocs = () => {
@@ -375,6 +376,57 @@ const ApiDocs = () => {
             </div>
           </Section>
 
+          {/* BALANCE SECTION */}
+          <Section 
+            id="balance" 
+            title="Check Balance" 
+            subtitle="Get your current balance"
+            icon={Wallet} 
+            color="emerald"
+          >
+            <Step number="1" title="Get Balance" color="emerald">
+              <p>Check your current balance in INR and USDT</p>
+              <CodeBlock id="balance-get" language="bash" code={`curl -X GET ${baseUrl}/v1/balance \\
+  -H "Authorization: Bearer YOUR_API_KEY"`} />
+              
+              <p className="font-semibold text-gray-900 mt-4 mb-2">Response:</p>
+              <CodeBlock id="balance-response" language="json" code={`{
+  "success": true,
+  "balance": {
+    "total_inr": 125000.00,
+    "pending_inr": 5000.00,
+    "reserved_for_payouts_inr": 10000.00,
+    "available_inr": 115000.00,
+    "usdt_rate": 95.50,
+    "total_usdt": 1308.90,
+    "available_usdt": 1204.19
+  },
+  "currency": "INR",
+  "updated_at": "2026-02-22T08:15:00.000Z"
+}`} />
+            </Step>
+
+            <div className="p-5 rounded-xl bg-white border border-gray-200 shadow-sm">
+              <h5 className="text-gray-900 font-semibold mb-4">Balance Fields</h5>
+              <div className="grid grid-cols-1 gap-3 text-sm">
+                {[
+                  { field: 'total_inr', desc: 'Total balance in INR' },
+                  { field: 'pending_inr', desc: 'Pending credits (not yet confirmed)' },
+                  { field: 'reserved_for_payouts_inr', desc: 'Reserved for pending payouts' },
+                  { field: 'available_inr', desc: 'Available for withdrawal' },
+                  { field: 'usdt_rate', desc: 'Current INR/USDT rate' },
+                  { field: 'total_usdt', desc: 'Total balance in USDT' },
+                  { field: 'available_usdt', desc: 'Available in USDT' },
+                ].map((item, i) => (
+                  <div key={i} className="flex justify-between p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+                    <code className="text-emerald-700 font-medium">{item.field}</code>
+                    <span className="text-gray-600">{item.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+
           {/* DISPUTE SECTION */}
           <Section 
             id="dispute" 
@@ -472,6 +524,7 @@ function verifyWebhook(payload, signature, secret) {
           </div>
           <div className="divide-y divide-gray-100 bg-white">
             {[
+              { method: 'GET', path: '/v1/balance', desc: 'Get balance' },
               { method: 'POST', path: '/v1/payin/create', desc: 'Create payment' },
               { method: 'PATCH', path: '/v1/payin/submit-utr', desc: 'Submit UTR' },
               { method: 'GET', path: '/v1/payin/status', desc: 'Check payment' },
