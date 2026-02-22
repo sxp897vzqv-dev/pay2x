@@ -392,6 +392,19 @@ export default function TraderPayin() {
             note: `Payin #${payin.transactionId || payin.id.slice(-8)}`,
           });
         }
+        
+        // 4. Credit affiliate commission (if trader has one)
+        try {
+          await supabase.rpc('credit_affiliate_on_trader_transaction', {
+            p_trader_id: td?.id || user.id,
+            p_transaction_type: 'payin',
+            p_transaction_id: payin.id,
+            p_transaction_amount: amount,
+            p_trader_earning: traderComm
+          });
+        } catch (affErr) {
+          console.warn('Affiliate credit failed (non-critical):', affErr.message);
+        }
       } else if (!result?.success) {
         throw new Error(result?.error || 'Failed to complete payin');
       }
