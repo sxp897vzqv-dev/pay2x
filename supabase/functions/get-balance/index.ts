@@ -91,21 +91,16 @@ serve(async (req: Request) => {
     const pendingBalance = merchant.pending_balance || 0;
     const availableBalance = Math.max(0, balance - pendingPayoutAmount);
 
-    // 6. Build response
+    // 6. Build response (USDT only)
+    const rate = usdtRate || 95; // fallback rate
     const response = {
       success: true,
       balance: {
-        // INR values
-        total_inr: Math.round(balance * 100) / 100,
-        pending_inr: Math.round(pendingBalance * 100) / 100,
-        reserved_for_payouts_inr: Math.round(pendingPayoutAmount * 100) / 100,
-        available_inr: Math.round(availableBalance * 100) / 100,
-        // USDT values (if rate available)
-        usdt_rate: usdtRate,
-        total_usdt: usdtRate ? Math.round((balance / usdtRate) * 100) / 100 : null,
-        available_usdt: usdtRate ? Math.round((availableBalance / usdtRate) * 100) / 100 : null,
+        total_usdt: Math.round((balance / rate) * 100) / 100,
+        pending_usdt: Math.round((pendingBalance / rate) * 100) / 100,
+        reserved_for_payouts_usdt: Math.round((pendingPayoutAmount / rate) * 100) / 100,
+        available_usdt: Math.round((availableBalance / rate) * 100) / 100,
       },
-      currency: 'INR',
       updated_at: new Date().toISOString(),
     };
 
