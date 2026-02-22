@@ -101,19 +101,26 @@ export default function AdminDisputes() {
       // Check if trader has responded - use Edge Function for balance adjustments
       if (['trader_accepted', 'trader_rejected'].includes(dispute.status)) {
         // Call Edge Function for proper balance handling
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://jrzyndtowwwcydgcagcr.supabase.co';
         const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-resolve-dispute`,
+          `${SUPABASE_URL}/functions/v1/admin-resolve-dispute`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             },
             body: JSON.stringify({ disputeId: dispute.id, decision }),
           }
         );
         
-        const result = await response.json();
+        // Handle empty or non-JSON response
+        const text = await response.text();
+        let result;
+        try {
+          result = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error(`Server error: ${response.status} - ${text || 'Empty response'}`);
+        }
         if (!response.ok) throw new Error(result.error || 'Failed to resolve dispute');
         
         setToast({ 

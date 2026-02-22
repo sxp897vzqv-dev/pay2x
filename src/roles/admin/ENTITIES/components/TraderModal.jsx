@@ -26,7 +26,7 @@ export default function TraderModal({ trader, onClose, onSave }) {
   const [error, setError] = useState('');
   const [affiliates, setAffiliates] = useState([]);
 
-  // Fetch affiliates for dropdown
+  // Fetch affiliates for dropdown + existing affiliate commission
   useEffect(() => {
     const fetchAffiliates = async () => {
       const { data } = await supabase
@@ -35,9 +35,25 @@ export default function TraderModal({ trader, onClose, onSave }) {
         .eq('status', 'active')
         .order('name');
       setAffiliates(data || []);
+      
+      // If editing trader with affiliate, fetch the commission rate
+      if (trader?.affiliateId) {
+        const { data: linkData } = await supabase
+          .from('affiliate_traders')
+          .select('commission_rate')
+          .eq('trader_id', trader.id)
+          .single();
+        
+        if (linkData) {
+          setFormData(prev => ({
+            ...prev,
+            affiliateCommission: linkData.commission_rate || 5
+          }));
+        }
+      }
     };
     fetchAffiliates();
-  }, []);
+  }, [trader]);
 
   // When affiliate is selected, set default commission
   const handleAffiliateChange = (affiliateId) => {

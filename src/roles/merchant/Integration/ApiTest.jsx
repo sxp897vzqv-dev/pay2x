@@ -4,7 +4,7 @@ import { supabase } from '../../../supabase';
 import { 
   CreditCard, ArrowRight, Copy, CheckCircle, Clock, AlertCircle, 
   Send, AlertTriangle, IndianRupee, Loader2, XCircle,
-  MessageSquare, RotateCcw, Search, Eye, Key, Play, Zap
+  MessageSquare, RotateCcw, Search, Eye, Key, Play, Zap, DollarSign, Wallet, RefreshCw
 } from 'lucide-react';
 
 const API_BASE_URL = 'https://api.pay2x.io';
@@ -71,25 +71,43 @@ const ApiTest = () => {
   const [disputeStatusResult, setDisputeStatusResult] = useState(null);
   const [disputeStatusLoading, setDisputeStatusLoading] = useState(false);
 
+  // Balance state
+  const [balanceData, setBalanceData] = useState(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState('');
+
   // Load merchant's API key
   useEffect(() => {
     const loadApiKey = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        console.log('[ApiTest] User:', user?.id);
+        if (!user) {
+          console.error('[ApiTest] No authenticated user');
+          return;
+        }
 
-        const { data: merchant } = await supabase
+        const { data: merchant, error } = await supabase
           .from('merchants')
           .select('live_api_key, test_api_key')
           .eq('profile_id', user.id)
           .single();
 
+        console.log('[ApiTest] Merchant query result:', { merchant, error });
+        
+        if (error) {
+          console.error('[ApiTest] RLS Error:', error.message);
+        }
+
         if (merchant) {
           const key = testMode ? merchant.test_api_key : merchant.live_api_key;
+          console.log('[ApiTest] Key loaded:', key ? `${key.slice(0,10)}...` : 'EMPTY');
           setApiKey(key || '');
+        } else {
+          console.error('[ApiTest] No merchant found for user');
         }
       } catch (e) {
-        console.error('Error loading API key:', e);
+        console.error('[ApiTest] Error loading API key:', e);
       }
       setLoadingKey(false);
     };
@@ -171,7 +189,13 @@ const ApiTest = () => {
         amount: data.amount,
         attemptNumber: data.attempt_number || 1,
         maxAttempts: data.max_attempts || 3,
-        fallbackAvailable: data.fallback_available ?? true
+        fallbackAvailable: data.fallback_available ?? true,
+        // Commission & USDT info
+        commissionPct: data.commission_pct,
+        commissionAmount: data.commission_amount,
+        netAmount: data.net_amount,
+        usdtRate: data.usdt_rate,
+        netAmountUsdt: data.net_amount_usdt
       });
       setPayinTimer(data.timer || 600);
       setPayinStep('payment');
@@ -289,8 +313,18 @@ const ApiTest = () => {
 
       setPayoutData({
         payoutId: data.payoutId || data.payout_id,
+        txnId: data.txn_id,
         amount: data.amount,
-        status: data.status || 'pending'
+        fee: data.fee,
+        totalOnCompletion: data.total_on_completion,
+        status: data.status || 'pending',
+        // Commission & USDT info
+        commissionPct: data.commission_pct,
+        commissionAmount: data.commission_amount,
+        netAmount: data.net_amount,
+        usdtRate: data.usdt_rate,
+        amountUsdt: data.amount_usdt,
+        totalUsdt: data.total_usdt
       });
       setPayoutStep('pending');
     } catch (e) {
@@ -369,6 +403,13 @@ const ApiTest = () => {
       setDisputeResult({
         success: true,
         disputeId: data.disputeId || data.dispute_id,
+        disputeRef: data.dispute_ref,
+        amount: data.amount,
+        amountUsdt: data.amount_usdt,
+        usdtRate: data.usdt_rate,
+        slaDeadline: data.sla_deadline,
+        status: data.status,
+        routed: data.routed,
         message: data.message || 'Dispute created'
       });
     } catch (e) {
@@ -393,6 +434,25 @@ const ApiTest = () => {
       setDisputeStatusResult({ error: e.message });
     }
     setDisputeStatusLoading(false);
+  };
+
+  // ─── BALANCE ───
+  const handleFetchBalance = async () => {
+    if (!apiKey) { setBalanceError('API Key required'); return; }
+    setBalanceLoading(true);
+    setBalanceError('');
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/balance`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || data.error || 'Failed');
+      setBalanceData(data.balance);
+    } catch (e) {
+      setBalanceError(e.message);
+    }
+    setBalanceLoading(false);
   };
 
   const TabButton = ({ id, label, icon: Icon }) => (
@@ -477,12 +537,87 @@ const ApiTest = () => {
 
       {/* Tabs */}
       <div className="flex bg-slate-100 rounded-t-xl overflow-hidden">
+        <TabButton id="balance" label="Balance" icon={Wallet} />
         <TabButton id="payin" label="Payin" icon={CreditCard} />
         <TabButton id="payout" label="Payout" icon={Send} />
         <TabButton id="dispute" label="Dispute" icon={AlertTriangle} />
       </div>
 
       <div className="bg-white rounded-b-xl border border-slate-200 shadow-sm overflow-hidden -mt-6">
+        {/* ─── BALANCE TAB ─── */}
+        {activeTab === 'balance' && (
+          <div className="p-6">
+            <div className="max-w-md mx-auto space-y-4">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-purple-600" />
+                Check Balance
+              </h3>
+
+              <button
+                onClick={handleFetchBalance}
+                disabled={balanceLoading || !apiKey}
+                className="w-full py-3 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {balanceLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><RefreshCw className="w-4 h-4" /> GET /v1/balance</>}
+              </button>
+
+              {balanceError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-sm text-red-700">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  {balanceError}
+                </div>
+              )}
+
+              {balanceData && (
+                <div className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-xl p-5 space-y-4">
+                  {/* INR Balances */}
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600">Total Balance</span>
+                      <span className="text-2xl font-bold text-slate-900">₹{balanceData.total_inr?.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-500">Reserved for Payouts</span>
+                      <span className="text-amber-600 font-medium">-₹{balanceData.reserved_for_payouts_inr?.toLocaleString()}</span>
+                    </div>
+                    <div className="border-t border-purple-200 pt-3 flex justify-between items-center">
+                      <span className="text-slate-700 font-medium">Available Balance</span>
+                      <span className="text-xl font-bold text-green-600">₹{balanceData.available_inr?.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  {/* USDT Values */}
+                  {balanceData.usdt_rate && (
+                    <div className="border-t border-purple-200 pt-4 space-y-2">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <DollarSign className="w-3 h-3" />
+                        <span>@ ₹{balanceData.usdt_rate}/USDT</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-white/60 rounded-lg p-3 text-center">
+                          <p className="text-xs text-slate-500">Total USDT</p>
+                          <p className="text-lg font-bold text-blue-600">${balanceData.total_usdt}</p>
+                        </div>
+                        <div className="bg-white/60 rounded-lg p-3 text-center">
+                          <p className="text-xs text-slate-500">Available USDT</p>
+                          <p className="text-lg font-bold text-green-600">${balanceData.available_usdt}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!balanceData && !balanceLoading && !balanceError && (
+                <div className="text-center py-8 text-slate-400">
+                  <Wallet className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Click the button to fetch your balance</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ─── PAYIN TAB ─── */}
         {activeTab === 'payin' && (
           <div className="p-6">
@@ -547,7 +682,28 @@ const ApiTest = () => {
                         <div><span className="text-slate-500">Holder:</span> <strong>{payinData.holderName}</strong></div>
                         <div><span className="text-slate-500">Amount:</span> <strong className="text-green-600">₹{payinData.amount}</strong></div>
                       </div>
-                      <div className="text-xs text-slate-500">ID: <span className="font-mono">{payinData.payinId}</span></div>
+                      
+                      {/* Commission & USDT Info */}
+                      {payinData.commissionPct !== undefined && (
+                        <div className="mt-3 pt-3 border-t border-green-200 space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Commission ({payinData.commissionPct}%)</span>
+                            <span className="text-red-600">-₹{payinData.commissionAmount}</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-semibold">
+                            <span className="text-slate-700">Net Amount</span>
+                            <span className="text-green-700">₹{payinData.netAmount}</span>
+                          </div>
+                          {payinData.usdtRate && (
+                            <div className="flex justify-between text-xs text-slate-500">
+                              <span>@ ₹{payinData.usdtRate}/USDT</span>
+                              <span className="text-blue-600 font-medium">${payinData.netAmountUsdt} USDT</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="text-xs text-slate-500 mt-2">ID: <span className="font-mono">{payinData.payinId}</span></div>
                     </div>
 
                     <div>
@@ -672,15 +828,61 @@ const ApiTest = () => {
                   </>
                 )}
 
-                {payoutStep === 'pending' && (
-                  <div className="text-center py-8 space-y-4">
-                    <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto" />
-                    <h3 className="font-semibold">Payout Created</h3>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-                      <p>ID: <span className="font-mono">{payoutData?.payoutId}</span></p>
-                      <p>Amount: ₹{payoutData?.amount}</p>
+                {payoutStep === 'pending' && payoutData && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="w-5 h-5" />
+                      <span className="font-semibold">Payout Created!</span>
                     </div>
-                    <button onClick={resetPayout} className="px-4 py-2 bg-slate-100 rounded-lg">New Payout</button>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div><span className="text-slate-500">Payout ID:</span></div>
+                        <div className="font-mono text-xs break-all">{payoutData.payoutId}</div>
+                        <div><span className="text-slate-500">Amount:</span></div>
+                        <div className="font-semibold text-blue-600">₹{payoutData.amount?.toLocaleString()}</div>
+                        <div><span className="text-slate-500">Fee:</span></div>
+                        <div className="text-red-600">₹{payoutData.fee?.toLocaleString()}</div>
+                        <div><span className="text-slate-500">Total on Completion:</span></div>
+                        <div className="font-bold">₹{payoutData.totalOnCompletion?.toLocaleString()}</div>
+                      </div>
+                      
+                      {/* Commission & USDT Info */}
+                      {payoutData.commissionPct !== undefined && (
+                        <div className="mt-3 pt-3 border-t border-blue-200 space-y-2">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Commission Rate</span>
+                            <span className="font-medium">{payoutData.commissionPct}%</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-700">Net to Beneficiary</span>
+                            <span className="text-green-700 font-semibold">₹{payoutData.netAmount?.toLocaleString()}</span>
+                          </div>
+                          {payoutData.usdtRate && (
+                            <>
+                              <div className="flex justify-between text-xs text-slate-500 pt-2 border-t border-blue-100">
+                                <span>USDT Rate</span>
+                                <span>₹{payoutData.usdtRate}/USDT</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Amount in USDT</span>
+                                <span className="text-blue-600 font-medium">${payoutData.amountUsdt}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Total in USDT</span>
+                                <span className="text-blue-600 font-medium">${payoutData.totalUsdt}</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="pt-2 text-xs text-slate-500">Status: <span className="font-medium text-amber-600 uppercase">{payoutData.status}</span></div>
+                    </div>
+                    
+                    <button onClick={resetPayout} className="w-full py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200">
+                      Create Another Payout
+                    </button>
                   </div>
                 )}
               </div>
@@ -743,11 +945,47 @@ const ApiTest = () => {
                 <textarea value={disputeComment} onChange={(e) => setDisputeComment(e.target.value)} placeholder="Comment" rows={2} className="w-full px-4 py-3 border border-slate-300 rounded-xl resize-none" />
 
                 {disputeResult && (
-                  <div className={`rounded-lg p-3 ${disputeResult.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+                  <div className={`rounded-xl p-4 ${disputeResult.error ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
                     {disputeResult.error ? <p className="text-red-700 text-sm">{disputeResult.error}</p> : (
-                      <div className="text-green-700 text-sm">
-                        <p className="font-semibold">✓ {disputeResult.message}</p>
-                        <p className="font-mono text-xs mt-1">ID: {disputeResult.disputeId}</p>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-green-700">
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="font-semibold">{disputeResult.message}</span>
+                        </div>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Dispute ID:</span>
+                            <span className="font-mono text-xs">{disputeResult.disputeId}</span>
+                          </div>
+                          {disputeResult.disputeRef && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Reference:</span>
+                              <span className="font-mono text-xs">{disputeResult.disputeRef}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Amount:</span>
+                            <span className="font-medium">₹{disputeResult.amount?.toLocaleString()}</span>
+                          </div>
+                          {disputeResult.usdtRate && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-500">@ ₹{disputeResult.usdtRate}/USDT</span>
+                              <span className="text-blue-600 font-medium">${disputeResult.amountUsdt} USDT</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Status:</span>
+                            <span className={`font-medium ${disputeResult.routed ? 'text-amber-600' : 'text-slate-600'}`}>
+                              {disputeResult.status?.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          {disputeResult.slaDeadline && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-500">SLA Deadline:</span>
+                              <span className="text-orange-600">{new Date(disputeResult.slaDeadline).toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -791,6 +1029,7 @@ const ApiTest = () => {
           <span>Rate: <span className="text-white">60/min</span></span>
           <span>Payin: <span className="text-white">₹500-50K</span></span>
           <span>Payout: <span className="text-white">₹5K-50K</span></span>
+          <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> <span className="text-green-400">USDT rate in response</span></span>
         </div>
       </div>
     </div>

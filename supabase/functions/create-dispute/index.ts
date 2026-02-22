@@ -115,6 +115,18 @@ serve(async (req: Request) => {
       );
     }
 
+    // 2b. Get current USDT rate
+    let usdtRate: number | null = null;
+    try {
+      const { data: tatumConfig } = await supabase
+        .from('tatum_config')
+        .select('admin_usdt_rate')
+        .single();
+      usdtRate = tatumConfig?.admin_usdt_rate || null;
+    } catch (e) {
+      console.log('Failed to fetch USDT rate:', e);
+    }
+
     // 3. Parse request body
     let body: CreateDisputeRequest;
     try {
@@ -361,7 +373,9 @@ serve(async (req: Request) => {
       ifsc_code: ifscCode || null,
     };
 
-    // 9. Create dispute record
+    // 9. Create dispute record (with USDT rate at creation)
+    const amountUsdt = usdtRate ? Math.round((amount / usdtRate) * 100) / 100 : null;
+    
     const { data: dispute, error: disputeError } = await supabase
       .from('disputes')
       .insert({
@@ -383,6 +397,9 @@ serve(async (req: Request) => {
         dispute_id: disputeRef,
         // SLA: 48 hours to respond
         sla_deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+        // USDT tracking
+        usdt_rate_at_creation: usdtRate,
+        amount_usdt: amountUsdt,
       })
       .select('id, dispute_id')
       .single();
@@ -425,15 +442,19 @@ serve(async (req: Request) => {
       }
     }
 
-    // 11. Return success
+    // 11. Return success with USDT info
     return new Response(
       JSON.stringify({
         success: true,
         dispute_id: dispute.id,
         dispute_ref: dispute.dispute_id,
         type,
+        amount,
+        amount_usdt: usdtRate ? Math.round((amount / usdtRate) * 100) / 100 : null,
+        usdt_rate: usdtRate,
         status: traderId ? 'routed_to_trader' : 'pending',
         routed: !!traderId,
+        sla_deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
         message: traderId 
           ? 'Dispute created and sent to trader for review.' 
           : 'Dispute created. Our team will review and route it shortly.',

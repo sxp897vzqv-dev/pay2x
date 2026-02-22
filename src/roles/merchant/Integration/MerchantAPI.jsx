@@ -252,7 +252,14 @@ export default function MerchantAPI() {
     try {
       const fieldName = mode === 'live' ? 'live_api_key' : 'test_api_key';
       const updateData = { [fieldName]: newKey, api_key_updated_at: new Date().toISOString() };
-      await supabase.from('merchants').update(updateData).eq('id', merchant.id);
+      
+      const { error: updateError } = await supabase.from('merchants').update(updateData).eq('id', merchant.id);
+      
+      if (updateError) {
+        console.error('Supabase update error:', updateError);
+        throw new Error(updateError.message || 'Failed to save API key');
+      }
+      
       setApiKeys(prev => ({ ...prev, [mode]: newKey }));
       
       // Log activity (critical action)
@@ -281,10 +288,22 @@ export default function MerchantAPI() {
     if (!webhookUrl || !webhookUrl.startsWith('https://')) { alert('Webhook URL must start with https://'); return; }
     try {
       // Get merchant ID first
-      const { data: merchant } = await supabase.from('merchants').select('id').eq('profile_id', user.id).single();
+      const { data: merchant } = await supabase.from('merchants').select('id, webhook_secret').eq('profile_id', user.id).single();
       if (!merchant) { alert('Merchant not found'); return; }
       
-      await supabase.from('merchants').update({ webhook_url: webhookUrl, webhook_events: webhookEvents }).eq('id', merchant.id);
+      // Generate webhook secret if not already set
+      const newSecret = merchant.webhook_secret || `whsec_${crypto.randomUUID().replace(/-/g, '')}`;
+      
+      const { error } = await supabase.from('merchants').update({ 
+        webhook_url: webhookUrl, 
+        webhook_secret: newSecret,
+        webhook_events: webhookEvents 
+      }).eq('id', merchant.id);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setWebhookSecret(newSecret);
       
       // Log activity
       await logMerchantActivity(MERCHANT_ACTIONS.WEBHOOK_URL_UPDATED, {
@@ -294,7 +313,8 @@ export default function MerchantAPI() {
         }
       });
       
-      alert('✅ Webhook configuration saved!');
+      setSuccessMessage('✅ Webhook configuration saved!');
+      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (e) { alert('Error: ' + e.message); }
   };
 

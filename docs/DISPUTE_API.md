@@ -162,11 +162,26 @@ For disputes where trader says payout sent but customer didn't receive.
   "dispute_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "dispute_ref": "DSP1708123456ABCD",
   "type": "payment_not_received",
+  "amount": 5000,
+  "amount_usdt": 55.87,
+  "usdt_rate": 89.50,
   "status": "routed_to_trader",
   "routed": true,
+  "sla_deadline": "2026-02-19T10:00:00.000Z",
   "message": "Dispute created and sent to trader for review."
 }
 ```
+
+#### Response Fields
+
+| Field | Description |
+|-------|-------------|
+| `dispute_id` | Unique dispute ID |
+| `dispute_ref` | Human-readable reference |
+| `amount` | Disputed amount in INR |
+| `amount_usdt` | Disputed amount in USDT |
+| `usdt_rate` | Current INR/USDT rate |
+| `sla_deadline` | Trader must respond by this time |
 
 ---
 
@@ -475,5 +490,6 @@ Disputes are auto-escalated if not resolved within SLA.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | Feb 2026 | Added amount, USDT rate, SLA deadline to response |
 | 2.0 | Feb 2026 | Separate payin/payout dispute flows, added SLA |
 | 1.0 | Jan 2026 | Initial release |

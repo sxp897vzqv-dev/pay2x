@@ -327,6 +327,13 @@ export default function TraderPayin() {
         console.warn('RPC failed, using fallback:', rpcError.message);
         
         // Fallback: manual updates
+        // Get USDT rate
+        let usdtRate = 95; // Default fallback
+        try {
+          const { data: tatumConfig } = await supabase.from('tatum_config').select('admin_usdt_rate').single();
+          if (tatumConfig?.admin_usdt_rate) usdtRate = tatumConfig.admin_usdt_rate;
+        } catch (e) { console.warn('USDT rate fetch failed:', e); }
+        
         // 1. Update payin status
         const { error: payinError } = await supabase
           .from('payins')
@@ -349,20 +356,41 @@ export default function TraderPayin() {
           }).eq('id', td.id);
         }
 
-        // 3. Credit merchant balance
+        // 3. Credit merchant balance (INR + USDT)
         const { data: merchant } = await supabase
           .from('merchants')
-          .select('id, available_balance, payin_commission, payin_commission_rate')
+          .select('id, available_balance, usdt_balance, payin_commission, payin_commission_rate')
           .eq('id', payin.merchant_id || payin.userId)
           .single();
         
         if (merchant) {
-          const merchantRate = merchant.payin_commission || merchant.payin_commission_rate || 6;
+          const merchantRate = merchant.payin_commission || merchant.payin_commission_rate || 0;
           const merchantFee = Math.round((amount * merchantRate) / 100);
           const merchantCredit = amount - merchantFee;
+          const usdtCredit = Math.round((merchantCredit / usdtRate) * 100) / 100;
+          
           await supabase.from('merchants').update({
             available_balance: (Number(merchant.available_balance) || 0) + merchantCredit,
+            usdt_balance: (Number(merchant.usdt_balance) || 0) + usdtCredit,
           }).eq('id', merchant.id);
+          
+          // Update payin with USDT info
+          await supabase.from('payins').update({
+            net_amount_usdt: usdtCredit,
+            usdt_rate_at_completion: usdtRate,
+          }).eq('id', payin.id);
+          
+          // Add balance history entry
+          await supabase.from('balance_history').insert({
+            entity_type: 'merchant',
+            entity_id: merchant.id,
+            type: 'credit',
+            reason: 'payin_completed',
+            amount: merchantCredit,
+            amount_usdt: usdtCredit,
+            usdt_rate: usdtRate,
+            note: `Payin #${payin.transactionId || payin.id.slice(-8)}`,
+          });
         }
       } else if (!result?.success) {
         throw new Error(result?.error || 'Failed to complete payin');

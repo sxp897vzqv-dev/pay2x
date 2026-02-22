@@ -122,6 +122,12 @@ POST /v1/payout/create
   "fee": 500,
   "total_on_completion": 25500,
   "status": "pending",
+  "commission_pct": 2,
+  "commission_amount": 500,
+  "net_amount": 25000,
+  "usdt_rate": 89.50,
+  "amount_usdt": 279.33,
+  "total_usdt": 285.47,
   "message": "Payout request created. Trader will choose Bank or UPI method."
 }
 ```
@@ -135,6 +141,12 @@ POST /v1/payout/create
 | `fee` | Platform fee (percentage of amount) |
 | `total_on_completion` | Amount + Fee (deducted when completed) |
 | `status` | Initial status is `pending` |
+| `commission_pct` | Your commission rate (%) |
+| `commission_amount` | Fee amount in INR |
+| `net_amount` | Amount beneficiary will receive |
+| `usdt_rate` | Current INR/USDT rate |
+| `amount_usdt` | Net amount in USDT |
+| `total_usdt` | Total (amount + fee) in USDT |
 
 #### Important Notes
 
@@ -531,5 +543,6 @@ GET https://ifsc.razorpay.com/HDFC0001234
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | Feb 2026 | Added commission % and USDT rate to response |
 | 2.0 | Feb 2026 | Added UPI payout support, userId field |
 | 1.0 | Jan 2026 | Initial release |

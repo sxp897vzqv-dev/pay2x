@@ -123,6 +123,11 @@ POST /v1/payin/create
   "attempt_number": 1,
   "max_attempts": 3,
   "fallback_available": true,
+  "commission_pct": 2.5,
+  "commission_amount": 125,
+  "net_amount": 4875,
+  "usdt_rate": 87.45,
+  "net_amount_usdt": 55.75,
   "trace_id": "abc123def456"
 }
 ```
@@ -138,6 +143,11 @@ POST /v1/payin/create
 | `timer` | Seconds until payment expires |
 | `expires_at` | ISO timestamp when payment expires |
 | `fallback_available` | If true, customer can try a different UPI |
+| `commission_pct` | Your commission rate (percentage) |
+| `commission_amount` | Commission in INR |
+| `net_amount` | Amount you'll receive after commission (INR) |
+| `usdt_rate` | Current INR/USDT exchange rate |
+| `net_amount_usdt` | Net amount in USDT (null if rate unavailable) |
 
 #### What to Show Customer
 

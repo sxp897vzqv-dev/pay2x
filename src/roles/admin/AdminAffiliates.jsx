@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabase';
-import { createAffiliate } from '../../utils/adminApi';
+import { createAffiliate, resetUserPassword } from '../../utils/adminApi';
+import Toast from '../../components/admin/Toast';
 import { 
   Users, Plus, Search, Filter, MoreVertical, Eye, Edit2, 
   Ban, CheckCircle, TrendingUp, IndianRupee, Calendar,
-  CreditCard, UserPlus, X, Save, Building, Phone, Mail
+  CreditCard, UserPlus, X, Save, Building, Phone, Mail, KeyRound
 } from 'lucide-react';
 
 export default function AdminAffiliates() {
@@ -34,6 +35,21 @@ export default function AdminAffiliates() {
     totalEarnings: 0,
     pendingSettlement: 0
   });
+  const [toast, setToast] = useState(null);
+  const [resettingPassword, setResettingPassword] = useState(null);
+
+  const handleResetPassword = async (affiliate) => {
+    if (!confirm(`Send new password to ${affiliate.email}?`)) return;
+    
+    setResettingPassword(affiliate.id);
+    try {
+      await resetUserPassword(affiliate.email);
+      setToast({ type: 'success', message: `New password sent to ${affiliate.email}` });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to reset password' });
+    }
+    setResettingPassword(null);
+  };
 
   useEffect(() => {
     fetchAffiliates();
@@ -254,6 +270,8 @@ export default function AdminAffiliates() {
 
   return (
     <div className="p-6">
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+      
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
@@ -465,6 +483,14 @@ export default function AdminAffiliates() {
                               <CreditCard size={16} className="text-blue-600" />
                             </button>
                           )}
+                          <button
+                            onClick={() => handleResetPassword(affiliate)}
+                            disabled={resettingPassword === affiliate.id}
+                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-50"
+                            title="Reset Password"
+                          >
+                            <KeyRound size={16} className={resettingPassword === affiliate.id ? "text-gray-400 animate-pulse" : "text-purple-600"} />
+                          </button>
                         </div>
                       </td>
                     </tr>

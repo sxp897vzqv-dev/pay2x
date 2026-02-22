@@ -57,7 +57,9 @@ serve(async (req: Request) => {
       });
     }
 
-    if (dispute.status !== 'routed_to_trader') {
+    // Allow response if pending or routed_to_trader
+    const allowedStatuses = ['pending', 'routed_to_trader'];
+    if (!allowedStatuses.includes(dispute.status)) {
       return new Response(JSON.stringify({ 
         error: `Cannot respond to dispute in status: ${dispute.status}` 
       }), {

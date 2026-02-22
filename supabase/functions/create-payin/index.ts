@@ -160,7 +160,7 @@ serve(async (req: Request) => {
     
     const { data: merchantData, error: merchantError } = await supabase
       .from('merchants')
-      .select('id, name, business_name, is_active, webhook_url, webhook_secret')
+      .select('*')
       .eq(keyColumn, apiKey)
       .single();
 
@@ -335,6 +335,18 @@ serve(async (req: Request) => {
     const userGeo = await getLocation(req);
     log('info', 'User geo detected', ctx, { ip: clientIP, city: userGeo.city, state: userGeo.state });
 
+    // 9b. Get current USDT rate for merchant calculations
+    let usdtRate: number | null = null;
+    try {
+      const { data: tatumConfig } = await supabase
+        .from('tatum_config')
+        .select('admin_usdt_rate')
+        .single();
+      usdtRate = tatumConfig?.admin_usdt_rate || null;
+    } catch (e) {
+      log('warn', 'Failed to fetch USDT rate', ctx, { error: e.message });
+    }
+
     // 10. Smart UPI selection via PayinEngine v4 (with geo)
     log('info', 'Selecting UPI', ctx, { amount: amountNum, userId, userCity: userGeo.city });
     const engine = new PayinEngineV5(supabase);
@@ -367,7 +379,7 @@ serve(async (req: Request) => {
     // 12. Calculate expiry
     const expiresAt = new Date(Date.now() + TIMER_SECONDS * 1000);
 
-    // 13. Create payin record with fallback chain + geo
+    // 13. Create payin record with fallback chain + geo + USDT rate at creation
     const { data: payin, error: payinError } = await supabase
       .from('payins')
       .insert({
@@ -395,6 +407,8 @@ serve(async (req: Request) => {
         user_state: userGeo.state,
         user_lat: userGeo.lat,
         user_lon: userGeo.lon,
+        // USDT rate at creation time (used at completion)
+        usdt_rate_at_creation: usdtRate,
       })
       .select('id')
       .single();
@@ -425,6 +439,10 @@ serve(async (req: Request) => {
 
     // 14. Build response
     const hasMoreFallbacks = (selection.maxAttempts || 1) > 1;
+    const commissionPct = merchant.payin_commission_rate ?? merchant.payin_rate ?? 0;
+    const commissionAmount = (amountNum * commissionPct) / 100;
+    const netAmount = amountNum - commissionAmount;
+    
     responseBody = {
       payment_id: payin.id,
       txn_id: txnId,
@@ -440,6 +458,12 @@ serve(async (req: Request) => {
       attempt_number: 1,
       max_attempts: selection.maxAttempts || 1,
       fallback_available: hasMoreFallbacks,
+      // Commission & rate info (requested by merchants)
+      commission_pct: commissionPct,
+      commission_amount: Math.round(commissionAmount * 100) / 100,
+      net_amount: Math.round(netAmount * 100) / 100,
+      usdt_rate: usdtRate,
+      net_amount_usdt: usdtRate ? Math.round((netAmount / usdtRate) * 100) / 100 : null,
     };
     responseStatus = 200;
 

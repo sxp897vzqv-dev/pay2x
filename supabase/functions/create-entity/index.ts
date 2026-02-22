@@ -83,28 +83,30 @@ serve(async (req: Request) => {
   try {
     // 1. Verify the caller is an admin
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
+        JSON.stringify({ error: 'Missing or invalid authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Create client with user's JWT to verify their role
-    const userClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
-      global: { headers: { Authorization: authHeader } }
-    });
-
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or expired token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Check if user is admin
+    // Extract JWT from header
+    const jwt = authHeader.replace('Bearer ', '');
+    
+    // Create admin client for verification
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+    // Verify the JWT by getting user info
+    const { data: { user }, error: authError } = await adminClient.auth.getUser(jwt);
+    if (authError || !user) {
+      console.error('Auth error:', authError?.message);
+      return new Response(
+        JSON.stringify({ error: 'Invalid or expired token', details: authError?.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check if user is admin (reuse adminClient from above)
     const { data: profile } = await adminClient
       .from('profiles')
       .select('role')
@@ -169,7 +171,7 @@ serve(async (req: Request) => {
   }
 });
 
-// Queue welcome email
+// Send welcome email directly via Resend
 async function queueWelcomeEmail(
   supabase: any, 
   email: string, 
@@ -178,6 +180,9 @@ async function queueWelcomeEmail(
   type: string, 
   apiKey?: string
 ) {
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+  const FROM_EMAIL = Deno.env.get('FROM_EMAIL') || 'Pay2X <noreply@pay2x.io>';
+  
   const typeLabels: Record<string, string> = {
     trader: 'Trader',
     merchant: 'Merchant',
@@ -190,30 +195,123 @@ async function queueWelcomeEmail(
     ? 'Pay2X - Your Password Has Been Reset'
     : `Welcome to Pay2X - Your ${typeLabels[type] || type} Account`;
   
-  const template = type === 'reset' ? 'password_reset' : 'welcome_credentials';
+  const html = type === 'reset' ? getPasswordResetTemplate(name, email, password) 
+    : getWelcomeTemplate(name, email, password, type, apiKey);
   
   try {
-    await supabase.from('email_queue').insert({
-      to_email: email,
-      subject,
-      template,
-      template_data: { 
-        name, 
-        email, 
-        password, 
-        type,
-        apiKey,
-        loginUrl: 'https://pay2x.io/'
+    if (!RESEND_API_KEY) {
+      console.warn('RESEND_API_KEY not set, skipping email');
+      return false;
+    }
+    
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
       },
-      status: 'pending',
-      attempts: 0,
-      created_at: new Date().toISOString(),
+      body: JSON.stringify({
+        from: FROM_EMAIL,
+        to: email,
+        subject: subject,
+        html: html,
+      }),
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('Resend error:', err);
+      return false;
+    }
+    
+    console.log(`✅ Email sent to ${email}`);
     return true;
   } catch (err) {
-    console.warn('Failed to queue email:', err);
+    console.error('Failed to send email:', err);
     return false;
   }
+}
+
+function getWelcomeTemplate(name: string, email: string, password: string, type: string, apiKey?: string): string {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #4F46E5; margin: 0;">Pay2X</h1>
+        <p style="color: #6B7280; margin: 5px 0 0;">Payment Gateway Platform</p>
+      </div>
+      
+      <h2 style="color: #111827;">Welcome, ${name}! 🎉</h2>
+      <p style="color: #374151; line-height: 1.6;">
+        Your ${type} account has been created successfully. 
+        Here are your login credentials:
+      </p>
+      
+      <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); border-radius: 12px; padding: 24px; margin: 24px 0; color: white;">
+        <p style="margin: 0 0 12px; opacity: 0.9; font-size: 14px;">YOUR LOGIN CREDENTIALS</p>
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+          <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.8;">Email</p>
+          <p style="margin: 0; font-size: 16px; font-weight: bold;">${email}</p>
+        </div>
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 16px;">
+          <p style="margin: 0 0 4px; font-size: 12px; opacity: 0.8;">Password</p>
+          <p style="margin: 0; font-size: 18px; font-weight: bold; font-family: monospace; letter-spacing: 1px;">${password}</p>
+        </div>
+      </div>
+      
+      ${apiKey ? `
+      <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 8px; padding: 16px; margin: 16px 0;">
+        <p style="margin: 0 0 8px; color: #166534; font-weight: bold;">🔑 Your API Key</p>
+        <code style="display: block; background: white; padding: 12px; border-radius: 6px; font-family: monospace; word-break: break-all; color: #15803D;">${apiKey}</code>
+        <p style="margin: 8px 0 0; font-size: 12px; color: #166534;">Keep this key secure.</p>
+      </div>
+      ` : ''}
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="https://pay2x.io/" 
+           style="display: inline-block; background: #4F46E5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+          Login to Dashboard →
+        </a>
+      </div>
+      
+      <div style="background: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 0 8px 8px 0; margin: 24px 0;">
+        <p style="margin: 0; color: #92400E; font-weight: bold;">⚠️ Security Reminder</p>
+        <p style="margin: 8px 0 0; color: #92400E;">Change your password after first login.</p>
+      </div>
+    </div>
+  `;
+}
+
+function getPasswordResetTemplate(name: string, email: string, password: string): string {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #4F46E5; margin: 0;">Pay2X</h1>
+      </div>
+      
+      <h2 style="color: #111827;">Password Reset 🔐</h2>
+      <p style="color: #374151;">Hi ${name}, your password has been reset.</p>
+      
+      <div style="background: #EFF6FF; border: 1px solid #93C5FD; border-radius: 12px; padding: 24px; margin: 24px 0;">
+        <p style="margin: 0 0 12px; color: #1E40AF; font-weight: bold;">YOUR NEW CREDENTIALS</p>
+        <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+          <p style="margin: 0 0 4px; font-size: 12px; color: #6B7280;">Email</p>
+          <p style="margin: 0; font-weight: bold; color: #111827;">${email}</p>
+        </div>
+        <div style="background: white; border-radius: 8px; padding: 16px;">
+          <p style="margin: 0 0 4px; font-size: 12px; color: #6B7280;">New Password</p>
+          <p style="margin: 0; font-size: 18px; font-weight: bold; font-family: monospace; color: #1E40AF;">${password}</p>
+        </div>
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="https://pay2x.io/" style="display: inline-block; background: #4F46E5; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+          Login Now →
+        </a>
+      </div>
+      
+      <p style="color: #DC2626;"><strong>Important:</strong> Change your password after logging in.</p>
+    </div>
+  `;
 }
 
 // Create base entity (auth user + profile)

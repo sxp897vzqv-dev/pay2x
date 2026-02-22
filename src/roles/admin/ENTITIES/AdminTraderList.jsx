@@ -35,6 +35,7 @@ const mapTrader = (row) => ({
   telegramGroupLink: row.telegram_group_link,
   usdtDepositAddress: row.usdt_deposit_address,
   lastOnlineAt: row.last_online_at,
+  affiliateId: row.affiliate_id,
   createdAt: row.created_at ? { seconds: new Date(row.created_at).getTime() / 1000 } : null,
   updatedAt: row.updated_at ? { seconds: new Date(row.updated_at).getTime() / 1000 } : null,
 });
@@ -129,6 +130,7 @@ export default function AdminTraderList() {
         const { password, ...updateData } = formData;
         const workingBalance = (Number(updateData.balance) || 0) - (Number(updateData.securityHold) || 0);
 
+        // Update trader basic info
         await supabase.from('traders').update({
           name: updateData.name,
           phone: updateData.phone || '',
@@ -139,7 +141,36 @@ export default function AdminTraderList() {
           telegram: updateData.telegramId || '',
           telegram_group_link: updateData.telegramGroupLink || '',
           is_active: updateData.active,
+          affiliate_id: updateData.affiliateId || null,
         }).eq('id', selectedTrader.id);
+
+        // Handle affiliate linking
+        if (updateData.affiliateId) {
+          // Check if affiliate_traders record exists
+          const { data: existingLink } = await supabase
+            .from('affiliate_traders')
+            .select('id')
+            .eq('trader_id', selectedTrader.id)
+            .single();
+
+          if (existingLink) {
+            // Update existing link
+            await supabase.from('affiliate_traders').update({
+              affiliate_id: updateData.affiliateId,
+              commission_rate: Number(updateData.affiliateCommission) || 5,
+            }).eq('trader_id', selectedTrader.id);
+          } else {
+            // Create new link
+            await supabase.from('affiliate_traders').insert({
+              affiliate_id: updateData.affiliateId,
+              trader_id: selectedTrader.id,
+              commission_rate: Number(updateData.affiliateCommission) || 5,
+            });
+          }
+        } else {
+          // Remove affiliate link if cleared
+          await supabase.from('affiliate_traders').delete().eq('trader_id', selectedTrader.id);
+        }
 
         setToast({ msg: '✅ Trader updated successfully!', success: true });
       } else {

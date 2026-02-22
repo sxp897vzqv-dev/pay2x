@@ -95,6 +95,18 @@ serve(async (req: Request) => {
       );
     }
 
+    // 2b. Get current USDT rate
+    let usdtRate: number | null = null;
+    try {
+      const { data: tatumConfig } = await supabase
+        .from('tatum_config')
+        .select('admin_usdt_rate')
+        .single();
+      usdtRate = tatumConfig?.admin_usdt_rate || null;
+    } catch (e) {
+      console.log('Failed to fetch USDT rate:', e);
+    }
+
     // 3. Parse request body
     let body: CreatePayoutRequest;
     try {
@@ -191,7 +203,10 @@ serve(async (req: Request) => {
     // 10. Generate transaction ID
     const txnId = `PO${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-    // 11. Create payout record (both bank and UPI details stored, trader chooses method)
+    // 11. Calculate USDT values to store
+    const amountUsdt = usdtRate ? Math.round((amountNum / usdtRate) * 100) / 100 : null;
+
+    // 12. Create payout record (both bank and UPI details stored, trader chooses method)
     const { data: payout, error: payoutError } = await supabase
       .from('payouts')
       .insert({
@@ -207,6 +222,9 @@ serve(async (req: Request) => {
         upi_id: upiId,
         // Common fields
         account_name: accountName,
+        // USDT tracking (frozen at creation)
+        amount_usdt: amountUsdt,
+        usdt_rate_at_creation: usdtRate,
         // Metadata with all extra info
         metadata: { 
           ...metadata, 
@@ -260,7 +278,10 @@ serve(async (req: Request) => {
         });
     }
 
-    // 13. Return success
+    // 13. Build response with commission and USDT info
+    const commissionPct = payoutRate;
+    const netAmount = amountNum; // For payouts, merchant pays amount + fee, beneficiary receives amount
+    
     return new Response(
       JSON.stringify({
         success: true,
@@ -272,6 +293,13 @@ serve(async (req: Request) => {
         fee,
         total_on_completion: totalRequired,
         status: 'pending',
+        // Commission & rate info (same as payin)
+        commission_pct: commissionPct,
+        commission_amount: fee,
+        net_amount: netAmount,
+        usdt_rate: usdtRate,
+        amount_usdt: usdtRate ? Math.round((amountNum / usdtRate) * 100) / 100 : null,
+        total_usdt: usdtRate ? Math.round((totalRequired / usdtRate) * 100) / 100 : null,
         message: 'Payout request created. Trader will choose Bank or UPI method.',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
