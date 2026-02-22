@@ -570,41 +570,25 @@ const ApiTest = () => {
 
               {balanceData && (
                 <div className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-xl p-5 space-y-4">
-                  {/* INR Balances */}
+                  {/* USDT Balances */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="text-slate-600">Total Balance</span>
-                      <span className="text-2xl font-bold text-slate-900">₹{balanceData.total_inr?.toLocaleString()}</span>
+                      <span className="text-2xl font-bold text-blue-600">${balanceData.total_usdt?.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-500">Pending</span>
+                      <span className="text-amber-600 font-medium">${balanceData.pending_usdt?.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">Reserved for Payouts</span>
-                      <span className="text-amber-600 font-medium">-₹{balanceData.reserved_for_payouts_inr?.toLocaleString()}</span>
+                      <span className="text-orange-600 font-medium">-${balanceData.reserved_for_payouts_usdt?.toLocaleString()}</span>
                     </div>
                     <div className="border-t border-purple-200 pt-3 flex justify-between items-center">
                       <span className="text-slate-700 font-medium">Available Balance</span>
-                      <span className="text-xl font-bold text-green-600">₹{balanceData.available_inr?.toLocaleString()}</span>
+                      <span className="text-xl font-bold text-green-600">${balanceData.available_usdt?.toLocaleString()}</span>
                     </div>
                   </div>
-
-                  {/* USDT Values */}
-                  {balanceData.usdt_rate && (
-                    <div className="border-t border-purple-200 pt-4 space-y-2">
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <DollarSign className="w-3 h-3" />
-                        <span>@ ₹{balanceData.usdt_rate}/USDT</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-white/60 rounded-lg p-3 text-center">
-                          <p className="text-xs text-slate-500">Total USDT</p>
-                          <p className="text-lg font-bold text-blue-600">${balanceData.total_usdt}</p>
-                        </div>
-                        <div className="bg-white/60 rounded-lg p-3 text-center">
-                          <p className="text-xs text-slate-500">Available USDT</p>
-                          <p className="text-lg font-bold text-green-600">${balanceData.available_usdt}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
