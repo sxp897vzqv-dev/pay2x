@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../../supabase';
 import { useRealtimeSubscription } from '../../../hooks/useRealtimeSubscription';
 import {
   IndianRupee, CreditCard, TrendingDown, FileText, Upload, CheckCircle2, AlertCircle,
+  Volume2, VolumeX
 } from 'lucide-react';
+import { payoutNotifications } from '../components/TransactionNotifications';
 import {
   immediateAutoAssignPayouts,
   cancelPayoutByTrader,
@@ -42,6 +44,12 @@ export default function TraderPayout() {
   const [showBatchVerification, setShowBatchVerification] = useState(false);
   const [processingPayout,  setProcessingPayout]  = useState(null);
   const [toast,             setToast]             = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('payoutSoundEnabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [newPayoutAlert, setNewPayoutAlert] = useState(false);
+  const isFirstLoad = useRef(true);
 
   const [traderId, setTraderId] = useState(null);
 
@@ -155,12 +163,33 @@ export default function TraderPayout() {
   }, [traderId]);
 
   useEffect(() => {
-    fetchAll();
+    fetchAll().then(() => { isFirstLoad.current = false; });
   }, [fetchAll]);
+
+  // Sync sound toggle with notification manager + persist
+  useEffect(() => {
+    payoutNotifications.toggleSound(soundEnabled);
+    localStorage.setItem('payoutSoundEnabled', String(soundEnabled));
+  }, [soundEnabled]);
 
   // Realtime: refresh when payouts change
   useRealtimeSubscription('payouts', {
-    onChange: fetchAll,
+    onChange: async (eventType, payload) => {
+      console.log('📡 Payout realtime event:', eventType, payload?.new?.id);
+      await fetchAll();
+      
+      // Check for new assigned payouts and play sound (skip first load)
+      if (!isFirstLoad.current && eventType === 'UPDATE') {
+        const newRecord = payload?.new;
+        if (newRecord?.status === 'assigned') {
+          const hasNew = payoutNotifications.checkNewPending([newRecord], 'status', 'assigned');
+          if (hasNew) {
+            setNewPayoutAlert(true);
+            setTimeout(() => setNewPayoutAlert(false), 3000);
+          }
+        }
+      }
+    },
     filter: traderId ? `trader_id=eq.${traderId}` : undefined,
     enabled: !!traderId, // Only subscribe once we have traderId
   });
@@ -314,13 +343,31 @@ export default function TraderPayout() {
       <div className="hidden sm:flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <div className="p-2 bg-gradient-to-br from-purple-500 to-blue-600 rounded-xl shadow-sm">
+            <div className={`p-2 bg-gradient-to-br from-purple-500 to-blue-600 rounded-xl shadow-sm ${newPayoutAlert ? 'animate-pulse ring-2 ring-purple-400' : ''}`}>
               <TrendingDown className="w-5 h-5 text-white" />
             </div>
             Payout Management
+            {newPayoutAlert && <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full animate-bounce">NEW!</span>}
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Request & process payouts</p>
         </div>
+        <button
+          onClick={() => {
+            const newState = !soundEnabled;
+            setSoundEnabled(newState);
+            if (newState) {
+              setTimeout(() => payoutNotifications.playSound(), 100);
+            }
+          }}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold ${
+            soundEnabled
+              ? 'bg-purple-50 border border-purple-200 text-purple-700'
+              : 'bg-slate-100 border border-slate-200 text-slate-500'
+          }`}
+          title={soundEnabled ? 'Sound alerts on - click to disable' : 'Sound alerts off - click to enable'}
+        >
+          {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+        </button>
       </div>
 
       {/* Active request banner */}

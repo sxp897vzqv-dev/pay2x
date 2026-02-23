@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useMemo, useCallback, memo } from "react";
+import React, { useEffect, useState, useMemo, useCallback, memo, useRef } from "react";
 import { supabase } from "../../../supabase";
 import { useRealtimeSubscription } from "../../../hooks/useRealtimeSubscription";
 import {
   CheckCircle, XCircle, Edit, Search, FileText, AlertCircle,
   MoreHorizontal, Download, TrendingUp, RefreshCw, Filter, X,
-  Calendar, CreditCard, Hash, User, IndianRupee, Clock, Inbox
+  Calendar, CreditCard, Hash, User, IndianRupee, Clock, Inbox,
+  Volume2, VolumeX
 } from "lucide-react";
 import { StatusBadge, RelativeTime, SkeletonCard, SuccessAnimation } from "../../../components/trader";
 import { formatINR } from "../../../utils/format";
+import { payinNotifications } from "../components/TransactionNotifications";
 
 function exportToCSV(rows, columns, filename) {
   const csv = columns.map(c => c.header).join(",") + "\n" +
@@ -210,6 +212,12 @@ export default function TraderPayin() {
   const [processing,   setProcessing]   = useState(false);
   const [showFilters,  setShowFilters]  = useState(false);
   const [userModal,    setUserModal]    = useState({ open: false, userId: null, data: null });
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('payinSoundEnabled');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [newPayinAlert, setNewPayinAlert] = useState(false);
+  const isFirstLoad = useRef(true);
 
   // Debounce search
   useEffect(() => {
@@ -250,9 +258,16 @@ export default function TraderPayin() {
         rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
       })));
       setLoading(false);
+      isFirstLoad.current = false;
     };
     init();
   }, []);
+
+  // Sync sound toggle with notification manager + persist
+  useEffect(() => {
+    payinNotifications.toggleSound(soundEnabled);
+    localStorage.setItem('payinSoundEnabled', String(soundEnabled));
+  }, [soundEnabled]);
 
   // Realtime: listen for all changes and filter client-side
   useRealtimeSubscription('payins', {
@@ -264,15 +279,26 @@ export default function TraderPayin() {
       if (!traderId) return;
       const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('created_at', { ascending: false }).limit(100);
       console.log('📡 Fetched payins for trader:', traderId, 'count:', rows?.length);
-      setPayins((rows || []).map(r => ({
+      
+      const mappedRows = (rows || []).map(r => ({
         ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
         userId: r.merchant_id, transactionId: r.transaction_id,
         screenshotUrl: r.screenshot_url, autoRejected: r.auto_rejected,
-        // Use requested_at, fallback to created_at for timer
         requestedAt: (r.requested_at || r.created_at) ? { seconds: new Date(r.requested_at || r.created_at).getTime() / 1000 } : null,
         completedAt: r.completed_at ? { seconds: new Date(r.completed_at).getTime() / 1000 } : null,
         rejectedAt: r.rejected_at ? { seconds: new Date(r.rejected_at).getTime() / 1000 } : null,
-      })));
+      }));
+      
+      setPayins(mappedRows);
+      
+      // Check for new pending payins and play sound (skip first load)
+      if (!isFirstLoad.current) {
+        const hasNew = payinNotifications.checkNewPending(mappedRows);
+        if (hasNew) {
+          setNewPayinAlert(true);
+          setTimeout(() => setNewPayinAlert(false), 3000);
+        }
+      }
     },
   });
 
@@ -488,11 +514,31 @@ export default function TraderPayin() {
       <div className="hidden sm:flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <div className="p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-sm"><TrendingUp className="w-5 h-5 text-white" /></div>
+            <div className={`p-2 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-sm ${newPayinAlert ? 'animate-pulse ring-2 ring-green-400' : ''}`}>
+              <TrendingUp className="w-5 h-5 text-white" />
+            </div>
             Payin Management
+            {newPayinAlert && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full animate-bounce">NEW!</span>}
           </h1>
           <p className="text-slate-500 text-sm mt-0.5 ml-11">Process incoming payments</p>
         </div>
+        <button
+          onClick={() => {
+            const newState = !soundEnabled;
+            setSoundEnabled(newState);
+            if (newState) {
+              setTimeout(() => payinNotifications.playSound(), 100);
+            }
+          }}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold ${
+            soundEnabled
+              ? 'bg-green-50 border border-green-200 text-green-700'
+              : 'bg-slate-100 border border-slate-200 text-slate-500'
+          }`}
+          title={soundEnabled ? 'Sound alerts on - click to disable' : 'Sound alerts off - click to enable'}
+        >
+          {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+        </button>
       </div>
 
       {/* Tabs + export */}
