@@ -86,11 +86,18 @@ export default function TraderDispute() {
   // Initial fetch
   useEffect(() => { fetchDisputes(); }, [fetchDisputes]);
 
-  // Realtime subscription
+  // Realtime subscription - only enable after traderId is known
   useRealtimeSubscription('disputes', {
-    filter: traderId ? `trader_id=eq.${traderId}` : undefined,
-    onInsert: () => fetchDisputes(true, true), // checkForNew=true on insert
-    onUpdate: () => fetchDisputes(true, false),
+    filter: `trader_id=eq.${traderId}`,
+    enabled: !!traderId, // Don't subscribe until we have traderId
+    onInsert: (newRecord) => {
+      console.log('📡 New dispute received:', newRecord?.id);
+      fetchDisputes(true, true); // checkForNew=true on insert
+    },
+    onUpdate: (newRecord) => {
+      console.log('📡 Dispute updated:', newRecord?.id);
+      fetchDisputes(true, false);
+    },
   });
 
   // Sync sound toggle with notification manager + persist
