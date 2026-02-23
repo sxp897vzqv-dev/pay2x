@@ -47,12 +47,21 @@ export default function TraderDispute() {
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); setRefreshing(false); return; }
-    setTraderId(user.id);
+    
+    // Get actual trader ID (auth user.id = profile_id, not trader.id)
+    const { data: traderData } = await supabase
+      .from('traders')
+      .select('id')
+      .or(`id.eq.${user.id},profile_id.eq.${user.id}`)
+      .single();
+    
+    const actualTraderId = traderData?.id || user.id;
+    setTraderId(actualTraderId);
 
     const { data } = await supabase
       .from('disputes')
       .select('*')
-      .eq('trader_id', user.id)
+      .eq('trader_id', actualTraderId)
       .order('created_at', { ascending: false })
       .limit(200);
 
