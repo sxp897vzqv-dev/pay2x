@@ -70,7 +70,7 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-slate-300">
-      <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : payin.status === 'rejected' ? 'bg-red-500' : 'bg-blue-500'}`} />
+      <div className={`h-1 ${payin.status === 'completed' ? 'bg-green-500' : (payin.status === 'rejected' || payin.status === 'expired') ? 'bg-red-500' : 'bg-blue-500'}`} />
       <div className="p-3 space-y-3">
 
         {/* Header */}
@@ -176,8 +176,8 @@ const PayinCard = memo(({ payin, onAccept, onReject, onEditAmount, isEditing, ed
         {/* Status badge */}
         {payin.status !== "pending" && (
           <div className="flex items-center gap-2">
-            <StatusBadge status={payin.status} size="md" />
-            {payin.autoRejected && <span className="text-xs text-slate-500">(Time Expired)</span>}
+            <StatusBadge status={payin.status === 'expired' ? 'rejected' : payin.status} size="md" />
+            {(payin.autoRejected || payin.status === 'expired') && <span className="text-xs text-slate-500">(Time Expired)</span>}
           </div>
         )}
       </div>
@@ -300,7 +300,11 @@ export default function TraderPayin() {
   }, [payins]);
 
   const filtered = useMemo(() => {
-    let r = payins.filter(p => p.status === activeTab);
+    let r = payins.filter(p => 
+      activeTab === 'rejected' 
+        ? (p.status === 'rejected' || p.status === 'expired')
+        : p.status === activeTab
+    );
     if (debouncedSearch) { const s=debouncedSearch.toLowerCase(); r=r.filter(p => p.transactionId?.toLowerCase().includes(s)||p.userId?.toLowerCase().includes(s)||p.amount?.toString().includes(debouncedSearch)); }
     if (dateFrom) r=r.filter(p => (p.requestedAt?.seconds||0)*1000 >= new Date(dateFrom).getTime());
     if (dateTo)   r=r.filter(p => (p.requestedAt?.seconds||0)*1000 <= new Date(dateTo).getTime()+86399999);
@@ -474,7 +478,8 @@ export default function TraderPayin() {
   const stats = useMemo(() => {
     const pending   = payins.filter(p=>p.status==='pending').length;
     const completed = payins.filter(p=>p.status==='completed');
-    return { pending, completedCount: completed.length, totalCommission: completed.reduce((s,p)=>s+Number(p.commission||0),0) };
+    const rejected  = payins.filter(p=>p.status==='rejected'||p.status==='expired').length;
+    return { pending, completedCount: completed.length, rejectedCount: rejected, totalCommission: completed.reduce((s,p)=>s+Number(p.commission||0),0) };
   }, [payins]);
 
   return (
@@ -494,7 +499,11 @@ export default function TraderPayin() {
       <div className="flex gap-1.5 items-center">
         <div className="flex-1 flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto" style={{ scrollbarWidth:'none' }}>
           {TABS.map(tab => {
-            const count = payins.filter(x=>x.status===tab.key).length;
+            const count = payins.filter(x => 
+              tab.key === 'rejected' 
+                ? (x.status === 'rejected' || x.status === 'expired')
+                : x.status === tab.key
+            ).length;
             return (
               <button key={tab.key} onClick={()=>setActiveTab(tab.key)}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
