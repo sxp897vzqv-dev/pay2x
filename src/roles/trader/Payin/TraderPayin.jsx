@@ -237,7 +237,7 @@ export default function TraderPayin() {
         .from('payins')
         .select('*')
         .eq('trader_id', actualTraderId)
-        .order('requested_at', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(100);
       setPayins((rows || []).map(r => ({
         ...r,
@@ -262,7 +262,7 @@ export default function TraderPayin() {
       console.log('📡 Payin realtime event:', eventType, payload?.new?.id);
       
       if (!traderId) return;
-      const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('requested_at', { ascending: false }).limit(100);
+      const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('created_at', { ascending: false }).limit(100);
       console.log('📡 Fetched payins for trader:', traderId, 'count:', rows?.length);
       setPayins((rows || []).map(r => ({
         ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
