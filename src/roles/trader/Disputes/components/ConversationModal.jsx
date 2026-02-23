@@ -53,8 +53,8 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
     try {
       const { error } = await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
+        sender_role: 'trader',
         sender: 'trader',
-        sender_id: dispute.trader_id,
         message: messageText,
         read_by_merchant: false,
         read_by_trader: true,
@@ -93,8 +93,8 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
       // Add final decision message
       const { error: msgError } = await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
+        sender_role: 'trader',
         sender: 'trader',
-        sender_id: dispute.trader_id,
         message: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
         is_decision: true,
         action,
