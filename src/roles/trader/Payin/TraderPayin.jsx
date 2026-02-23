@@ -221,15 +221,22 @@ export default function TraderPayin() {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      setTraderId(user.id); // Store for realtime filter
-      // Fetch commission rate (payin_commission column)
-      const { data: trader } = await supabase.from('traders').select('payin_commission').eq('id', user.id).single();
+      // Fetch trader record (could be id or profile_id match)
+      const { data: trader } = await supabase
+        .from('traders')
+        .select('id, profile_id, payin_commission')
+        .or(`id.eq.${user.id},profile_id.eq.${user.id}`)
+        .single();
+      
+      const actualTraderId = trader?.id || user.id;
+      setTraderId(actualTraderId); // Store for realtime filter
       if (trader) setCommissionRate(trader.payin_commission || 4);
+      
       // Fetch payins (limited to 100 for performance)
       const { data: rows } = await supabase
         .from('payins')
         .select('*')
-        .eq('trader_id', user.id)
+        .eq('trader_id', actualTraderId)
         .order('requested_at', { ascending: false })
         .limit(100);
       setPayins((rows || []).map(r => ({
@@ -256,6 +263,7 @@ export default function TraderPayin() {
       
       if (!traderId) return;
       const { data: rows } = await supabase.from('payins').select('*').eq('trader_id', traderId).order('requested_at', { ascending: false }).limit(100);
+      console.log('📡 Fetched payins for trader:', traderId, 'count:', rows?.length);
       setPayins((rows || []).map(r => ({
         ...r, traderId: r.trader_id, upiId: r.upi_id, utrId: r.utr,
         userId: r.merchant_id, transactionId: r.transaction_id,
