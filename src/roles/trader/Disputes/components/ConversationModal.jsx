@@ -90,20 +90,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
         proofUrl = urlData.publicUrl;
       }
 
-      // Add final decision message
-      const { error: msgError } = await supabase.from('dispute_messages').insert({
-        dispute_id: dispute.id,
-        sender_role: 'trader',
-        sender: 'trader',
-        message: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
-        is_decision: true,
-        action,
-        proof_url: proofUrl,
-        read_by_merchant: false,
-        read_by_trader: true,
-      });
-      if (msgError) throw msgError;
-
+      // Let the edge function handle the message insert
       await onSubmit({ action, note: finalNote, proofUrl });
       onClose();
     } catch (e) {

@@ -82,15 +82,18 @@ serve(async (req: Request) => {
     }).eq('id', disputeId);
 
     // Add to dispute messages
-    await supabase.from('dispute_messages').insert({
+    const { error: msgError } = await supabase.from('dispute_messages').insert({
       dispute_id: disputeId,
+      sender_role: 'trader',
       sender: 'trader',
-      sender_id: dispute.trader_id,
       message: response === 'accepted' 
         ? `Trader accepted the dispute. ${statement || ''}` 
         : `Trader rejected the dispute. ${statement || ''}`,
       proof_url: proofUrl,
     });
+    if (msgError) {
+      console.error('Failed to insert dispute message:', msgError);
+    }
 
     console.log(`✅ Trader responded to dispute ${disputeId}: ${response}`);
 
