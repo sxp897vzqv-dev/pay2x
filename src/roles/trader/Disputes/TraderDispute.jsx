@@ -228,6 +228,9 @@ export default function TraderDispute() {
       notificationManager.markAsSeen(selectedDispute.id);
       setSelectedDispute(null);
       setToast({ type: 'success', message: data.message });
+      
+      // Refresh disputes list to show updated status
+      fetchDisputes(true);
     } catch (e) {
       setToast({ type: 'error', message: 'Error: ' + e.message });
     }
