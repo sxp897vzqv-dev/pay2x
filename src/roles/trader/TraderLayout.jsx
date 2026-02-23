@@ -3,8 +3,9 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../supabase';
 import {
   LayoutDashboard, TrendingUp, TrendingDown, Building2,
-  AlertCircle, Wallet, LogOut, Menu, X, User,
+  AlertCircle, Wallet, LogOut, Menu, X, User, Volume2, VolumeX,
 } from 'lucide-react';
+import TraderNotificationProvider, { useTraderNotifications } from './context/TraderNotificationProvider';
 
 /* ─── Fonts (injected once) ─── */
 (() => {
@@ -92,7 +93,8 @@ const drawerOnlyLinks = [
 ];
 const allSidebarLinks = [...bottomLinks, ...drawerOnlyLinks];
 
-export default function TraderLayout() {
+function TraderLayoutInner() {
+  const { soundEnabled, setSoundEnabled, playSound } = useTraderNotifications();
   const [sidebarOpen, setSidebarOpen]       = useState(false);
   const [traderInfo, setTraderInfo]         = useState(null);
   const [workingBalance, setWorkingBalance] = useState(0);
@@ -191,8 +193,22 @@ export default function TraderLayout() {
             <Menu className="w-5 h-5 text-slate-700" />
           </button>
           <h1 className="text-sm font-bold text-slate-900 tracking-tight">{currentTitle}</h1>
-          <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-1">
-            <span className="text-xs font-bold text-green-700">₹{workingBalance.toLocaleString()}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const newState = !soundEnabled;
+                setSoundEnabled(newState);
+                if (newState) setTimeout(() => playSound(), 100);
+              }}
+              className={`w-8 h-8 flex items-center justify-center rounded-lg ${
+                soundEnabled ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-400'
+              }`}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-1">
+              <span className="text-xs font-bold text-green-700">₹{workingBalance.toLocaleString()}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -223,7 +239,20 @@ export default function TraderLayout() {
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">{renderNav(allSidebarLinks)}</nav>
 
-        <div className="p-3 border-t border-white/10">
+        <div className="p-3 border-t border-white/10 space-y-2">
+          <button
+            onClick={() => {
+              const newState = !soundEnabled;
+              setSoundEnabled(newState);
+              if (newState) setTimeout(() => playSound(), 100);
+            }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group ${
+              soundEnabled ? 'bg-white/20 text-white' : 'bg-white/10 text-green-200 hover:bg-white/15'
+            }`}
+          >
+            {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            <span className="font-medium text-sm">{soundEnabled ? 'Sound On' : 'Sound Off'}</span>
+          </button>
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/15 text-white hover:bg-red-500/25 transition-all group">
             <LogOut className="w-5 h-5 group-hover:scale-110 transition-transform" />
             <span className="font-medium text-sm">Logout</span>
@@ -302,5 +331,14 @@ export default function TraderLayout() {
         </div>
       </nav>
     </div>
+  );
+}
+
+// Wrap with notification provider
+export default function TraderLayout() {
+  return (
+    <TraderNotificationProvider>
+      <TraderLayoutInner />
+    </TraderNotificationProvider>
   );
 }
