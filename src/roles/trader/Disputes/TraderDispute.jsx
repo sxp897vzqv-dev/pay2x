@@ -86,18 +86,48 @@ export default function TraderDispute() {
   // Initial fetch
   useEffect(() => { fetchDisputes(); }, [fetchDisputes]);
 
-  // Realtime subscription - only enable after traderId is known
+  // Memoize realtime callbacks to prevent subscription churn
+  const handleDisputeInsert = useCallback((newRecord) => {
+    console.log('📡 New dispute received:', newRecord?.id);
+    fetchDisputes(true, true); // checkForNew=true on insert
+  }, [fetchDisputes]);
+
+  const handleDisputeUpdate = useCallback((newRecord) => {
+    console.log('📡 Dispute updated:', newRecord?.id);
+    fetchDisputes(true, false);
+  }, [fetchDisputes]);
+
+  // Realtime subscription for disputes - only enable after traderId is known
   useRealtimeSubscription('disputes', {
     filter: `trader_id=eq.${traderId}`,
-    enabled: !!traderId, // Don't subscribe until we have traderId
-    onInsert: (newRecord) => {
-      console.log('📡 New dispute received:', newRecord?.id);
-      fetchDisputes(true, true); // checkForNew=true on insert
-    },
-    onUpdate: (newRecord) => {
-      console.log('📡 Dispute updated:', newRecord?.id);
-      fetchDisputes(true, false);
-    },
+    enabled: !!traderId,
+    onInsert: handleDisputeInsert,
+    onUpdate: handleDisputeUpdate,
+  });
+
+  // Realtime subscription for dispute messages - updates conversation & unread counts
+  const handleMessageChange = useCallback(() => {
+    console.log('📡 Dispute message changed');
+    // Refresh unread counts
+    const fetchUnread = async () => {
+      const counts = {};
+      for (const dispute of disputes) {
+        const { count } = await supabase
+          .from('dispute_messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('dispute_id', dispute.id)
+          .neq('from', 'trader')
+          .eq('read_by_trader', false);
+        counts[dispute.id] = count || 0;
+      }
+      setUnreadCounts(counts);
+    };
+    if (disputes.length > 0) fetchUnread();
+  }, [disputes]);
+
+  useRealtimeSubscription('dispute_messages', {
+    enabled: disputes.length > 0,
+    onChange: handleMessageChange,
   });
 
   // Sync sound toggle with notification manager + persist

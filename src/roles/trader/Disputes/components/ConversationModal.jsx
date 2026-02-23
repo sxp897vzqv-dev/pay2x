@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../../../supabase';
+import { useRealtimeSubscription } from '../../../../hooks/useRealtimeSubscription';
 import {
   CheckCircle, XCircle, X, Upload, Send, Paperclip,
 } from 'lucide-react';
@@ -15,37 +16,50 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
   const isPayin = dispute.type === 'payin';
   const canRespond = dispute.status === 'pending' || dispute.status === 'routed_to_trader';
 
-  // Load messages
-  useEffect(() => {
+  // Fetch messages function
+  const fetchMessages = useCallback(async () => {
     if (!dispute) return;
-    const fetchMessages = async () => {
-      const { data } = await supabase
-        .from('dispute_messages')
-        .select('*')
-        .eq('dispute_id', dispute.id)
-        .order('timestamp', { ascending: true });
-      const list = (data || []).map(m => ({
-        ...m,
-        from: m.sender || m.from || m.sender_role, // Normalize sender field
-        text: m.message,
-        disputeId: m.dispute_id,
-        readByTrader: m.read_by_trader,
-        readByMerchant: m.read_by_merchant,
-        isDecision: m.is_decision,
-        proofUrl: m.proof_url,
-        timestamp: m.created_at ? { seconds: new Date(m.created_at).getTime() / 1000 } : (m.timestamp ? { seconds: new Date(m.timestamp).getTime() / 1000 } : null),
-      }));
-      setMessages(list);
-      // Mark unread messages as read (use normalized 'from' field)
-      const unread = list.filter(m => m.from !== 'trader' && !m.readByTrader);
-      for (const msg of unread) {
-        await supabase.from('dispute_messages').update({
-          read_by_trader: true, read_by_trader_at: new Date().toISOString(),
-        }).eq('id', msg.id);
-      }
-    };
-    fetchMessages();
+    const { data } = await supabase
+      .from('dispute_messages')
+      .select('*')
+      .eq('dispute_id', dispute.id)
+      .order('timestamp', { ascending: true });
+    const list = (data || []).map(m => ({
+      ...m,
+      from: m.sender || m.from || m.sender_role, // Normalize sender field
+      text: m.message,
+      disputeId: m.dispute_id,
+      readByTrader: m.read_by_trader,
+      readByMerchant: m.read_by_merchant,
+      isDecision: m.is_decision,
+      proofUrl: m.proof_url,
+      timestamp: m.created_at ? { seconds: new Date(m.created_at).getTime() / 1000 } : (m.timestamp ? { seconds: new Date(m.timestamp).getTime() / 1000 } : null),
+    }));
+    setMessages(list);
+    // Mark unread messages as read (use normalized 'from' field)
+    const unread = list.filter(m => m.from !== 'trader' && !m.readByTrader);
+    for (const msg of unread) {
+      await supabase.from('dispute_messages').update({
+        read_by_trader: true, read_by_trader_at: new Date().toISOString(),
+      }).eq('id', msg.id);
+    }
   }, [dispute]);
+
+  // Load messages on mount
+  useEffect(() => { fetchMessages(); }, [fetchMessages]);
+
+  // Realtime subscription for new messages
+  const handleNewMessage = useCallback(() => {
+    console.log('📡 New message in conversation');
+    fetchMessages();
+  }, [fetchMessages]);
+
+  useRealtimeSubscription('dispute_messages', {
+    filter: `dispute_id=eq.${dispute?.id}`,
+    enabled: !!dispute?.id,
+    onInsert: handleNewMessage,
+    onUpdate: handleNewMessage,
+  });
 
   const handleSendMessage = async () => {
     if (!messageText.trim()) return;
