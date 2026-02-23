@@ -300,18 +300,19 @@ export default function TraderDispute() {
           </button>
           <button
             onClick={() => {
-              if (soundEnabled) {
-                // Test sound when clicking while enabled
-                notificationManager.playSound();
+              const newState = !soundEnabled;
+              setSoundEnabled(newState);
+              if (newState) {
+                // Play test sound when enabling
+                setTimeout(() => notificationManager.playSound(), 100);
               }
-              setSoundEnabled(!soundEnabled);
             }}
             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold ${
               soundEnabled
                 ? 'bg-green-50 border border-green-200 text-green-700'
                 : 'bg-slate-100 border border-slate-200 text-slate-500'
             }`}
-            title={soundEnabled ? 'Click to test sound / disable' : 'Sound alerts off - click to enable'}
+            title={soundEnabled ? 'Sound alerts on - click to disable' : 'Sound alerts off - click to enable'}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
@@ -339,10 +340,12 @@ export default function TraderDispute() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              if (soundEnabled) {
-                notificationManager.playSound();
+              const newState = !soundEnabled;
+              setSoundEnabled(newState);
+              if (newState) {
+                // Play test sound when enabling
+                setTimeout(() => notificationManager.playSound(), 100);
               }
-              setSoundEnabled(!soundEnabled);
             }}
             className={`p-2 rounded-xl ${
               soundEnabled
