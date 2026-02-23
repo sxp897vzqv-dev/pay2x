@@ -26,16 +26,17 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
         .order('timestamp', { ascending: true });
       const list = (data || []).map(m => ({
         ...m,
-        text: m.message, // DB column is 'message', app uses 'text'
+        from: m.sender || m.from || m.sender_role, // Normalize sender field
+        text: m.message,
         disputeId: m.dispute_id,
         readByTrader: m.read_by_trader,
         readByMerchant: m.read_by_merchant,
         isDecision: m.is_decision,
         proofUrl: m.proof_url,
-        timestamp: m.timestamp ? { seconds: new Date(m.timestamp).getTime() / 1000 } : null,
+        timestamp: m.created_at ? { seconds: new Date(m.created_at).getTime() / 1000 } : (m.timestamp ? { seconds: new Date(m.timestamp).getTime() / 1000 } : null),
       }));
       setMessages(list);
-      // Mark unread messages as read
+      // Mark unread messages as read (use normalized 'from' field)
       const unread = list.filter(m => m.from !== 'trader' && !m.readByTrader);
       for (const msg of unread) {
         await supabase.from('dispute_messages').update({
@@ -50,14 +51,16 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
     if (!messageText.trim()) return;
     const ts = new Date().toISOString();
     try {
-      await supabase.from('dispute_messages').insert({
+      const { error } = await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
-        from: 'trader',
+        sender: 'trader',
+        sender_id: dispute.trader_id,
         message: messageText,
-        timestamp: ts,
         read_by_merchant: false,
         read_by_trader: true,
       });
+      if (error) throw error;
+      
       await supabase.from('disputes').update({
         message_count: (dispute.message_count || 0) + 1,
         last_message_at: ts,
@@ -66,6 +69,7 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
       setMessages(prev => [...prev, { from: 'trader', message: messageText, timestamp: { seconds: new Date(ts).getTime() / 1000 } }]);
       setMessageText('');
     } catch (e) {
+      console.error('Send message error:', e);
       alert('Error: ' + e.message);
     }
   };
@@ -87,17 +91,18 @@ export default function ConversationModal({ dispute, onClose, onSubmit }) {
       }
 
       // Add final decision message
-      await supabase.from('dispute_messages').insert({
+      const { error: msgError } = await supabase.from('dispute_messages').insert({
         dispute_id: dispute.id,
-        from: 'trader',
+        sender: 'trader',
+        sender_id: dispute.trader_id,
         message: `**FINAL DECISION: ${action.toUpperCase()}**\n\n${finalNote}`,
         is_decision: true,
         action,
         proof_url: proofUrl,
-        timestamp: new Date().toISOString(),
         read_by_merchant: false,
         read_by_trader: true,
       });
+      if (msgError) throw msgError;
 
       await onSubmit({ action, note: finalNote, proofUrl });
       onClose();
