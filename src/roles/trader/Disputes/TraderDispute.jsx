@@ -93,8 +93,10 @@ export default function TraderDispute() {
   }, [fetchDisputes]);
 
   const handleDisputeUpdate = useCallback((newRecord) => {
-    console.log('📡 Dispute updated:', newRecord?.id);
-    fetchDisputes(true, false);
+    console.log('📡 Dispute updated:', newRecord?.id, 'status:', newRecord?.status);
+    // Play sound if dispute needs trader attention (pending or routed_to_trader)
+    const needsAttention = newRecord?.status === 'routed_to_trader' || newRecord?.status === 'pending';
+    fetchDisputes(true, needsAttention);
   }, [fetchDisputes]);
 
   // Realtime subscription for disputes - only enable after traderId is known
